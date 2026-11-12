@@ -600,7 +600,15 @@ struct InstallToolsView: View {
                         .font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới danh mục chứng chỉ") { Task { await loadCertificates() } }
                     Text(catalogStatus).font(.footnote).foregroundColor(.secondary)
-                    if certificates.isEmpty { Text("Chưa có chứng chỉ để đặt mua.").foregroundColor(.secondary) }
+                    if certificates.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Danh mục chứng chỉ ERI").font(.headline)
+                            Text("Chứng chỉ ký ứng dụng iOS (P12 + mobileprovision)")
+                            Text("Gia hạn / cấp lại chứng chỉ iOS")
+                            Text("Giá: Chờ báo giá từ nguồn cung").foregroundColor(.secondary)
+                            Text("Chưa mở thanh toán vì chưa xác minh chứng chỉ có thể giao.").font(.footnote).foregroundColor(.secondary)
+                        }
+                    }
                     ForEach(certificates) { item in
                         VStack(alignment: .leading, spacing: 5) {
                             Text(item.name).font(.headline)
@@ -662,7 +670,15 @@ struct AIPlusStoreView: View {
                     Text(status).font(.footnote).foregroundColor(.secondary)
                 }
                 Section("Gói AI") {
-                    if items.isEmpty { Text("Chưa có gói AI nào để đặt mua.").foregroundColor(.secondary) }
+                    if items.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Danh mục AI ERI").font(.headline)
+                            Text("Gói sử dụng công cụ AI chính hãng")
+                            Text("Gói AI cho cá nhân và công việc")
+                            Text("Giá: Chờ báo giá và xác nhận quyền phân phối").foregroundColor(.secondary)
+                            Text("Chưa mở thanh toán khi chưa có sản phẩm được xác minh để giao.").font(.footnote).foregroundColor(.secondary)
+                        }
+                    }
                     Text("Giá bán theo danh mục riêng của ERI NGUYỄN.")
                         .font(.footnote).foregroundColor(.secondary)
                     ForEach(items) { item in
