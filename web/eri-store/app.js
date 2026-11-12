@@ -173,6 +173,40 @@ async function buy(id,kind){
     $("dialog-body").append(button("Đóng","btn outline",closeDialog));
   }
 }
+
+async function downloadDelivery(order){
+  if(!state.token){authModal();return}
+  const path=order.delivery?.download_path;
+  if(typeof path!=="string" ||
+     path!=="/api/v1/me/orders/"+order.id+"/delivery" ||
+     !/^\/api\/v1\/me\/orders\/[A-F0-9]{12}\/delivery$/.test(path)){
+    showBanner("Đơn này chưa có file được giao.");return;
+  }
+  let response;
+  try{
+    response=await fetch(API+path,{
+      headers:{Authorization:"Bearer "+state.token},
+      cache:"no-store"
+    });
+    if(!response.ok){
+      if(response.status===410)throw new Error("File đã mất khỏi máy chủ tạm. Liên hệ Admin để được giao lại.");
+      if(response.status===401){signOut(false);throw new Error("Phiên đăng nhập đã hết hạn.");}
+      throw new Error("Không tải được file (HTTP "+response.status+").");
+    }
+    const blob=await response.blob();
+    if(!blob.size)throw new Error("Tệp giao hàng rỗng.");
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download=order.delivery.filename||"eri-delivery";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),120000);
+    showBanner("");
+  }catch(err){showBanner(errorMessage(err))}
+}
+
 function showOrder(order){
   openDialog("Đơn hàng "+(order.id||""));
   const root=$("dialog-body");
@@ -206,6 +240,10 @@ function showOrder(order){
     const statuses={paid:"Đã nhận tiền, đang chờ giao",fulfilled:"Đã giao hàng",cancelled:"Đơn đã hủy"};
     root.append(element("p",null,statuses[order.status]||"Trạng thái: "+order.status));
   }
+  if(order.status==="fulfilled"&&order.delivery?.download_path){
+    root.append(element("p",null,"File đã được Admin giao trực tiếp: "+order.delivery.filename));
+    root.append(button("⇩ Tải file đã giao","btn primary",()=>downloadDelivery(order)));
+  }
   root.append(element("p","small","Lưu mã đơn và liên hệ Admin để nhận hàng. Việc thanh toán không được xác nhận tự động; Admin chỉ đánh dấu Đã nhận tiền sau khi kiểm tra giao dịch MoMo."));
   const actions=element("div","dialog-actions");
   actions.append(button("Đóng","btn outline",closeDialog));
@@ -230,6 +268,10 @@ async function loadOrders(){
         try{showOrder(await request("/api/v1/orders/"+encodeURIComponent(order.id),{authorized:true}))}
         catch(err){showBanner(errorMessage(err))}
       }));
+      if(order.status==="fulfilled"&&order.delivery?.download_path){
+        entry.append(" ");
+        entry.append(button("⇩ Tải file","btn primary",()=>downloadDelivery(order)));
+      }
       root.append(entry);
     }
   }catch(e){root.replaceChildren(element("div","empty",errorMessage(e)))}

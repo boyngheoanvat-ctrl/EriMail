@@ -53,6 +53,7 @@ private struct Order: Decodable, Identifiable {
     let buyer_username: String?
     let buyer_name: String?
     let buyer_contact: String?
+    let delivery_filename: String?
 }
 @MainActor
 private final class AdminSession: ObservableObject {
@@ -79,6 +80,73 @@ private final class AdminSession: ObservableObject {
         return body
     }
 
+
+    private struct OrderDeliveryBegin: Decodable {
+        let upload_id: String
+        let size_bytes: Int
+        let chunk_bytes: Int
+    }
+    private struct OrderDeliveryOffset: Decodable { let offset: Int }
+
+    func deliverFile(orderID: String, file: URL,
+                     onProgress: @escaping @MainActor (Double) -> Void) async throws {
+        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+        guard let size = (attrs[.size] as? NSNumber)?.intValue,
+              size > 0 && size <= 300 * 1024 * 1024 else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        let base = "/api/v1/admin/orders/" + orderID + "/delivery-sessions"
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "filename": file.lastPathComponent, "size_bytes": size
+        ])
+        let started = try await send(base, method: "POST", data: payload)
+        let session = try JSONDecoder().decode(OrderDeliveryBegin.self, from: started)
+        guard session.size_bytes == size, session.chunk_bytes > 0,
+              session.chunk_bytes <= 4 * 1024 * 1024 else {
+            throw URLError(.badServerResponse)
+        }
+        let path = base + "/" + session.upload_id
+        let reader = try FileHandle(forReadingFrom: file)
+        defer { try? reader.close() }
+        var offset = 0
+        while offset < size {
+            let count = min(session.chunk_bytes, size - offset)
+            try reader.seek(toOffset: UInt64(offset))
+            guard let bytes = try reader.read(upToCount: count), bytes.count == count else {
+                throw URLError(.cannotDecodeRawData)
+            }
+            var attempt = 0
+            while true {
+                do {
+                    var req = try request(path, method: "PUT")
+                    req.timeoutInterval = 120
+                    req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                    req.setValue(String(offset), forHTTPHeaderField: "X-ERI-Upload-Offset")
+                    let (reply, response) = try await URLSession.shared.upload(for: req, from: bytes)
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    guard (200...299).contains(status) else { throw AdminError.http(status) }
+                    let received = try JSONDecoder().decode(OrderDeliveryOffset.self, from: reply)
+                    guard received.offset == offset + count else { throw URLError(.badServerResponse) }
+                    offset = received.offset
+                    onProgress(Double(offset) / Double(size))
+                    break
+                } catch {
+                    attempt += 1
+                    guard attempt <= 3 else { throw error }
+                    let data = try await send(path)
+                    let received = try JSONDecoder().decode(OrderDeliveryOffset.self, from: data)
+                    if received.offset == offset + count {
+                        offset = received.offset
+                        onProgress(Double(offset) / Double(size))
+                        break
+                    }
+                    guard received.offset == offset else { throw URLError(.badServerResponse) }
+                }
+            }
+        }
+        _ = try await send(path + "/complete", method: "POST")
+        onProgress(1)
+    }
 
     private struct UploadBegin: Decodable {
         let upload_id: String
@@ -362,6 +430,7 @@ private struct OrdersView: View {
     @State private var references: [String: String] = [:]
     @State private var status = ""
     @State private var toDeliver: Order?
+    @State private var fileDeliveryOrder: Order?
     @State private var updatingOrderID: String?
 
     private func referenceFor(_ order: Order) -> String {
@@ -422,6 +491,10 @@ private struct OrdersView: View {
                     Text("Giá: " + eriMoney(order.amount_vnd))
                     Text(readableStatus(order.status))
                         .fontWeight(.medium)
+                    if let delivered = order.delivery_filename {
+                        Label("Đã gửi file: " + delivered, systemImage: "paperclip")
+                            .font(.footnote).foregroundStyle(.green)
+                    }
                     if order.status == "pending" {
                         TextField("Mã giao dịch MoMo đã đối chiếu", text: Binding(
                             get: { references[order.id] ?? "" },
@@ -437,26 +510,25 @@ private struct OrdersView: View {
                             Task { await update(order, "paid") }
                         }
                         .disabled(!validReference(order) || updatingOrderID != nil)
-                        Button {
-                            toDeliver = order
-                        } label: {
-                            Label("Đã giao", systemImage: "checkmark.seal.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                        .disabled(!validReference(order) || updatingOrderID != nil)
                         Button("Hủy đơn", role: .destructive) {
                             Task { await update(order, "cancelled") }
                         }
                         .disabled(updatingOrderID != nil)
                     } else if order.status == "paid" {
-                        Text("Chỉ nhấn Đã giao sau khi đã giao sản phẩm thật cho khách.")
+                        Button {
+                            fileDeliveryOrder = order
+                        } label: {
+                            Label("Giao file trực tiếp cho khách", systemImage: "square.and.arrow.up.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(updatingOrderID != nil)
+                        Text("Hoặc xác nhận giao hàng bên ngoài sau khi đã gửi bằng cách khác.")
                             .font(.footnote).foregroundStyle(.secondary)
                         Button {
                             toDeliver = order
                         } label: {
-                            Label("Đã giao", systemImage: "checkmark.seal.fill")
+                            Label("Đã giao bên ngoài", systemImage: "checkmark.seal.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -470,7 +542,7 @@ private struct OrdersView: View {
         .navigationTitle(kind == "all" ? "Lịch sử khách mua" : "Đơn " + productCategory(kind))
         .toolbar { Button("Làm mới") { Task { await refresh() } } }
         .confirmationDialog(
-            "Xác nhận đã giao sản phẩm cho khách?",
+            "Xác nhận đã giao bên ngoài website?",
             isPresented: Binding(
                 get: { toDeliver != nil },
                 set: { if !$0 { toDeliver = nil } }
@@ -484,7 +556,12 @@ private struct OrdersView: View {
             }
             Button("Chưa giao", role: .cancel) { toDeliver = nil }
         } message: {
-            Text("Chỉ xác nhận nếu bạn đã đối chiếu tiền MoMo và thực sự giao sản phẩm. Đơn đang chờ sẽ được xác nhận đã nhận tiền trước khi đánh dấu Đã giao.")
+            Text("Chỉ xác nhận khi bạn đã tự giao sản phẩm bên ngoài. Để khách nhận file trực tiếp trên ERI STORE, dùng nút Giao file trực tiếp.")
+        }
+        .sheet(item: $fileDeliveryOrder) { order in
+            OrderFileDeliveryView(order: order, onDelivered: {
+                Task { await refresh() }
+            }).environmentObject(session)
         }
         .task { await refresh() }
     }
@@ -525,26 +602,111 @@ private struct OrdersView: View {
     }
 
     private func markDelivered(_ order: Order) async {
-        guard updatingOrderID == nil else { return }
-        guard order.status == "paid" || (order.status == "pending" && validReference(order)) else {
-            status = "Cần đối chiếu thanh toán MoMo trước khi xác nhận giao hàng."
+        guard updatingOrderID == nil, order.status == "paid" else {
+            status = "Vui lòng xác nhận đã nhận tiền trước khi giao hàng."
             return
         }
         updatingOrderID = order.id
         defer { updatingOrderID = nil }
         do {
-            // The API enforces pending -> paid -> fulfilled.
-            // Keep both transitions explicit and use a transaction reference for payment.
-            if order.status == "pending" {
-                try await setServerStatus(order, to: "paid")
-            }
             try await setServerStatus(order, to: "fulfilled")
             await refresh()
-            status = "Đơn " + order.id + ": Đã giao hàng"
+            status = "Đơn " + order.id + ": Đã giao bên ngoài ERI STORE"
         } catch {
-            await refresh()
-            status = "Chưa hoàn tất đánh dấu Đã giao: " + error.localizedDescription +
-                     ". Hãy kiểm tra trạng thái đơn và thử lại nếu vẫn là Đã thanh toán."
+            status = "Không cập nhật được: " + error.localizedDescription
+        }
+    }
+
+}
+
+
+private struct OrderFileDeliveryView: View {
+    @EnvironmentObject private var session: AdminSession
+    @Environment(\.dismiss) private var dismiss
+    let order: Order
+    let onDelivered: () -> Void
+    @State private var picker = false
+    @State private var fileURL: URL?
+    @State private var working = false
+    @State private var progress = 0.0
+    @State private var message = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Đúng đơn · Đúng khách") {
+                    Text(order.product_name).font(.headline)
+                    Text("Tên khách: " + (order.buyer_name ?? "Không có tên"))
+                    if let username = order.buyer_username {
+                        Text("Tài khoản: @" + username)
+                    }
+                    Text("Mã đơn: " + order.id).textSelection(.enabled)
+                    Text("Đã thanh toán: " + eriMoney(order.amount_vnd))
+                    Label("Chỉ chủ tài khoản đặt mua đơn này được tải file.",
+                          systemImage: "lock.shield.fill")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Giao file từ ứng dụng Tệp") {
+                    Button("Chọn file cần giao") { picker = true }.disabled(working)
+                    if let file = fileURL {
+                        Text("Đã chọn: " + file.lastPathComponent)
+                            .font(.footnote)
+                    }
+                    if working {
+                        ProgressView(value: progress)
+                        Text("Đã tải lên: " + String(Int(progress * 100)) + "%")
+                            .font(.footnote)
+                    }
+                    Button(working ? "Đang gửi file..." : "Gửi file trực tiếp cho khách") {
+                        Task { await sendFile() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(fileURL == nil || working || order.status != "paid")
+                    if !message.isEmpty {
+                        Text(message).font(.footnote).foregroundStyle(.red)
+                    }
+                }
+                Section {
+                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 300 MB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Text("Lưu ý: File hiện nằm trên ổ tạm Render Free, có thể mất khi server khởi động lại. Không lưu thông tin bí mật quan trọng khi chưa chuyển sang kho lưu trữ bền vững.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Giao hàng trực tiếp")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Đóng") { dismiss() }.disabled(working)
+                }
+            }
+            .sheet(isPresented: $picker) {
+                ERIDocumentPicker(onPick: { url in
+                    fileURL = url
+                    picker = false
+                }, onCancel: { picker = false })
+            }
+        }
+    }
+
+    private func sendFile() async {
+        guard !working, let source = fileURL else { return }
+        working = true
+        progress = 0
+        message = ""
+        defer { working = false }
+        do {
+            let imported = try await Task.detached(priority: .userInitiated) {
+                try ImportedFile.copy(source, maxBytes: 300 * 1024 * 1024)
+            }.value
+            defer { try? FileManager.default.removeItem(at: imported.deletingLastPathComponent()) }
+            try await session.deliverFile(orderID: order.id, file: imported) { value in
+                progress = value
+            }
+            onDelivered()
+            dismiss()
+        } catch {
+            message = "Giao hàng thất bại: " + error.localizedDescription +
+                      ". Nếu vẫn là Đã thanh toán, hãy thử gửi lại."
         }
     }
 }

@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -87,6 +88,11 @@ def init():
           id INTEGER PRIMARY KEY CHECK(id=1), image BLOB NOT NULL,
           mime TEXT NOT NULL CHECK(mime IN ('image/png','image/jpeg')),
           updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS order_deliveries (
+          order_id TEXT PRIMARY KEY, original_name TEXT NOT NULL,
+          storage_name TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL,
+          sha256 TEXT NOT NULL, created_at TEXT NOT NULL
         );
         """)
         ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}
@@ -215,7 +221,10 @@ def customer_logout(authorization: str | None = Header(default=None),
 def customer_order_history(customer=Depends(require_customer)):
     with connection() as db:
         rows = db.execute(
-            "SELECT * FROM orders WHERE customer_id=? ORDER BY created_at DESC LIMIT 200",
+            "SELECT o.*,d.original_name AS delivery_filename,"
+            "d.size_bytes AS delivery_size_bytes FROM orders o "
+            "LEFT JOIN order_deliveries d ON d.order_id=o.id "
+            "WHERE o.customer_id=? ORDER BY o.created_at DESC LIMIT 200",
             (customer["id"],)).fetchall()
     return {"items": [public_order(x) for x in rows]}
 
@@ -371,6 +380,13 @@ class NewOrder(BaseModel):
 
 def public_order(row):
     data = dict(row)
+    filename = data.pop("delivery_filename", None)
+    size = data.pop("delivery_size_bytes", None)
+    if filename and data.get("status") == "fulfilled":
+        data["delivery"] = {
+            "filename": filename, "size_bytes": size,
+            "download_path": "/api/v1/me/orders/" + data["id"] + "/delivery"
+        }
     data.pop("customer_id", None)
     data.pop("product_id", None)
     data.pop("payos_order_code", None)
@@ -434,8 +450,12 @@ def order_status(order_id: str, customer=Depends(require_customer)):
     if not re.fullmatch(r"[A-F0-9]{12}", order_id):
         raise HTTPException(404, "Order not found")
     with connection() as db:
-        row = db.execute("SELECT * FROM orders WHERE id=? AND customer_id=?",
-                         (order_id, customer["id"])).fetchone()
+        row = db.execute(
+            "SELECT o.*,d.original_name AS delivery_filename,"
+            "d.size_bytes AS delivery_size_bytes FROM orders o "
+            "LEFT JOIN order_deliveries d ON d.order_id=o.id "
+            "WHERE o.id=? AND o.customer_id=?",
+            (order_id, customer["id"])).fetchone()
     if row is None:
         raise HTTPException(404, "Order not found")
     return public_order(row)
@@ -539,8 +559,10 @@ def admin_orders():
     with connection() as db:
         rows = db.execute(
             "SELECT o.*, c.username AS buyer_username, c.display_name AS buyer_name, "
-            "c.contact AS buyer_contact FROM orders o LEFT JOIN customers c "
-            "ON c.id=o.customer_id ORDER BY o.created_at DESC LIMIT 300"
+            "c.contact AS buyer_contact, d.original_name AS delivery_filename "
+            "FROM orders o LEFT JOIN customers c ON c.id=o.customer_id "
+            "LEFT JOIN order_deliveries d ON d.order_id=o.id "
+            "ORDER BY o.created_at DESC LIMIT 300"
         ).fetchall()
     return {"items": [dict(x) for x in rows]}
 
@@ -1000,3 +1022,154 @@ def admin_delete_catalog_product(kind: str, product_id: int):
         if Path(name).name == name and not name.startswith("."):
             (UPLOAD_DIR / name).unlink(missing_ok=True)
     return {"deleted": True, "id": product_id, "kind": kind}
+
+
+# Authenticated delivery files, visible only to the buyer whose order is fulfilled.
+# WARNING: /tmp is temporary on Render Free; use durable storage in production.
+DELIVERY_MAX_BYTES = 300 * 1024 * 1024
+DELIVERY_SUFFIXES = {".ipa",".zip",".pdf",".txt",".mobileprovision",".p12",".cer",
+                     ".png",".jpg",".jpeg",".json",".plist",".md",".csv"}
+
+class DeliveryBegin(BaseModel):
+    filename: str = Field(min_length=1, max_length=180)
+    size_bytes: int = Field(gt=0, le=DELIVERY_MAX_BYTES)
+
+def delivery_paths(upload_id: str):
+    if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
+        raise HTTPException(404, "Lượt upload không tồn tại")
+    return UPLOAD_DIR / ("." + upload_id + ".delivery.json"), UPLOAD_DIR / ("." + upload_id + ".delivery.part")
+
+def delivery_metadata(order_id: str, upload_id: str):
+    metadata_path, part_path = delivery_paths(upload_id)
+    try:
+        metadata = json.loads(metadata_path.read_text("utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(404, "Không tìm thấy lượt giao hàng")
+    if metadata.get("order_id") != order_id or not part_path.is_file():
+        raise HTTPException(404, "Lượt giao không thuộc đơn này")
+    if part_path.stat().st_size != metadata["offset"]:
+        raise HTTPException(409, "Trạng thái tệp chưa đồng bộ")
+    return metadata, metadata_path, part_path
+
+def save_delivery_metadata(meta, path):
+    tmp = path.with_suffix(".writing")
+    tmp.write_text(json.dumps(meta,ensure_ascii=False),encoding="utf-8")
+    os.chmod(tmp,0o600)
+    os.replace(tmp,path)
+
+@app.post("/api/v1/admin/orders/{order_id}/delivery-sessions",
+          dependencies=[Depends(require_admin)], status_code=201)
+async def delivery_begin(order_id: str, item: DeliveryBegin):
+    filename = item.filename.replace("\\","/").split("/")[-1].strip()
+    suffix = Path(filename).suffix.lower()
+    if not filename or filename in (".","..") or any(ord(c)<32 or ord(c)==127 for c in filename) or suffix not in DELIVERY_SUFFIXES:
+        raise HTTPException(422,"Tên hoặc định dạng tệp chưa được hỗ trợ")
+    if not re.fullmatch(r"[A-F0-9]{12}", order_id):
+        raise HTTPException(404,"Không tìm thấy đơn")
+    with connection() as db:
+        order=db.execute("SELECT customer_id,status FROM orders WHERE id=?",(order_id,)).fetchone()
+        prior=db.execute("SELECT 1 FROM order_deliveries WHERE order_id=?",(order_id,)).fetchone()
+    if order is None or order["customer_id"] is None:
+        raise HTTPException(404,"Đơn chưa gắn với tài khoản khách")
+    if order["status"]!="paid" or prior:
+        raise HTTPException(409,"Chỉ giao file cho đơn đã thanh toán và chưa được giao")
+    UPLOAD_DIR.mkdir(parents=True,exist_ok=True,mode=0o700)
+    async with _eri_upload_lock:
+        upload_id=secrets.token_hex(16)
+        path,part=delivery_paths(upload_id)
+        with part.open("xb"):
+            pass
+        os.chmod(part,0o600)
+        try:
+            save_delivery_metadata({"order_id":order_id,"filename":filename,"suffix":suffix,
+                                    "offset":0,"size_bytes":item.size_bytes},path)
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
+    return {"upload_id":upload_id,"offset":0,"size_bytes":item.size_bytes,"chunk_bytes":ERI_CHUNK_BYTES}
+
+@app.get("/api/v1/admin/orders/{order_id}/delivery-sessions/{upload_id}",
+         dependencies=[Depends(require_admin)])
+async def delivery_progress(order_id: str, upload_id: str):
+    async with _eri_upload_lock:
+        meta,_,_=delivery_metadata(order_id,upload_id)
+        return {"offset":meta["offset"],"size_bytes":meta["size_bytes"]}
+
+@app.put("/api/v1/admin/orders/{order_id}/delivery-sessions/{upload_id}",
+         dependencies=[Depends(require_admin)])
+async def delivery_chunk(order_id: str, upload_id: str, request: Request,
+                         x_eri_upload_offset: int=Header(...)):
+    async with _eri_upload_lock:
+        meta,path,part=delivery_metadata(order_id,upload_id)
+        if x_eri_upload_offset!=meta["offset"]:
+            raise HTTPException(409,detail={"offset":meta["offset"]})
+        length=0
+        with part.open("ab") as out:
+            async for piece in request.stream():
+                length+=len(piece)
+                if length>ERI_CHUNK_BYTES or meta["offset"]+length>meta["size_bytes"]:
+                    out.truncate(meta["offset"])
+                    raise HTTPException(413,"Chunk quá lớn")
+                out.write(piece)
+            out.flush()
+        if not length:
+            raise HTTPException(422,"Tệp rỗng")
+        meta["offset"]+=length
+        save_delivery_metadata(meta,path)
+        return {"offset":meta["offset"]}
+
+@app.post("/api/v1/admin/orders/{order_id}/delivery-sessions/{upload_id}/complete",
+          dependencies=[Depends(require_admin)],status_code=201)
+async def delivery_complete(order_id: str,upload_id: str):
+    async with _eri_upload_lock:
+        meta,path,part=delivery_metadata(order_id,upload_id)
+        if meta["offset"]!=meta["size_bytes"]:
+            raise HTTPException(409,"Chưa nhận đủ tệp")
+        digest=hashlib.sha256()
+        with part.open("rb") as src:
+            while block:=src.read(1048576):
+                digest.update(block)
+        final=UPLOAD_DIR / (upload_id+meta["suffix"])
+        os.replace(part,final)
+        try:
+            with connection() as db:
+                order=db.execute("SELECT status,customer_id FROM orders WHERE id=?",(order_id,)).fetchone()
+                if order is None or order["status"]!="paid" or order["customer_id"] is None:
+                    raise HTTPException(409,"Đơn chưa sẵn sàng để giao file")
+                if db.execute("SELECT 1 FROM order_deliveries WHERE order_id=?",(order_id,)).fetchone():
+                    raise HTTPException(409,"Đơn đã được giao file")
+                db.execute(
+                    "INSERT INTO order_deliveries(order_id,original_name,storage_name,size_bytes,sha256,created_at)"
+                    " VALUES(?,?,?,?,?,?)",
+                    (order_id,meta["filename"],final.name,meta["size_bytes"],digest.hexdigest(),
+                     datetime.now(timezone.utc).isoformat()))
+                cur=db.execute("UPDATE orders SET status='fulfilled' WHERE id=? AND status='paid'",(order_id,))
+                if cur.rowcount!=1:
+                    raise HTTPException(409,"Trạng thái đơn thay đổi")
+        except BaseException:
+            os.replace(final,part)
+            raise
+        path.unlink(missing_ok=True)
+    return {"id":order_id,"status":"fulfilled","delivery":{
+        "filename":meta["filename"],"size_bytes":meta["size_bytes"],
+        "download_path":"/api/v1/me/orders/"+order_id+"/delivery"}}
+
+@app.get("/api/v1/me/orders/{order_id}/delivery")
+def delivery_download(order_id: str, customer=Depends(require_customer)):
+    if not re.fullmatch(r"[A-F0-9]{12}",order_id):
+        raise HTTPException(404,"Không tìm thấy tệp")
+    with connection() as db:
+        file=db.execute(
+            "SELECT d.original_name,d.storage_name FROM order_deliveries d "
+            "JOIN orders o ON o.id=d.order_id "
+            "WHERE o.id=? AND o.customer_id=? AND o.status='fulfilled'",
+            (order_id,customer["id"])).fetchone()
+    if file is None:
+        raise HTTPException(404,"Đơn này chưa có tệp được giao")
+    path=UPLOAD_DIR / file["storage_name"]
+    if path.name!=file["storage_name"] or not path.is_file():
+        raise HTTPException(410,"Tệp đã mất khỏi ổ tạm. Liên hệ Admin để nhận lại.")
+    return FileResponse(path,media_type="application/octet-stream",
+        filename=file["original_name"],content_disposition_type="attachment",
+        headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
+                 "Content-Security-Policy":"default-src 'none'"})

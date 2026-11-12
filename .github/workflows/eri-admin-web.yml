@@ -125,6 +125,72 @@ jobs:
                                   json={"kind":kind,"product_id":item.json()["id"]})
               assert order.status_code == 201, order.text
               assert order.json()["amount_vnd"] == amount, (kind,order.text)
+          # Customer-to-customer isolation and a real uploaded file delivery.
+          ordered = order.json()
+          order_id = ordered["id"]
+          sample = b"ERI owned order delivery sample (not a real certificate)"
+          sample_file = "certificate.txt"
+          base = "/api/v1/admin/orders/" + order_id + "/delivery-sessions"
+          assert client.post(base, json={
+              "filename":sample_file,"size_bytes":len(sample)
+          }).status_code == 403
+          assert client.post(base,headers=h,json={
+              "filename":sample_file,"size_bytes":len(sample)
+          }).status_code == 409, "Cannot deliver to unpaid buyer"
+
+          # Another customer must not access any of the buyer's order data.
+          another = client.post("/api/v1/auth/register",json={
+              "username":"differentbuyer","password":"DifferentLongPassword2026!",
+              "display_name":"Khách thứ hai","contact":"Zalo: differentbuyer"
+          })
+          assert another.status_code == 201, another.text
+          other_auth={"Authorization":"Bearer "+another.json()["token"]}
+          assert client.get("/api/v1/orders/"+order_id,headers=other_auth).status_code == 404
+
+          paid=client.post("/api/v1/admin/orders/"+order_id+"/status",
+              headers=h,json={"status":"paid","transaction_reference":"MOMO_DELIVERY_TEST_1234"})
+          assert paid.status_code == 200,paid.text
+
+          begin=client.post(base,headers=h,json={
+              "filename":sample_file,"size_bytes":len(sample)
+          })
+          assert begin.status_code == 201,begin.text
+          upload_id=begin.json()["upload_id"]
+          path=base+"/"+upload_id
+          half=len(sample)//2
+          denied=client.put(path,headers={"X-ERI-Upload-Offset":"0"},content=sample[:half])
+          assert denied.status_code == 403
+          wrong=client.put(path,headers={**h,"X-ERI-Upload-Offset":"5"},content=sample[:half])
+          assert wrong.status_code == 409
+          first=client.put(path,headers={**h,"X-ERI-Upload-Offset":"0"},content=sample[:half])
+          assert first.status_code == 200,first.text
+          assert client.get(path,headers=h).json()["offset"] == half
+          second=client.put(path,headers={**h,"X-ERI-Upload-Offset":str(half)},
+                            content=sample[half:])
+          assert second.status_code == 200,second.text
+          finished=client.post(path+"/complete",headers=h)
+          assert finished.status_code == 201,finished.text
+          assert finished.json()["status"] == "fulfilled"
+          file_url="/api/v1/me/orders/"+order_id+"/delivery"
+          assert client.get(file_url).status_code == 401
+          assert client.get(file_url,headers=other_auth).status_code == 404
+          received=client.get(file_url,headers=auth)
+          assert received.status_code == 200 and received.content == sample
+          assert received.headers["cache-control"] == "private, no-store"
+          assert received.headers["content-disposition"].startswith("attachment;")
+          own=client.get("/api/v1/orders/"+order_id,headers=auth).json()
+          assert own["status"] == "fulfilled"
+          assert own["delivery"]["filename"] == sample_file
+          assert own["delivery"]["download_path"] == file_url
+          mine=client.get("/api/v1/me/orders",headers=auth).json()["items"]
+          assert any(x["id"] == order_id and x["delivery"]["filename"] == sample_file for x in mine)
+          assert "delivery" not in client.get("/api/v1/products").text
+          admin_orders=client.get("/api/v1/admin/orders",headers=h).json()["items"]
+          assert any(x["id"] == order_id and x["delivery_filename"] == sample_file for x in admin_orders)
+          assert client.post(base,headers=h,json={
+              "filename":sample_file,"size_bytes":len(sample)
+          }).status_code == 409
+          print("Private paid-order file delivery and buyer isolation: OK")
           print("Mod Game original price; AI and certificate 30% markup: OK")
           PY
   web-check:
