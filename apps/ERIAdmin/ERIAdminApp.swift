@@ -361,6 +361,18 @@ private struct OrdersView: View {
     @State private var orders: [Order] = []
     @State private var references: [String: String] = [:]
     @State private var status = ""
+    @State private var toDeliver: Order?
+    @State private var updatingOrderID: String?
+
+    private func referenceFor(_ order: Order) -> String {
+        (references[order.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func validReference(_ order: Order) -> Bool {
+        referenceFor(order).range(
+            of: "^[A-Za-z0-9_-]{6,128}$", options: .regularExpression
+        ) != nil
+    }
 
     private var visible: [Order] {
         kind == "all" ? orders : orders.filter { $0.kind == kind }
@@ -417,18 +429,40 @@ private struct OrdersView: View {
                         ))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .textContentType(.none)
+                        if !validReference(order) {
+                            Text("Nhập mã giao dịch MoMo hợp lệ (6–128 ký tự) sau khi đã kiểm tra tiền để bật nút Đã giao.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Button("Xác nhận đã nhận tiền") {
                             Task { await update(order, "paid") }
-                        }.disabled((references[order.id] ?? "").count < 6)
+                        }
+                        .disabled(!validReference(order) || updatingOrderID != nil)
+                        Button {
+                            toDeliver = order
+                        } label: {
+                            Label("Đã giao", systemImage: "checkmark.seal.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .disabled(!validReference(order) || updatingOrderID != nil)
                         Button("Hủy đơn", role: .destructive) {
                             Task { await update(order, "cancelled") }
                         }
+                        .disabled(updatingOrderID != nil)
                     } else if order.status == "paid" {
-                        Text("Hãy liên hệ khách và giao hàng thực tế trước khi đánh dấu.")
+                        Text("Chỉ nhấn Đã giao sau khi đã giao sản phẩm thật cho khách.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        Button("Xác nhận đã giao cho khách") {
-                            Task { await update(order, "fulfilled") }
+                        Button {
+                            toDeliver = order
+                        } label: {
+                            Label("Đã giao", systemImage: "checkmark.seal.fill")
+                                .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                        .disabled(updatingOrderID != nil)
                     }
                 }
                 .padding(.vertical, 7)
@@ -436,6 +470,23 @@ private struct OrdersView: View {
         }
         .navigationTitle(kind == "all" ? "Lịch sử khách mua" : "Đơn " + productCategory(kind))
         .toolbar { Button("Làm mới") { Task { await refresh() } } }
+        .confirmationDialog(
+            "Xác nhận đã giao sản phẩm cho khách?",
+            isPresented: Binding(
+                get: { toDeliver != nil },
+                set: { if !$0 { toDeliver = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Xác nhận Đã giao") {
+                guard let order = toDeliver else { return }
+                toDeliver = nil
+                Task { await markDelivered(order) }
+            }
+            Button("Chưa giao", role: .cancel) { toDeliver = nil }
+        } message: {
+            Text("Chỉ xác nhận nếu bạn đã đối chiếu tiền MoMo và thực sự giao sản phẩm. Đơn đang chờ sẽ được xác nhận đã nhận tiền trước khi đánh dấu Đã giao.")
+        }
         .task { await refresh() }
     }
 
@@ -451,18 +502,50 @@ private struct OrdersView: View {
         }
     }
 
-    private func update(_ order: Order, _ newStatus: String) async {
-        var payload = ["status": newStatus]
-        if newStatus == "paid" {
-            payload["transaction_reference"] = references[order.id] ?? ""
+    private func setServerStatus(_ order: Order, to next: String) async throws {
+        var payload = ["status": next]
+        if next == "paid" {
+            payload["transaction_reference"] = referenceFor(order)
         }
+        let body = try JSONEncoder().encode(payload)
+        _ = try await session.send("/api/v1/admin/orders/" + order.id + "/status",
+                                   method: "POST", data: body)
+    }
+
+    private func update(_ order: Order, _ newStatus: String) async {
+        guard updatingOrderID == nil else { return }
+        updatingOrderID = order.id
+        defer { updatingOrderID = nil }
         do {
-            let body = try JSONEncoder().encode(payload)
-            _ = try await session.send("/api/v1/admin/orders/" + order.id + "/status",
-                                       method: "POST", data: body)
+            try await setServerStatus(order, to: newStatus)
             await refresh()
+            status = "Đơn " + order.id + ": " + readableStatus(newStatus)
         } catch {
             status = "Không cập nhật được đơn: " + error.localizedDescription
+        }
+    }
+
+    private func markDelivered(_ order: Order) async {
+        guard updatingOrderID == nil else { return }
+        guard order.status == "paid" || (order.status == "pending" && validReference(order)) else {
+            status = "Cần đối chiếu thanh toán MoMo trước khi xác nhận giao hàng."
+            return
+        }
+        updatingOrderID = order.id
+        defer { updatingOrderID = nil }
+        do {
+            // The API enforces pending -> paid -> fulfilled.
+            // Keep both transitions explicit and use a transaction reference for payment.
+            if order.status == "pending" {
+                try await setServerStatus(order, to: "paid")
+            }
+            try await setServerStatus(order, to: "fulfilled")
+            await refresh()
+            status = "Đơn " + order.id + ": Đã giao hàng"
+        } catch {
+            await refresh()
+            status = "Chưa hoàn tất đánh dấu Đã giao: " + error.localizedDescription +
+                     ". Hãy kiểm tra trạng thái đơn và thử lại nếu vẫn là Đã thanh toán."
         }
     }
 }
