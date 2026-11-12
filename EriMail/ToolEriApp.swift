@@ -295,6 +295,7 @@ struct SignIPAView: View {
     @State private var p12URL: URL?
     @State private var profileURL: URL?
     @State private var p12Password = ""
+    @State private var signingKey = ""
     @State private var removeEmbeddedProfile = false
     @State private var newBundleID = ""
     @State private var newBundleName = ""
@@ -333,6 +334,7 @@ struct SignIPAView: View {
                 Section("Chứng chỉ ký") {
                     fileRow("Chọn file .p12", kind: .p12, url: p12URL)
                     SecureField("Mật khẩu .p12", text: $p12Password)
+                    SecureField("Khóa API ký ERI", text: $signingKey)
                     fileRow("Chọn file .mobileprovision", kind: .mobileprovision, url: profileURL)
                 }
                 Section("Tùy chọn") {
@@ -359,7 +361,7 @@ struct SignIPAView: View {
                     }
                 }
                 Section {
-                    Text("Chỉ gửi P12, mật khẩu và provisioning profile đến backend ERI HTTPS do bạn kiểm soát. Không dùng máy chủ bên thứ ba. Máy chủ cần triển khai POST /api/v1/sign với phản hồi download_url.")
+                    Text("Chỉ gửi P12, mật khẩu và provisioning profile đến backend ERI HTTPS do bạn kiểm soát. Không dùng máy chủ bên thứ ba. Máy chủ macOS cần cấu hình ERI_SIGNING_KEY và ERI_PUBLIC_BASE_URL. Các tùy chọn đổi Bundle ID/tên ứng dụng chưa được worker hỗ trợ.")
                         .font(.caption).foregroundColor(.secondary)
                 }
             }
@@ -397,8 +399,8 @@ struct SignIPAView: View {
     }
 
     @MainActor private func sign() async {
-        guard let ipaURL, let p12URL, let profileURL, !p12Password.isEmpty else {
-            message = "Cần chọn IPA, P12, mobileprovision và nhập mật khẩu P12."
+        guard let ipaURL, let p12URL, let profileURL, !p12Password.isEmpty, !signingKey.isEmpty else {
+            message = "Cần chọn IPA, P12, mobileprovision, mật khẩu P12 và khóa API ký ERI."
             return
         }
         guard let base = ERIAPI.configuredBase(),
@@ -442,6 +444,7 @@ struct SignIPAView: View {
             try write("--\(boundary)--\r\n")
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
+            request.setValue("Bearer " + signingKey, forHTTPHeaderField: "Authorization")
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 600
             let (data, response) = try await URLSession.shared.upload(for: request, fromFile: temporary)
