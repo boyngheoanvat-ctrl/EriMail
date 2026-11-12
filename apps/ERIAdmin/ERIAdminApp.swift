@@ -1,21 +1,46 @@
 import SwiftUI
+import Security
+
+private let server = "https://eri-api-dag8.onrender.com"
 
 @main
 struct ERIAdminApp: App {
     var body: some Scene { WindowGroup { AdminHome() } }
 }
 
-private let eriAPI = "https://eri-api-dag8.onrender.com"
+private enum SecureKey {
+    static let account = "eri_admin_token"
+    static let service = "vn.eri.admin"
+    static func load() -> String {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: account,
+            kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+    static func save(_ value: String) {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: account]
+        SecItemDelete(query as CFDictionary)
+        guard !value.isEmpty, let data = value.data(using: .utf8) else { return }
+        var attributes = query
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+}
 
-private struct OrdersEnvelope: Decodable { let items: [AdminOrder] }
-private struct AdminOrder: Decodable, Identifiable {
+private struct Envelope<T: Decodable>: Decodable { let items: [T] }
+private struct Order: Decodable, Identifiable {
     let id: String
     let kind: String
     let product_name: String
     let amount_vnd: Int
     let status: String
 }
-private struct IPAInput: Encodable {
+private struct IPAEntry: Encodable {
     let name: String
     let version: String
     let bundle_id: String
@@ -24,192 +49,221 @@ private struct IPAInput: Encodable {
     let authorized: Bool
 }
 
+@MainActor
+private final class AdminSession: ObservableObject {
+    @Published var key = SecureKey.load()
+    @Published var message = ""
+    var authenticated: Bool { !key.isEmpty }
+    func request(_ path: String, method: String = "GET", data: Data? = nil) throws -> URLRequest {
+        guard let url = URL(string: server + path), url.scheme == "https" else { throw URLError(.badURL) }
+        guard key.count >= 32 else { throw URLError(.userAuthenticationRequired) }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.httpBody = data
+        req.setValue(key, forHTTPHeaderField: "X-ERI-Admin-Key")
+        if data != nil { req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        return req
+    }
+    func send(_ path: String, method: String = "GET", data: Data? = nil) async throws -> Data {
+        let (body, response) = try await URLSession.shared.data(for: request(path, method: method, data: data))
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(status) else {
+            if status == 401 || status == 403 { throw AdminError.invalidKey }
+            throw AdminError.http(status)
+        }
+        return body
+    }
+    func activate(_ candidate: String) async {
+        let old = key
+        key = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            _ = try await send("/api/v1/admin/orders")
+            SecureKey.save(key)
+            message = ""
+        } catch {
+            key = old
+            message = "Không xác thực được: " + error.localizedDescription
+        }
+    }
+    func signOut() { SecureKey.save(""); key = ""; message = "" }
+}
+private enum AdminError: LocalizedError {
+    case invalidKey
+    case http(Int)
+    var errorDescription: String? {
+        switch self {
+        case .invalidKey: return "Khóa quản trị không đúng hoặc đã hết hiệu lực."
+        case .http(let status): return "Máy chủ trả về HTTP \(status)."
+        }
+    }
+}
+
 private struct AdminHome: View {
-    @State private var key = ""
-    @State private var showAuth = false
-    @State private var section: AdminSection?
+    @StateObject private var session = AdminSession()
+    @State private var showLogin = false
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
-                Text("Quản lý cửa hàng ERI").font(.subheadline).foregroundStyle(.secondary)
-                menu("Giao hàng AI", icon: "sparkles", destination: .ai)
-                menu("Update IPA Mod", icon: "square.and.arrow.up", destination: .ipa)
-                menu("Giao hàng chứng chỉ", icon: "checkmark.seal", destination: .certificate)
-                Spacer()
+            List {
+                NavigationLink { OrdersView(kind: "ai").environmentObject(session) } label: {
+                    Label("Giao hàng AI", systemImage: "sparkles")
+                }
+                NavigationLink { IPAUpdateView().environmentObject(session) } label: {
+                    Label("Update IPA Mod", systemImage: "square.and.arrow.up")
+                }
+                NavigationLink { OrdersView(kind: "certificate").environmentObject(session) } label: {
+                    Label("Giao hàng chứng chỉ", systemImage: "checkmark.seal")
+                }
             }
-            .padding(20)
             .navigationTitle("ERI ADMIN")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAuth = true } label: { Image(systemName: "lock.shield") }
-                        .accessibilityLabel("Xác thực quản trị")
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showLogin = true } label: {
+                        Image(systemName: session.authenticated ? "lock.shield" : "lock")
+                    }
                 }
             }
-            .sheet(isPresented: $showAuth) {
-                NavigationStack {
-                    Form {
-                        Section("Bảo mật quản trị") {
-                            SecureField("Nhập ERI_ADMIN_KEY từ Render", text: $key)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                            Text("Khóa chỉ giữ trong bộ nhớ khi ứng dụng mở; không được nhúng vào IPA.")
-                                .font(.footnote).foregroundStyle(.secondary)
+            .sheet(isPresented: $showLogin) { LoginView().environmentObject(session) }
+            .onAppear { if !session.authenticated { showLogin = true } }
+        }
+    }
+}
+
+private struct LoginView: View {
+    @EnvironmentObject private var session: AdminSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft = ""
+    @State private var working = false
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Kích hoạt quản trị một lần") {
+                    SecureField("ERI_ADMIN_KEY từ Render", text: $draft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button(working ? "Đang xác thực..." : "Kích hoạt thiết bị") {
+                        working = true
+                        Task {
+                            await session.activate(draft)
+                            working = false
+                            if session.message.isEmpty { dismiss() }
                         }
-                        Section("Máy chủ HTTPS") {
-                            Text(eriAPI).font(.footnote).textSelection(.enabled)
+                    }.disabled(draft.count < 32 || working)
+                    if !session.message.isEmpty {
+                        Text(session.message).foregroundStyle(.red)
+                    }
+                }
+                Section {
+                    Text("Máy chủ đã cài sẵn. Khóa chỉ lưu trong iOS Keychain trên thiết bị này, không nhúng vào IPA.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if session.authenticated {
+                        Button("Đăng xuất thiết bị", role: .destructive) {
+                            session.signOut()
+                            dismiss()
                         }
                     }
-                    .navigationTitle("Xác thực")
-                    .toolbar { Button("Xong") { showAuth = false } }
                 }
             }
-            .navigationDestination(item: $section) { selected in
-                if selected == .ipa {
-                    IPAUpdateView(key: key)
-                } else {
-                    DeliveryView(key: key, kind: selected == .ai ? "ai" : "certificate",
-                                 title: selected == .ai ? "Giao hàng AI" : "Giao hàng chứng chỉ")
-                }
-            }
+            .navigationTitle("Bảo mật")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
         }
     }
-    private func menu(_ title: String, icon: String, destination: AdminSection) -> some View {
-        Button { section = destination } label: {
-            HStack(spacing: 16) {
-                Image(systemName: icon).font(.title2).frame(width: 32)
-                Text(title).font(.headline)
-                Spacer()
-                Image(systemName: "chevron.right").font(.subheadline)
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        }
-        .buttonStyle(.plain)
-    }
 }
 
-private enum AdminSection: String, Hashable, Identifiable {
-    case ai, ipa, certificate
-    var id: String { rawValue }
-}
-
-private func adminRequest(_ path: String, key: String, method: String = "GET", body: Data? = nil) throws -> URLRequest {
-    guard key.count >= 32 else { throw URLError(.userAuthenticationRequired) }
-    guard let url = URL(string: eriAPI + path) else { throw URLError(.badURL) }
-    var request = URLRequest(url: url)
-    request.httpMethod = method
-    request.setValue(key, forHTTPHeaderField: "X-ERI-Admin-Key")
-    if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-    request.httpBody = body
-    return request
-}
-
-private struct DeliveryView: View {
-    let key: String
+private struct OrdersView: View {
+    @EnvironmentObject private var session: AdminSession
     let kind: String
-    let title: String
-    @State private var orders: [AdminOrder] = []
+    @State private var orders: [Order] = []
     @State private var references: [String: String] = [:]
-    @State private var message = ""
+    @State private var status = ""
     var body: some View {
         List {
-            if !message.isEmpty { Text(message).foregroundStyle(.secondary) }
-            if orders.isEmpty { Text("Chưa có đơn hàng thuộc mục này.").foregroundStyle(.secondary) }
-            ForEach(orders) { order in
-                VStack(alignment: .leading, spacing: 10) {
+            if !status.isEmpty { Text(status).foregroundStyle(.secondary) }
+            ForEach(orders.filter { $0.kind == kind }) { order in
+                VStack(alignment: .leading, spacing: 8) {
                     Text(order.product_name).font(.headline)
                     Text("Mã đơn: " + order.id).font(.caption)
                     Text(order.amount_vnd.formatted(.currency(code: "VND")))
                     Text("Trạng thái: " + order.status)
                     if order.status == "pending" {
-                        TextField("Mã giao dịch MoMo đã kiểm tra", text: Binding(
+                        TextField("Mã giao dịch MoMo đã đối chiếu", text: Binding(
                             get: { references[order.id] ?? "" },
                             set: { references[order.id] = $0 }
-                        )).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        Button("Xác nhận đã nhận tiền") { Task { await change(order, status: "paid") } }
+                        )).textInputAutocapitalization(.never)
+                        Button("Xác nhận đã nhận tiền") { Task { await update(order, "paid") } }
                             .disabled((references[order.id] ?? "").count < 6)
-                        Button("Hủy đơn", role: .destructive) { Task { await change(order, status: "cancelled") } }
+                        Button("Hủy đơn", role: .destructive) { Task { await update(order, "cancelled") } }
+                    } else if order.status == "paid" {
+                        Button("Đã giao sản phẩm thực tế") { Task { await update(order, "fulfilled") } }
                     }
-                    if order.status == "paid" {
-                        Text("Chỉ đánh dấu sau khi đã giao sản phẩm thật cho khách.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Đánh dấu đã giao") { Task { await change(order, status: "fulfilled") } }
-                    }
-                }.padding(.vertical, 5)
+                }.padding(.vertical, 6)
             }
         }
-        .navigationTitle(title)
-        .toolbar { Button("Làm mới") { Task { await load() } } }
-        .task { await load() }
+        .navigationTitle(kind == "ai" ? "Giao hàng AI" : "Giao chứng chỉ")
+        .toolbar { Button("Làm mới") { Task { await refresh() } } }
+        .task { await refresh() }
     }
-    @MainActor private func load() async {
-        guard key.count >= 32 else { message = "Nhấn quay lại và mở biểu tượng ổ khóa để nhập khóa quản trị."; return }
+    private func refresh() async {
         do {
-            let (data, response) = try await URLSession.shared.data(for: adminRequest("/api/v1/admin/orders", key: key))
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { message = "Máy chủ từ chối khóa quản trị."; return }
-            orders = try JSONDecoder().decode(OrdersEnvelope.self, from: data).items.filter { $0.kind == kind }
-            message = ""
-        } catch { message = "Không tải được đơn: " + error.localizedDescription }
+            orders = try JSONDecoder().decode(Envelope<Order>.self,
+                from: await session.send("/api/v1/admin/orders")).items
+            status = orders.filter { $0.kind == kind }.isEmpty ? "Chưa có đơn hàng." : ""
+        } catch { status = error.localizedDescription }
     }
-    @MainActor private func change(_ order: AdminOrder, status: String) async {
+    private func update(_ order: Order, _ newStatus: String) async {
+        var payload = ["status": newStatus]
+        if newStatus == "paid" { payload["transaction_reference"] = references[order.id] ?? "" }
         do {
-            var payload = ["status": status]
-            if status == "paid" { payload["transaction_reference"] = references[order.id] ?? "" }
-            let data = try JSONSerialization.data(withJSONObject: payload)
-            let req = try adminRequest("/api/v1/admin/orders/" + order.id + "/status", key: key, method: "POST", body: data)
-            let (_, response) = try await URLSession.shared.data(for: req)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                message = "Không cập nhật được đơn. Kiểm tra mã giao dịch và trạng thái."; return
-            }
-            await load()
-        } catch { message = error.localizedDescription }
+            let body = try JSONEncoder().encode(payload)
+            _ = try await session.send("/api/v1/admin/orders/" + order.id + "/status",
+                                       method: "POST", data: body)
+            await refresh()
+        } catch { status = error.localizedDescription }
     }
 }
 
 private struct IPAUpdateView: View {
-    let key: String
+    @EnvironmentObject private var session: AdminSession
     @State private var name = ""
     @State private var version = ""
-    @State private var bundleID = ""
-    @State private var url = ""
-    @State private var sha256 = ""
+    @State private var bundle = ""
+    @State private var link = ""
+    @State private var hash = ""
     @State private var authorized = false
-    @State private var message = ""
+    @State private var status = ""
     var body: some View {
         Form {
-            Section("Đăng phiên bản IPA") {
+            Section("Cập nhật IPA Mod") {
                 TextField("Tên game", text: $name)
                 TextField("Phiên bản", text: $version)
-                TextField("Bundle ID", text: $bundleID)
+                TextField("Bundle ID", text: $bundle)
                     .textInputAutocapitalization(.never)
-                TextField("Đường dẫn HTTPS tải IPA", text: $url)
+                TextField("Link tải IPA HTTPS", text: $link)
                     .textInputAutocapitalization(.never).keyboardType(.URL)
-                TextField("SHA-256 của file IPA (64 ký tự)", text: $sha256)
+                TextField("SHA-256 của file IPA", text: $hash)
                     .textInputAutocapitalization(.never)
                 Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
-                Button("Đăng IPA lên ERI STORE") { Task { await upload() } }
-                    .disabled(!authorized || name.isEmpty || version.isEmpty || bundleID.isEmpty ||
-                              !url.hasPrefix("https://") || sha256.count != 64)
-                Text("Chức năng này đăng thông tin và link tải IPA, không tải trực tiếp file từ iPhone lên máy chủ.")
+                Button("Đăng IPA lên danh mục") { Task { await publish() } }
+                    .disabled(!valid)
+                if !status.isEmpty { Text(status).font(.footnote) }
+            }
+            Section {
+                Text("Ứng dụng đăng thông tin IPA qua API. File IPA cần được lưu ở đường dẫn HTTPS riêng; chưa hỗ trợ tải file trực tiếp lên máy chủ.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            if !message.isEmpty { Section { Text(message) } }
         }
         .navigationTitle("Update IPA Mod")
     }
-    @MainActor private func upload() async {
+    private var valid: Bool {
+        !name.isEmpty && !version.isEmpty && !bundle.isEmpty && authorized &&
+        link.hasPrefix("https://") && hash.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil
+    }
+    private func publish() async {
         do {
-            let payload = IPAInput(name: name, version: version, bundle_id: bundleID,
-                                   download_url: url, sha256: sha256, authorized: authorized)
-            let req = try adminRequest("/api/v1/admin/ipa", key: key, method: "POST",
-                                       body: JSONEncoder().encode(payload))
-            let (_, response) = try await URLSession.shared.data(for: req)
-            if (response as? HTTPURLResponse)?.statusCode == 201 {
-                message = "Đã thêm IPA vào danh mục ERI STORE."
-            } else { message = "Máy chủ từ chối yêu cầu. Kiểm tra khóa, URL và SHA-256." }
-        } catch {
-            message = key.count < 32 ? "Mở biểu tượng ổ khóa để nhập khóa quản trị." : error.localizedDescription
-        }
+            let item = IPAEntry(name: name, version: version, bundle_id: bundle,
+                                download_url: link, sha256: hash, authorized: true)
+            let data = try JSONEncoder().encode(item)
+            _ = try await session.send("/api/v1/admin/ipa", method: "POST", data: data)
+            status = "Đã cập nhật danh mục IPA."
+        } catch { status = "Không cập nhật được: " + error.localizedDescription }
     }
 }
