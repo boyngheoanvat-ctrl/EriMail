@@ -7,6 +7,7 @@ on:
       - 'apps/ERIAdmin/**'
       - 'apps/ERIStore/**'
       - 'apps/ERIStoreAndroid/**'
+      - 'backend/**'
       - '.github/workflows/build-two-ipa.yml'
 permissions:
   contents: read
@@ -141,9 +142,57 @@ jobs:
           path: ${{ matrix.app }}-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+  backend-check:
+    name: Validate private upload API
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check Python source
+        run: python -m py_compile backend/app.py
+      - name: Install API dependencies
+        run: pip install -r backend/requirements.txt httpx
+      - name: Verify secure admin upload and public catalog
+        working-directory: backend
+        env:
+          ERI_ADMIN_KEY: test-ci-admin-key-please-replace-1234567890
+          ERI_DB_PATH: /tmp/eri-ci.sqlite3
+          ERI_UPLOAD_DIR: /tmp/eri-ci-private-uploads
+        run: |
+          python - <<'PY'
+          import io
+          import zipfile
+          from fastapi.testclient import TestClient
+          from app import app
+          client = TestClient(app)
+          fields = {"name": "AI test item", "description": "CI validation", "price_vnd": "10000"}
+          upload = {"upload": ("example.txt", b"private-ci-test-only", "text/plain")}
+          assert client.post("/api/v1/admin/uploads/ai", data=fields, files=upload).status_code == 403
+          response = client.post("/api/v1/admin/uploads/ai", data=fields, files=upload,
+                                 headers={"X-ERI-Admin-Key": "test-ci-admin-key-please-replace-1234567890"})
+          assert response.status_code == 201, response.text
+          public = client.get("/api/v1/products")
+          assert public.status_code == 200
+          assert any(x["name"] == "AI test item" for x in public.json()["items"])
+          assert "private-ci-test-only" not in public.text
+          buffer = io.BytesIO()
+          with zipfile.ZipFile(buffer, "w") as zipped:
+              zipped.writestr("Payload/Demo.app/Info.plist", "<plist/>")
+          ipa = client.post("/api/v1/admin/uploads/ipa",
+                            data={"name": "Demo", "price_vnd": "12000", "version": "1.0",
+                                  "bundle_id": "com.eri.demo", "authorized": "true"},
+                            files={"upload": ("demo.ipa", buffer.getvalue(), "application/octet-stream")},
+                            headers={"X-ERI-Admin-Key": "test-ci-admin-key-please-replace-1234567890"})
+          assert ipa.status_code == 201, ipa.text
+          assert "download_url" not in client.get("/api/v1/mods").text
+          print("Protected uploads and public catalogs: OK")
+          PY
   package-all:
     name: Bundle all three apps
-    needs: [android, ios]
+    needs: [android, ios, backend-check]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

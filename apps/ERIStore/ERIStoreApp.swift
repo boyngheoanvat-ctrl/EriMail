@@ -5,8 +5,9 @@ struct ERIStoreApp: App {
     var body: some Scene { WindowGroup { StoreHome() } }
 }
 
+private let publicAPI = "https://eri-api-dag8.onrender.com"
+
 private struct StoreHome: View {
-    @State private var showSettings = false
     var body: some View {
         TabView {
             StoreCatalog(title: "AI Plus", endpoint: "products")
@@ -15,58 +16,6 @@ private struct StoreHome: View {
                 .tabItem { Label("Chứng chỉ", systemImage: "checkmark.seal") }
             ModCatalog()
                 .tabItem { Label("Mod Game", systemImage: "gamecontroller") }
-        }
-        .sheet(isPresented: $showSettings) { ServerSettingsView() }
-        .environment(\.openERISettings, { showSettings = true })
-    }
-}
-private struct OpenERISettingsKey: EnvironmentKey {
-    static let defaultValue: () -> Void = {}
-}
-private extension EnvironmentValues {
-    var openERISettings: () -> Void {
-        get { self[OpenERISettingsKey.self] }
-        set { self[OpenERISettingsKey.self] = newValue }
-    }
-}
-private struct ServerSettingsView: View {
-    @Environment(\.dismiss) private var dismiss
-    @AppStorage("eri_store_api") private var api = "https://eri-api-dag8.onrender.com"
-    @State private var draft = ""
-    @State private var message = ""
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Máy chủ ERI") {
-                    TextField("https://your-api.example.com", text: $draft)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    Button("Lưu địa chỉ máy chủ") {
-                        let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                        guard let url = URLComponents(string: value),
-                              url.scheme == "https", url.host != nil,
-                              url.user == nil, url.password == nil,
-                              url.path.isEmpty, url.query == nil, url.fragment == nil else {
-                            message = "Nhập URL HTTPS của máy chủ, không kèm đường dẫn."
-                            return
-                        }
-                        api = value
-                        message = "Đã lưu. Quay lại tab và nhấn Làm mới."
-                    }
-                    if !message.isEmpty { Text(message).font(.footnote) }
-                }
-                Section {
-                    Text("Ứng dụng khách chỉ sử dụng API công khai. Không nhập khóa quản trị hoặc mật khẩu MoMo tại đây.")
-                        .font(.footnote).foregroundColor(.secondary)
-                }
-            }
-            .navigationTitle("Cấu hình")
-            .toolbar { ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Xong") { dismiss() }
-            }}
-            .onAppear { draft = api }
         }
     }
 }
@@ -78,10 +27,8 @@ private struct StoreItem: Decodable, Identifiable {
 }
 private struct StoreResponse: Decodable { let items: [StoreItem] }
 private struct StoreCatalog: View {
-    @Environment(\.openERISettings) private var openSettings
     let title: String
     let endpoint: String
-    @AppStorage("eri_store_api") private var api = "https://eri-api-dag8.onrender.com"
     @State private var items: [StoreItem] = []
     @State private var checkout: CheckoutOrder?
     @State private var buying = false
@@ -102,14 +49,13 @@ private struct StoreCatalog: View {
             }.navigationTitle(title)
                 .sheet(item: $checkout) { order in OrderDetailView(order: order) }
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) { Button { openSettings() } label: { Image(systemName: "gearshape") } }
                     ToolbarItem(placement: .navigationBarTrailing) { Button("Làm mới") { Task { await load() } } }
                 }
                 .task { await load() }
         }
     }
     @MainActor private func buy(_ item: StoreItem) async {
-        guard let url = URL(string: api + "/api/v1/orders"), url.scheme == "https" else {
+        guard let url = URL(string: publicAPI + "/api/v1/orders"), url.scheme == "https" else {
             status = "Không thể kết nối máy chủ"; return
         }
         buying = true
@@ -131,7 +77,7 @@ private struct StoreCatalog: View {
         } catch { status = "Không tạo được đơn: " + error.localizedDescription }
     }
     @MainActor private func load() async {
-        guard let url = URL(string: api + "/api/v1/" + endpoint), url.scheme == "https" else {
+        guard let url = URL(string: publicAPI + "/api/v1/" + endpoint), url.scheme == "https" else {
             status = "Cần cấu hình máy chủ ERI"; return
         }
         do {
@@ -206,7 +152,6 @@ private struct ModItem: Decodable, Identifiable {
 }
 private struct ModResponse: Decodable { let items: [ModItem] }
 private struct ModCatalog: View {
-    @AppStorage("eri_store_api") private var api = "https://eri-api-dag8.onrender.com"
     @State private var items: [ModItem] = []
     @State private var status = ""
     @State private var buying = false
@@ -240,7 +185,7 @@ private struct ModCatalog: View {
         .padding(.vertical, 6)
     }
     @MainActor private func buy(_ item: ModItem) async {
-        guard let url = URL(string: api + "/api/v1/orders"), url.scheme == "https" else {
+        guard let url = URL(string: publicAPI + "/api/v1/orders"), url.scheme == "https" else {
             status = "Không thể kết nối máy chủ"; return
         }
         buying = true
@@ -260,7 +205,7 @@ private struct ModCatalog: View {
         } catch { status = error.localizedDescription }
     }
     @MainActor private func load() async {
-        guard let url = URL(string: api + "/api/v1/mods"), url.scheme == "https" else {
+        guard let url = URL(string: publicAPI + "/api/v1/mods"), url.scheme == "https" else {
             status = "Cần cấu hình máy chủ ERI"; return
         }
         do {

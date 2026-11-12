@@ -8,6 +8,7 @@ import json
 import urllib.request
 import urllib.error
 import re
+import zipfile
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,7 +45,8 @@ def init():
         CREATE TABLE IF NOT EXISTS ipa (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
           bundle_id TEXT NOT NULL, download_url TEXT NOT NULL,
-          sha256 TEXT NOT NULL, authorized INTEGER NOT NULL DEFAULT 0,\n          price_vnd INTEGER NOT NULL DEFAULT 0
+          sha256 TEXT NOT NULL, authorized INTEGER NOT NULL DEFAULT 0,
+          price_vnd INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
@@ -64,8 +66,16 @@ def init():
           id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
           source_url TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
         );
+        CREATE TABLE IF NOT EXISTS private_product_uploads (
+          id TEXT PRIMARY KEY, kind TEXT NOT NULL, product_id INTEGER NOT NULL,
+          original_name TEXT NOT NULL, storage_name TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL
+        );
         """)
-        ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}\n        if "price_vnd" not in ipa_columns:\n            db.execute("ALTER TABLE ipa ADD COLUMN price_vnd INTEGER NOT NULL DEFAULT 0")\n        columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
+        ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}
+        if "price_vnd" not in ipa_columns:
+            db.execute("ALTER TABLE ipa ADD COLUMN price_vnd INTEGER NOT NULL DEFAULT 0")
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
         for column, dtype in (("payos_order_code", "INTEGER"), ("payos_checkout_url", "TEXT")):
             if column not in columns:
                 db.execute("ALTER TABLE orders ADD COLUMN " + column + " " + dtype)
@@ -82,7 +92,8 @@ class IPA(BaseModel):
     bundle_id: str = Field(min_length=3, max_length=255)
     download_url: HttpUrl
     sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
-    authorized: bool = False\n    price_vnd: int = Field(gt=0)
+    authorized: bool = False
+    price_vnd: int = Field(gt=0)
 
 class Product(BaseModel):
     name: str = Field(min_length=1, max_length=160)
@@ -476,3 +487,108 @@ async def sign_ipa(
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
             raise
+
+
+# Files are private and only uploadable by an authenticated admin.
+# Use persistent, access-controlled storage for ERI_UPLOAD_DIR and ERI_DB_PATH in production.
+UPLOAD_LIMITS = {"ipa": 512 * 1024**2, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
+UPLOAD_SUFFIXES = {
+    "ipa": {".ipa"},
+    "certificate": {".p12", ".mobileprovision", ".zip"},
+    "ai": {".txt", ".json", ".csv", ".zip"},
+}
+UPLOAD_DIR = Path(os.getenv("ERI_UPLOAD_DIR", str(DB.parent / "eri-private-uploads")))
+
+@app.post("/api/v1/admin/uploads/{kind}", dependencies=[Depends(require_admin)], status_code=201)
+async def upload_private_product(
+    kind: str,
+    upload: UploadFile = File(...),
+    name: str = Form(...),
+    price_vnd: int = Form(...),
+    version: str = Form(""),
+    bundle_id: str = Form(""),
+    issuer: str = Form(""),
+    description: str = Form(""),
+    authorized: bool = Form(False),
+):
+    if kind not in UPLOAD_LIMITS:
+        raise HTTPException(404, "Unknown product category")
+    name, version, bundle_id, issuer, description = (
+        field.strip() for field in (name, version, bundle_id, issuer, description)
+    )
+    if not 1 <= len(name) <= 160 or not 1 <= price_vnd <= 1_000_000_000:
+        raise HTTPException(422, "Invalid name or price")
+    if len(description) > 2000:
+        raise HTTPException(422, "Description too long")
+    if kind == "ipa" and (
+        not authorized or not 1 <= len(version) <= 60 or
+        not 3 <= len(bundle_id) <= 255
+    ):
+        raise HTTPException(422, "Valid IPA version, bundle ID and distribution rights required")
+    if kind == "certificate" and not 1 <= len(issuer) <= 160:
+        raise HTTPException(422, "Certificate issuer required")
+
+    original_name = Path(upload.filename or "").name[:180]
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in UPLOAD_SUFFIXES[kind]:
+        raise HTTPException(422, "Unsupported file format")
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    storage_id = secrets.token_hex(16)
+    storage_name = storage_id + suffix
+    final_path = UPLOAD_DIR / storage_name
+    temporary_path = UPLOAD_DIR / ("." + storage_name + ".partial")
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with temporary_path.open("xb") as target:
+            os.chmod(temporary_path, 0o600)
+            while chunk := await upload.read(1024 * 1024):
+                size += len(chunk)
+                if size > UPLOAD_LIMITS[kind]:
+                    raise HTTPException(413, "File exceeds category size limit")
+                digest.update(chunk)
+                target.write(chunk)
+        if size == 0:
+            raise HTTPException(422, "Empty file")
+        if suffix in {".ipa", ".zip"}:
+            try:
+                with zipfile.ZipFile(temporary_path) as archive:
+                    if kind == "ipa" and not any(
+                        re.fullmatch(r"Payload/[^/]+\.app/Info\.plist", member.filename)
+                        for member in archive.infolist()
+                    ):
+                        raise HTTPException(422, "Not a valid IPA payload")
+            except zipfile.BadZipFile:
+                raise HTTPException(422, "Invalid ZIP or IPA file")
+        os.replace(temporary_path, final_path)
+        with connection() as db:
+            if kind == "ipa":
+                row = db.execute(
+                    "INSERT INTO ipa(name,version,bundle_id,download_url,sha256,authorized,price_vnd) "
+                    "VALUES(?,?,?,?,?,1,?)",
+                    (name, version, bundle_id, "private:" + storage_id, digest.hexdigest(), price_vnd),
+                )
+            elif kind == "certificate":
+                row = db.execute(
+                    "INSERT INTO certificates(name,issuer,description,price_vnd,active) VALUES(?,?,?,?,1)",
+                    (name, issuer, description, price_vnd),
+                )
+            else:
+                row = db.execute(
+                    "INSERT INTO products(name,description,price_vnd,active) VALUES(?,?,?,1)",
+                    (name, description, price_vnd),
+                )
+            product_id = row.lastrowid
+            db.execute(
+                "INSERT INTO private_product_uploads(id,kind,product_id,original_name,"
+                "storage_name,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (storage_id, kind, product_id, original_name, storage_name, size,
+                 digest.hexdigest(), datetime.now(timezone.utc).isoformat()),
+            )
+        return {"id": product_id, "kind": kind, "name": name, "uploaded": True}
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        final_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await upload.close()

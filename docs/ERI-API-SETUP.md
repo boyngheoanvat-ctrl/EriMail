@@ -36,3 +36,14 @@ Các endpoint admin yêu cầu header `X-ERI-Admin-Key`. Chỉ lưu giá vốn t
 ## Giới hạn hiện tại
 
 Chưa có server được triển khai, domain HTTPS, thanh toán MoMo tự động, kết nối đặt hàng Sky/MuaCert, worker tự giao, tải file IPA trực tiếp lên máy chủ hoặc pipeline build hai IPA. ERI ADMIN mới quản lý đơn; việc đánh dấu fulfilled là thao tác thủ công, không chứng minh sản phẩm đã được giao. Không bật bán hàng thực tế trước khi hoàn thiện và kiểm thử luồng thanh toán/giao hàng.
+
+
+## Cập nhật tệp trực tiếp từ ERI ADMIN
+
+- IPA Mod Game: chọn tệp .ipa, tên game, phiên bản, Bundle ID, giá vốn và xác nhận quyền phân phối.
+- Chứng chỉ: chọn tệp .p12, .mobileprovision hoặc .zip, tên, nhà phát hành và giá vốn.
+- AI Plus: chọn tệp .txt, .json, .csv hoặc .zip, tên gói, mô tả và giá vốn.
+
+Admin upload qua HTTPS đến POST /api/v1/admin/uploads/{ipa|certificate|ai} dùng X-ERI-Admin-Key. Giới hạn IPA 512 MB, chứng chỉ 15 MB, AI Plus 20 MB. Tệp gốc được lưu riêng phía server và không hiển thị trong API danh mục của Store. Chưa có chức năng tải tệp công khai hay tự giao hàng: cần triển khai quyền truy cập và giao hàng sau thanh toán riêng.
+
+LƯU Ý: Render Free hiện đặt SQLite ở /tmp/eri.sqlite3 nên database và file upload không bền vững qua lần khởi động/triển khai lại. Trước khi bán hàng, hãy cấu hình ERI_DB_PATH và ERI_UPLOAD_DIR trên bộ lưu trữ riêng bền vững (hoặc object storage), mã hóa tệp chứa khóa riêng/credential, backup, giới hạn tốc độ và kiểm soát truy cập. Không đặt khóa quản trị hay khóa thanh toán trong app Store. URL công khai của API không phải bí mật.

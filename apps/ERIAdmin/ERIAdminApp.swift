@@ -1,5 +1,6 @@
 import SwiftUI
 import Security
+import UniformTypeIdentifiers
 
 private let server = "https://eri-api-dag8.onrender.com"
 
@@ -40,16 +41,6 @@ private struct Order: Decodable, Identifiable {
     let amount_vnd: Int
     let status: String
 }
-private struct IPAEntry: Encodable {
-    let name: String
-    let version: String
-    let bundle_id: String
-    let download_url: String
-    let sha256: String
-    let authorized: Bool
-    let price_vnd: Int
-}
-
 @MainActor
 private final class AdminSession: ObservableObject {
     @Published var key = SecureKey.load()
@@ -74,6 +65,24 @@ private final class AdminSession: ObservableObject {
         }
         return body
     }
+
+    func uploadFile(kind: String, file: URL, fields: [(String, String)], maxBytes: Int) async throws {
+        var req = try request("/api/v1/admin/uploads/" + kind, method: "POST")
+        let boundary = "ERI-" + UUID().uuidString
+        req.setValue("multipart/form-data; boundary=" + boundary, forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 600
+        let multipart = try await Task.detached(priority: .userInitiated) {
+            try MultipartBuilder.make(source: file, boundary: boundary, fields: fields, maxBytes: maxBytes)
+        }.value
+        defer { try? FileManager.default.removeItem(at: multipart) }
+        let (_, response) = try await URLSession.shared.upload(for: req, fromFile: multipart)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(status) else {
+            if status == 401 || status == 403 { throw AdminError.invalidKey }
+            throw AdminError.http(status)
+        }
+    }
+
     func activate(_ candidate: String) async {
         let old = key
         key = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -105,14 +114,27 @@ private struct AdminHome: View {
     var body: some View {
         NavigationStack {
             List {
-                NavigationLink { OrdersView(kind: "ai").environmentObject(session) } label: {
-                    Label("Giao hàng AI", systemImage: "sparkles")
+                Section("Nhập tệp để cập nhật sản phẩm") {
+                    NavigationLink {
+                        AdminUploadView(kind: .ipa).environmentObject(session)
+                    } label: { Label("IPA Mod Game", systemImage: "square.and.arrow.up") }
+                    NavigationLink {
+                        AdminUploadView(kind: .certificate).environmentObject(session)
+                    } label: { Label("Chứng chỉ", systemImage: "checkmark.seal") }
+                    NavigationLink {
+                        AdminUploadView(kind: .ai).environmentObject(session)
+                    } label: { Label("AI Plus", systemImage: "sparkles") }
                 }
-                NavigationLink { IPAUpdateView().environmentObject(session) } label: {
-                    Label("Update IPA Mod", systemImage: "square.and.arrow.up")
-                }
-                NavigationLink { OrdersView(kind: "certificate").environmentObject(session) } label: {
-                    Label("Giao hàng chứng chỉ", systemImage: "checkmark.seal")
+                Section("Xử lý đơn hàng") {
+                    NavigationLink { OrdersView(kind: "mod").environmentObject(session) } label: {
+                        Label("Đơn Mod Game", systemImage: "gamecontroller")
+                    }
+                    NavigationLink { OrdersView(kind: "certificate").environmentObject(session) } label: {
+                        Label("Đơn chứng chỉ", systemImage: "doc.text")
+                    }
+                    NavigationLink { OrdersView(kind: "ai").environmentObject(session) } label: {
+                        Label("Đơn AI Plus", systemImage: "cart")
+                    }
                 }
             }
             .navigationTitle("ERI ADMIN")
@@ -222,52 +244,178 @@ private struct OrdersView: View {
     }
 }
 
-private struct IPAUpdateView: View {
+private enum UploadKind: String {
+    case ipa, certificate, ai
+    var title: String {
+        switch self {
+        case .ipa: return "Cập nhật IPA Mod Game"
+        case .certificate: return "Cập nhật chứng chỉ"
+        case .ai: return "Cập nhật AI Plus"
+        }
+    }
+    var accepted: [String] {
+        switch self {
+        case .ipa: return ["ipa"]
+        case .certificate: return ["p12", "mobileprovision", "zip"]
+        case .ai: return ["txt", "json", "csv", "zip"]
+        }
+    }
+    var maxBytes: Int {
+        switch self {
+        case .ipa: return 512 * 1_048_576
+        case .certificate: return 15 * 1_048_576
+        case .ai: return 20 * 1_048_576
+        }
+    }
+}
+
+private enum MultipartBuilder {
+    static func make(source: URL, boundary: String, fields: [(String, String)], maxBytes: Int) throws -> URL {
+        let permission = source.startAccessingSecurityScopedResource()
+        defer { if permission { source.stopAccessingSecurityScopedResource() } }
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".multipart")
+        guard FileManager.default.createFile(atPath: output.path, contents: nil) else {
+            throw URLError(.cannotCreateFile)
+        }
+        do {
+            let writer = try FileHandle(forWritingTo: output)
+            defer { try? writer.close() }
+            func append(_ value: String) throws { try writer.write(contentsOf: Data(value.utf8)) }
+            for (name, value) in fields {
+                try append("--" + boundary + "\r\n")
+                try append("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n")
+                try append(value + "\r\n")
+            }
+            let filename = source.lastPathComponent
+                .replacingOccurrences(of: "\"", with: "")
+                .replacingOccurrences(of: "\r", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+            try append("--" + boundary + "\r\n")
+            try append("Content-Disposition: form-data; name=\"upload\"; filename=\"" + filename + "\"\r\n")
+            try append("Content-Type: application/octet-stream\r\n\r\n")
+            let reader = try FileHandle(forReadingFrom: source)
+            defer { try? reader.close() }
+            var total = 0
+            while let chunk = try reader.read(upToCount: 1_048_576), !chunk.isEmpty {
+                total += chunk.count
+                guard total <= maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
+                try writer.write(contentsOf: chunk)
+            }
+            guard total > 0 else { throw URLError(.zeroByteResource) }
+            try append("\r\n--" + boundary + "--\r\n")
+            return output
+        } catch {
+            try? FileManager.default.removeItem(at: output)
+            throw error
+        }
+    }
+}
+
+private struct AdminUploadView: View {
     @EnvironmentObject private var session: AdminSession
+    let kind: UploadKind
     @State private var name = ""
     @State private var version = ""
-    @State private var bundle = ""
-    @State private var link = ""
-    @State private var hash = ""
-    @State private var authorized = false
+    @State private var bundleID = ""
+    @State private var issuer = ""
+    @State private var description = ""
     @State private var price = ""
+    @State private var authorized = false
+    @State private var selectedFile: URL?
+    @State private var showImporter = false
+    @State private var working = false
     @State private var status = ""
+
     var body: some View {
         Form {
-            Section("Cập nhật IPA Mod") {
-                TextField("Tên game", text: $name)
-                TextField("Phiên bản", text: $version)
-                TextField("Bundle ID", text: $bundle)
-                    .textInputAutocapitalization(.never)
-                TextField("Link tải IPA HTTPS", text: $link)
-                    .textInputAutocapitalization(.never).keyboardType(.URL)
-                TextField("SHA-256 của file IPA", text: $hash)
-                    .textInputAutocapitalization(.never)
+            Section("Thông tin sản phẩm") {
+                TextField("Tên sản phẩm", text: $name)
+                if kind == .ipa {
+                    TextField("Phiên bản IPA", text: $version)
+                    TextField("Bundle ID", text: $bundleID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
+                } else {
+                    if kind == .certificate {
+                        TextField("Nhà phát hành chứng chỉ", text: $issuer)
+                    }
+                    TextField("Mô tả", text: $description, axis: .vertical)
+                        .lineLimit(2...4)
+                }
                 TextField("Giá vốn (VND)", text: $price)
                     .keyboardType(.numberPad)
-                Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
-                Button("Đăng IPA lên danh mục") { Task { await publish() } }
-                    .disabled(!valid)
+            }
+            Section("Nhập tệp từ ứng dụng Tệp") {
+                Button("Chọn tệp") { showImporter = true }
+                    .disabled(working)
+                if let file = selectedFile { Text(file.lastPathComponent).font(.footnote) }
+                Text("Định dạng: " + kind.accepted.map { "." + $0 }.joined(separator: ", "))
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button(working ? "Đang tải tệp..." : "Cập nhật lên máy chủ") {
+                    Task { await publish() }
+                }
+                .disabled(!valid || working)
                 if !status.isEmpty { Text(status).font(.footnote) }
             }
             Section {
-                Text("Ứng dụng đăng thông tin IPA qua API. File IPA cần được lưu ở đường dẫn HTTPS riêng; chưa hỗ trợ tải file trực tiếp lên máy chủ.")
+                Text("Chỉ Admin được gửi tệp qua HTTPS. Tệp lưu riêng trên máy chủ; ứng dụng Store chỉ nhận tên và giá bán, không nhận tệp gốc hay khóa quản trị.")
                     .font(.footnote).foregroundStyle(.secondary)
+                if kind == .certificate {
+                    Text("Tệp .p12 có thể chứa khóa riêng. Chỉ sử dụng máy chủ do bạn kiểm soát, có lưu trữ an toàn và sao lưu.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
         }
-        .navigationTitle("Update IPA Mod")
+        .navigationTitle(kind.title)
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                guard let file = urls.first else { return }
+                guard kind.accepted.contains(file.pathExtension.lowercased()) else {
+                    selectedFile = nil
+                    status = "Định dạng tệp không phù hợp."
+                    return
+                }
+                selectedFile = file
+                if name.isEmpty { name = file.deletingPathExtension().lastPathComponent }
+                status = ""
+            case .failure(let error):
+                status = "Không chọn được tệp: " + error.localizedDescription
+            }
+        }
     }
+
     private var valid: Bool {
-        !name.isEmpty && !version.isEmpty && !bundle.isEmpty && authorized && (Int(price) ?? 0) > 0 &&
-        link.hasPrefix("https://") && hash.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil
+        guard session.authenticated, selectedFile != nil,
+              !name.trimmingCharacters(in: .whitespaces).isEmpty,
+              let amount = Int(price), amount > 0 else { return false }
+        switch kind {
+        case .ipa: return !version.isEmpty && bundleID.count >= 3 && authorized
+        case .certificate: return !issuer.isEmpty
+        case .ai: return true
+        }
     }
     private func publish() async {
+        guard let file = selectedFile else { return }
+        working = true
+        defer { working = false }
+        let fields: [(String, String)] = [
+            ("name", name.trimmingCharacters(in: .whitespacesAndNewlines)),
+            ("price_vnd", price),
+            ("version", version),
+            ("bundle_id", bundleID),
+            ("issuer", issuer),
+            ("description", description),
+            ("authorized", authorized ? "true" : "false")
+        ]
         do {
-            let item = IPAEntry(name: name, version: version, bundle_id: bundle,
-                                download_url: link, sha256: hash, authorized: true, price_vnd: Int(price) ?? 0)
-            let data = try JSONEncoder().encode(item)
-            _ = try await session.send("/api/v1/admin/ipa", method: "POST", data: data)
-            status = "Đã cập nhật danh mục IPA."
-        } catch { status = "Không cập nhật được: " + error.localizedDescription }
+            try await session.uploadFile(kind: kind.rawValue, file: file,
+                                         fields: fields, maxBytes: kind.maxBytes)
+            status = "Đã tải tệp và cập nhật sản phẩm thành công."
+            selectedFile = nil
+        } catch {
+            status = "Cập nhật thất bại: " + error.localizedDescription
+        }
     }
 }
