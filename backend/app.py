@@ -349,6 +349,7 @@ async def payos_webhook(request: Request):
 
 class OrderStatusUpdate(BaseModel):
     status: str = Field(pattern="^(paid|cancelled|fulfilled)$")
+    transaction_reference: str | None = Field(default=None, min_length=6, max_length=128)
 
 @app.post("/api/v1/admin/orders/{order_id}/status", dependencies=[Depends(require_admin)])
 def update_order_status(order_id: str, item: OrderStatusUpdate):
@@ -359,6 +360,14 @@ def update_order_status(order_id: str, item: OrderStatusUpdate):
         allowed = {"pending": {"paid", "cancelled"}, "paid": {"fulfilled"}, "cancelled": set(), "fulfilled": set()}
         if item.status not in allowed[old["status"]]:
             raise HTTPException(409, "Invalid order status transition")
+        if item.status == "paid":
+            if not item.transaction_reference or not re.fullmatch(r"[A-Za-z0-9_\\-]{6,128}", item.transaction_reference):
+                raise HTTPException(422, "MoMo transaction reference required to confirm payment")
+            db.execute("CREATE TABLE IF NOT EXISTS manual_payment_receipts (transaction_reference TEXT PRIMARY KEY, order_id TEXT NOT NULL)")
+            try:
+                db.execute("INSERT INTO manual_payment_receipts(transaction_reference,order_id) VALUES(?,?)", (item.transaction_reference,order_id))
+            except sqlite3.IntegrityError:
+                raise HTTPException(409, "MoMo transaction reference already used")
         db.execute("UPDATE orders SET status=? WHERE id=?", (item.status,order_id))
     return {"id": order_id, "status": item.status}
 
