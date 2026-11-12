@@ -158,8 +158,6 @@ struct IPACatalogEntry: Decodable, Identifiable {
     let authorizedForDistribution: Bool
 }
 struct StoreIPAView: View {
-    @State private var showF4 = false
-    @State private var confirmF4 = false
     @State private var link = ""
     @State private var appName = ""
     @State private var appID = ""
@@ -173,12 +171,7 @@ struct StoreIPAView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Kho F4TEAM · ERI NGUYỄN") {
-                    Button("Mở toàn bộ kho IPA F4TEAM") { confirmF4 = true }
-                    Text("Tìm App Store, chọn phiên bản và truy cập kho IPA của F4TEAM. Dịch vụ do F4TEAM vận hành; việc tải và giải mã phụ thuộc máy chủ của họ.")
-                        .font(.footnote).foregroundColor(.secondary)
-                }
-                Section("Tìm App Store (kho ERI dự phòng)") {
+                Section("Tìm App Store") {
                     TextField("https://apps.apple.com/.../id123456", text: $link).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Tìm ứng dụng và kiểm tra kho") { Task { await lookup() } }.disabled(busy)
                     if !appName.isEmpty {
@@ -186,7 +179,7 @@ struct StoreIPAView: View {
                         Text("App Store ID: " + appID)
                     }
                 }
-                Section("Kho IPA riêng (dự phòng)") {
+                Section("Kho IPA ERI NGUYỄN") {
                     if matches.isEmpty {
                         Text(appID.isEmpty ? "Nhập link để kiểm tra kho." : "Chưa có IPA được phép phân phối trong kho cho ứng dụng này.")
                             .foregroundColor(.secondary)
@@ -218,22 +211,6 @@ struct StoreIPAView: View {
                 }
             }
             .navigationTitle("ERI NGUYỄN · Xuất IPA")
-            .confirmationDialog("Mở dịch vụ F4TEAM?", isPresented: $confirmF4, titleVisibility: .visible) {
-                Button("Tiếp tục") { showF4 = true }
-                Button("Hủy", role: .cancel) {}
-            } message: {
-                Text("Bạn sẽ truy cập dịch vụ bên thứ ba. Chỉ tải và sử dụng IPA khi bạn có quyền hợp lệ.")
-            }
-            .sheet(isPresented: $showF4) {
-                NavigationView {
-                    F4IPAWebView()
-                        .navigationTitle("ERI NGUYỄN · Xuất IPA")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) { Button("Đóng") { showF4 = false } }
-                        }
-                }
-            }
             .task { await loadCatalog() }
             .sheet(isPresented: $share) { if let imported { ShareSheet(items: [imported]) } }
         }
