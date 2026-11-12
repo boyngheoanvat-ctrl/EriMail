@@ -157,6 +157,8 @@ struct IPACatalogEntry: Decodable, Identifiable {
     let authorizedForDistribution: Bool
 }
 struct StoreIPAView: View {
+    @State private var showF4 = false
+    @State private var confirmF4 = false
     @State private var link = ""
     @State private var appName = ""
     @State private var appID = ""
@@ -171,6 +173,11 @@ struct StoreIPAView: View {
     var body: some View {
         NavigationView {
             Form {
+                Section("Xuất IPA · ERI NGUYỄN") {
+                    Button("Mở F4TEAM Decrypt / Kho IPA") { confirmF4 = true }
+                    Text("Tìm App Store, chọn phiên bản và truy cập kho IPA của F4TEAM. Dịch vụ do F4TEAM vận hành; việc tải và giải mã phụ thuộc máy chủ của họ.")
+                        .font(.footnote).foregroundColor(.secondary)
+                }
                 Section("Tìm App Store") {
                     TextField("https://apps.apple.com/.../id123456", text: $link).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Tìm ứng dụng và kiểm tra kho") { Task { await lookup() } }.disabled(busy)
@@ -205,7 +212,23 @@ struct StoreIPAView: View {
                     Text(message).font(.footnote)
                 }
             }
-            .navigationTitle("Kho IPA")
+            .navigationTitle("ERI NGUYỄN · Xuất IPA")
+            .confirmationDialog("Mở dịch vụ F4TEAM?", isPresented: $confirmF4, titleVisibility: .visible) {
+                Button("Tiếp tục") { showF4 = true }
+                Button("Hủy", role: .cancel) {}
+            } message: {
+                Text("Bạn sẽ truy cập dịch vụ bên thứ ba. Chỉ tải và sử dụng IPA khi bạn có quyền hợp lệ.")
+            }
+            .sheet(isPresented: $showF4) {
+                NavigationView {
+                    F4IPAWebView()
+                        .navigationTitle("ERI NGUYỄN · Xuất IPA")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) { Button("Đóng") { showF4 = false } }
+                        }
+                }
+            }
             .task { await loadCatalog() }
             .fileImporter(isPresented: $pick, allowedContentTypes: [.data, .archive], allowsMultipleSelection: false) { result in
                 do {
@@ -433,4 +456,13 @@ struct ShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+struct F4IPAWebView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.load(URLRequest(url: URL(string: "https://160-191-242-70.sslip.io")!))
+        return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {}
 }
