@@ -240,3 +240,87 @@ def admin_orders():
 # Private signing API (requires a macOS worker and ERI_SIGNING_KEY).
 from signing_api import router as signing_router
 app.include_router(signing_router)
+
+
+# Private macOS signing service. Deploy this API on a macOS host with Apple codesign.
+# Never expose this route without a strong per-client token and HTTPS termination.
+import asyncio
+import tempfile
+import shutil
+import sys
+from fastapi import File, Form, UploadFile
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+
+SIGN_TOKEN = os.getenv("ERI_SIGN_TOKEN", "")
+SIGN_WORKER = Path(os.getenv("ERI_SIGN_WORKER", str(Path(__file__).resolve().parent.parent / "signing-worker" / "sign_worker.py")))
+SIGN_MAX_IPA = int(os.getenv("ERI_SIGN_MAX_IPA_BYTES", str(2 * 1024**3)))
+SIGN_MAX_CERT = 5 * 1024**2
+_sign_lock = asyncio.Lock()
+
+async def _save_limited(upload: UploadFile, target: Path, limit: int):
+    size = 0
+    with target.open("wb") as dest:
+        while chunk := await upload.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                raise HTTPException(413, "Uploaded file exceeds signing size limit")
+            dest.write(chunk)
+
+@app.post("/api/v1/sign")
+async def sign_ipa(
+    ipa: UploadFile = File(...),
+    p12: UploadFile = File(...),
+    mobileprovision: UploadFile = File(...),
+    password: str = Form(...),
+    identifier: str = Form(""),
+    name: str = Form(""),
+    remove_embedded: bool = Form(False),
+    x_eri_sign_token: str | None = Header(default=None),
+):
+    if not SIGN_TOKEN or not secrets.compare_digest(x_eri_sign_token or "", SIGN_TOKEN):
+        raise HTTPException(403, "Signing access denied")
+    if sys.platform != "darwin" or not SIGN_WORKER.is_file():
+        raise HTTPException(503, "ERI macOS signing worker is not available")
+    if len(password) > 1024 or len(identifier) > 255 or len(name) > 160:
+        raise HTTPException(422, "Invalid signing fields")
+    # Bundle rewriting requires separate binary-safe implementation; never silently ignore it.
+    if identifier.strip() or name.strip():
+        raise HTTPException(422, "Bundle ID and app name changes are not yet supported")
+    if not (ipa.filename or "").lower().endswith(".ipa") or not (p12.filename or "").lower().endswith(".p12") or not (mobileprovision.filename or "").lower().endswith(".mobileprovision"):
+        raise HTTPException(422, "Expected .ipa, .p12 and .mobileprovision")
+    if _sign_lock.locked():
+        raise HTTPException(429, "Signing worker is busy; retry later")
+    async with _sign_lock:
+        tmp = Path(tempfile.mkdtemp(prefix="eri-api-sign-"))
+        try:
+            ipa_path, p12_path, profile_path = (tmp / "input.ipa", tmp / "cert.p12", tmp / "profile.mobileprovision")
+            await _save_limited(ipa, ipa_path, SIGN_MAX_IPA)
+            await _save_limited(p12, p12_path, SIGN_MAX_CERT)
+            await _save_limited(mobileprovision, profile_path, SIGN_MAX_CERT)
+            output = tmp / "signed.ipa"
+            env = os.environ.copy()
+            env["ERI_P12_PASSWORD"] = password
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(SIGN_WORKER), str(ipa_path), str(p12_path),
+                str(profile_path), str(output),
+                env=env, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+            try:
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                raise HTTPException(504, "Signing timed out")
+            finally:
+                env.pop("ERI_P12_PASSWORD", None)
+            if proc.returncode != 0 or not output.is_file():
+                # Do not echo stderr: Apple tools can include sensitive file paths.
+                raise HTTPException(422, "Signing failed; check certificate, profile and IPA compatibility")
+            return FileResponse(
+                str(output), media_type="application/octet-stream",
+                filename="ERI-signed.ipa",
+                background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
+                headers={"Cache-Control": "no-store"})
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
