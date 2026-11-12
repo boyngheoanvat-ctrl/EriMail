@@ -339,36 +339,117 @@ struct StoreOffersView: View {
     }
 }
 
+struct EriInstallCatalog: Decodable {
+    let esign: [EriInstallItem]
+    let ksign: [EriInstallItem]
+}
+struct EriInstallItem: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let certificate: String
+    let manifestURL: URL
+    let status: String
+}
 struct InstallToolsView: View {
     @State private var tool = "ESign"
-    @State private var manifest = ""
-    @State private var message = ""
+    @State private var catalog = EriInstallCatalog(esign: [], ksign: [])
+    @State private var message = "Đang chờ danh mục cài đặt riêng."
+    @State private var busy = false
+    private let source = URL(string: "https://raw.githubusercontent.com/boyngheoanvat-ctrl/EriMail/main/ipa-catalog/install-tools.json")!
+    private var items: [EriInstallItem] { tool == "ESign" ? catalog.esign : catalog.ksign }
     var body: some View {
         NavigationView {
-            Form {
-                Section("Chọn công cụ") {
-                    Picker("Ứng dụng", selection: $tool) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("ERI NGUYỄN").font(.system(size: 27, weight: .black, design: .rounded))
+                            .foregroundColor(.purple)
+                        Text("CÀI ĐẶT ESIGN & KSIGN").font(.headline)
+                        Text("Chọn phiên bản đã ký hợp lệ để gửi yêu cầu cài đặt tới iOS.")
+                            .font(.subheadline).foregroundColor(.secondary)
+                    }
+                    .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(UIColor.secondarySystemGroupedBackground))
+                    .cornerRadius(22)
+                    Picker("Công cụ", selection: $tool) {
                         Text("ESign").tag("ESign")
                         Text("KSign").tag("KSign")
-                    }.pickerStyle(.segmented)
-                    Text("Chỉ cài bằng manifest OTA HTTPS của gói được ký và phân phối hợp lệ. Không có đường cài đặt mặc định đáng tin cậy được tích hợp.")
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 35)
+                    if items.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "tray").font(.largeTitle).foregroundColor(.purple)
+                            Text("Chưa có phiên bản " + tool).font(.headline)
+                            Text("Danh mục riêng chưa có manifest được xác minh. Không hiển thị liên kết cài đặt giả.")
+                                .font(.footnote).foregroundColor(.secondary).multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(24)
+                        .background(Color(UIColor.secondarySystemGroupedBackground)).cornerRadius(22)
+                    }
+                    ForEach(items) { item in
+                        HStack(spacing: 14) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 15).fill(Color.blue)
+                                Text(tool == "ESign" ? "E" : "K")
+                                    .font(.system(size: 32, weight: .bold, design: .rounded)).foregroundColor(.white)
+                            }.frame(width: 62, height: 62)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(item.name).font(.headline)
+                                Text(item.certificate).font(.subheadline).foregroundColor(.secondary)
+                            }
+                            Spacer(minLength: 4)
+                            Button("CÀI ĐẶT") { install(item) }
+                                .font(.system(size: 12, weight: .bold))
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                                .background(Color.purple.opacity(0.12)).foregroundColor(.purple)
+                                .clipShape(Capsule())
+                                .disabled(item.status != "available")
+                        }
+                        .padding(15)
+                        .background(Color(UIColor.secondarySystemGroupedBackground))
+                        .cornerRadius(22)
+                    }
+                    Button(busy ? "Đang cập nhật..." : "Làm mới danh sách") {
+                        Task { await load() }
+                    }.disabled(busy)
+                    .frame(maxWidth: .infinity)
+                    Text(message).font(.footnote).foregroundColor(.secondary)
+                    Text("iOS chỉ cho phép cài ứng dụng được ký và phân phối hợp lệ. Yêu cầu cài đặt không bảo đảm cài thành công.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
-                Section("Cài trực tiếp") {
-                    TextField("https://.../manifest.plist", text: $manifest).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Cài " + tool) {
-                        guard let url = URL(string: manifest), url.scheme == "https", url.pathExtension.lowercased() == "plist" else {
-                            message = "Cần URL HTTPS đến manifest.plist hợp lệ."; return
-                        }
-                        guard let encoded = manifest.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                              let installURL = URL(string: "itms-services://?action=download-manifest&url=" + encoded) else { return }
-                        UIApplication.shared.open(installURL) { success in
-                            message = success ? "Đã gửi yêu cầu cài đặt cho iOS; chưa xác nhận cài thành công." : "iOS không mở được yêu cầu cài đặt."
-                        }
-                    }
-                    Text(message).font(.footnote)
-                }
-            }.navigationTitle("ESign / KSign")
+                .padding()
+            }
+            .background(Color(UIColor.systemGroupedBackground))
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("ERI NGUYỄN")
+            .task { await load() }
+        }
+    }
+    @MainActor private func load() async {
+        busy = true; defer { busy = false }
+        do {
+            var request = URLRequest(url: source)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+            let decoded = try JSONDecoder().decode(EriInstallCatalog.self, from: data)
+            catalog = EriInstallCatalog(
+                esign: decoded.esign.filter { $0.manifestURL.scheme == "https" },
+                ksign: decoded.ksign.filter { $0.manifestURL.scheme == "https" }
+            )
+            message = "Đã cập nhật " + String(catalog.esign.count + catalog.ksign.count) + " phiên bản."
+        } catch { message = "Không cập nhật được danh sách: " + error.localizedDescription }
+    }
+    private func install(_ item: EriInstallItem) {
+        guard item.status == "available", item.manifestURL.scheme == "https",
+              let encoded = item.manifestURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "itms-services://?action=download-manifest&url=" + encoded) else {
+            message = "Manifest không hợp lệ hoặc phiên bản chưa sẵn sàng."
+            return
+        }
+        UIApplication.shared.open(url) { success in
+            message = success ? "Đã gửi yêu cầu cài đặt tới iOS, chưa xác nhận cài thành công." : "iOS từ chối mở yêu cầu cài đặt."
         }
     }
 }
