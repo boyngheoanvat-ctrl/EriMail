@@ -292,6 +292,8 @@ struct SignIPAView: View {
     @State private var importing: ImportKind?
     @State private var showImporter = false
     @State private var ipaURL: URL?
+    @State private var ipaLink = ""
+    @State private var showAdvanced = false
     @State private var p12URL: URL?
     @State private var profileURL: URL?
     @State private var p12Password = ""
@@ -329,12 +331,14 @@ struct SignIPAView: View {
         NavigationView {
             Form {
                 Section("Tệp ứng dụng") {
-                    fileRow("Chọn file .ipa", kind: .ipa, url: ipaURL)
+                    TextField("Dán link HTTPS tải IPA", text: $ipaLink)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    fileRow("Hoặc chọn file .ipa", kind: .ipa, url: ipaURL)
                 }
                 Section("Chứng chỉ ký") {
                     fileRow("Chọn file .p12", kind: .p12, url: p12URL)
                     SecureField("Mật khẩu .p12", text: $p12Password)
-                    SecureField("ERI_SIGN_TOKEN (máy chủ riêng)", text: $signToken)
                     fileRow("Chọn file .mobileprovision", kind: .mobileprovision, url: profileURL)
                 }
                 Section("Tùy chọn") {
@@ -342,6 +346,12 @@ struct SignIPAView: View {
                     TextField("Bundle ID mới (tùy chọn)", text: $newBundleID)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("Tên ứng dụng mới (tùy chọn)", text: $newBundleName)
+                }
+                Section("Kết nối ký ERI") {
+                    DisclosureGroup("Cấu hình kết nối (chỉ cần thiết lập một lần)", isExpanded: $showAdvanced) {
+                        SecureField("Mã truy cập dịch vụ ký", text: $signToken)
+                        Text("Dịch vụ ký phải được kích hoạt trước.").font(.caption).foregroundColor(.secondary)
+                    }
                 }
                 Section {
                     Button {
@@ -361,7 +371,7 @@ struct SignIPAView: View {
                     }
                 }
                 Section {
-                    Text("Chỉ gửi P12, mật khẩu và provisioning profile đến backend ERI HTTPS do bạn kiểm soát. Không dùng máy chủ bên thứ ba. Máy chủ macOS cần cấu hình ERI_SIGNING_KEY và ERI_PUBLIC_BASE_URL. Các tùy chọn đổi Bundle ID/tên ứng dụng chưa được worker hỗ trợ.")
+                    Text("Tệp P12 và mật khẩu chỉ được gửi đến dịch vụ ký ERI HTTPS khi bạn bấm Ký IPA. Chức năng chỉ hoạt động sau khi dịch vụ được cấu hình. Đổi Bundle ID/tên ứng dụng chưa được hỗ trợ.")
                         .font(.caption).foregroundColor(.secondary)
                 }
             }
@@ -399,8 +409,8 @@ struct SignIPAView: View {
     }
 
     @MainActor private func sign() async {
-        guard let ipaURL, let p12URL, let profileURL, !p12Password.isEmpty, !signToken.isEmpty else {
-            message = "Cần chọn IPA, P12, mobileprovision, mật khẩu P12 và ERI_SIGN_TOKEN."
+        guard let p12URL, let profileURL, !p12Password.isEmpty, !signToken.isEmpty else {
+            message = "Cần P12, mobileprovision, mật khẩu và dịch vụ ký đã cấu hình."
             return
         }
         guard let base = ERIAPI.configuredBase(),
@@ -413,6 +423,24 @@ struct SignIPAView: View {
         signedURL = nil
         defer { busy = false }
         do {
+            let signingIPA: URL
+            if !ipaLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                guard let remote = URL(string: ipaLink.trimmingCharacters(in: .whitespacesAndNewlines)), remote.scheme == "https" else {
+                    throw NSError(domain: "ERI", code: 4, userInfo: [NSLocalizedDescriptionKey: "Link IPA phải bắt đầu bằng https://"])
+                }
+                let (downloaded, response) = try await URLSession.shared.download(from: remote)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw NSError(domain: "ERI", code: 5, userInfo: [NSLocalizedDescriptionKey: "Không tải được IPA từ liên kết."])
+                }
+                let saved = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+                try FileManager.default.moveItem(at: downloaded, to: saved)
+                signingIPA = saved
+            } else if let ipaURL {
+                signingIPA = ipaURL
+            } else {
+                throw NSError(domain: "ERI", code: 6, userInfo: [NSLocalizedDescriptionKey: "Dán link IPA hoặc chọn tệp IPA."])
+            }
+            defer { if signingIPA != ipaURL { try? FileManager.default.removeItem(at: signingIPA) } }
             let boundary = "ERI-" + UUID().uuidString
             let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".multipart")
             FileManager.default.createFile(atPath: temporary.path, contents: nil)
@@ -438,7 +466,7 @@ struct SignIPAView: View {
             try field("identifier", newBundleID)
             try field("name", newBundleName)
             try field("remove_embedded", removeEmbeddedProfile ? "true" : "false")
-            try attachment("ipa", ipaURL, "application/octet-stream")
+            try attachment("ipa", signingIPA, "application/octet-stream")
             try attachment("p12", p12URL, "application/x-pkcs12")
             try attachment("mobileprovision", profileURL, "application/octet-stream")
             try write("--\(boundary)--\r\n")
