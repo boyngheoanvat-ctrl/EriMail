@@ -347,6 +347,7 @@ struct InstallToolsView: View {
                             Text("Đơn vị phát hành: " + item.issuer).font(.caption)
                             Text(item.description)
                             Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
+                            ERIBuyButton(kind: "certificate", productID: item.id)
                         }
                     }
                     Text("Chưa tích hợp đặt hàng, thanh toán hoặc cấp chứng chỉ. Chỉ đăng bán chứng chỉ có quyền phân phối; chứng chỉ của Khoindvn phải ghi đúng nguồn và có thỏa thuận bán lại.")
@@ -424,6 +425,7 @@ struct AIPlusStoreView: View {
                             Text(item.description)
                             Text(item.price_vnd.formatted(.currency(code: "VND")))
                                 .fontWeight(.semibold)
+                            ERIBuyButton(kind: "ai", productID: item.id)
                         }
                     }
                     Text("Chưa tích hợp thanh toán hoặc giao hàng. Không thu tiền khi chưa có hệ thống đơn hàng.")
@@ -473,5 +475,104 @@ enum ERIAPI {
             throw NSError(domain: "ERI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Máy chủ ERI không phản hồi thành công."])
         }
         return try JSONDecoder().decode(ERIList<T>.self, from: data).items
+    }
+}
+
+struct ERIOrder: Decodable, Identifiable {
+    let id: String
+    let kind: String
+    let product_name: String
+    let amount_vnd: Int
+    let status: String
+    let qr_url: String?
+    let bank_account: String?
+    let bank_name: String?
+    let transfer_note: String?
+}
+
+struct ERIBuyButton: View {
+    let kind: String
+    let productID: Int
+    @State private var order: ERIOrder?
+    @State private var errorMessage = ""
+    @State private var busy = false
+    @State private var showOrder = false
+    var body: some View {
+        Button(busy ? "Đang tạo đơn..." : "Mua ngay · QR ngân hàng") {
+            Task { await create() }
+        }.disabled(busy)
+        if !errorMessage.isEmpty { Text(errorMessage).font(.footnote).foregroundColor(.secondary) }
+        .sheet(isPresented: $showOrder) {
+            NavigationView {
+                Form {
+                    if let order {
+                        Section("Đơn hàng " + order.id) {
+                            Text(order.product_name).font(.headline)
+                            Text(order.amount_vnd.formatted(.currency(code: "VND")))
+                            Text("Trạng thái: " + order.status)
+                            if let bank = order.bank_name { Text("Ngân hàng: " + bank) }
+                            if let account = order.bank_account { Text("Số tài khoản: " + account) }
+                            if let note = order.transfer_note {
+                                Text("Nội dung: " + note)
+                                Button("Sao chép nội dung") { UIPasteboard.general.string = note }
+                            }
+                            if let raw = order.qr_url, let url = URL(string: raw) {
+                                AsyncImage(url: url) { image in image.resizable().scaledToFit() }
+                                placeholder: { ProgressView() }
+                                .frame(maxHeight: 320)
+                            }
+                            Text("Chuyển đúng số tiền và nội dung. Đơn chỉ được xác nhận khi người bán kiểm tra tiền thực nhận; QR không tự xác minh giao dịch.")
+                                .font(.footnote).foregroundColor(.secondary)
+                            Button("Kiểm tra trạng thái") { Task { await refresh() } }
+                        }
+                    }
+                }
+                .navigationTitle("Thanh toán ERI")
+                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Đóng") { showOrder = false } } }
+            }
+        }
+    }
+    @MainActor private func create() async {
+        busy = true
+        defer { busy = false }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["kind": kind, "product_id": productID])
+            order = try await ERIAPI.createOrder(body)
+            errorMessage = ""
+            showOrder = true
+        } catch { errorMessage = error.localizedDescription }
+    }
+    @MainActor private func refresh() async {
+        guard let id = order?.id else { return }
+        do { order = try await ERIAPI.fetchOrder(id) }
+        catch { errorMessage = error.localizedDescription }
+    }
+}
+
+extension ERIAPI {
+    static func baseURL() throws -> URL {
+        guard let base = Bundle.main.object(forInfoDictionaryKey: "ERI_API_BASE_URL") as? String,
+              let url = URL(string: base), url.scheme == "https" else {
+            throw NSError(domain: "ERI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Chưa cấu hình ERI_API_BASE_URL HTTPS."])
+        }
+        return url
+    }
+    static func createOrder(_ data: Data) async throws -> ERIOrder {
+        let base = try baseURL()
+        var req = URLRequest(url: base.appendingPathComponent("api/v1/orders"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        let (responseData, response) = try await URLSession.shared.data(for: req)
+        guard (response as? HTTPURLResponse)?.statusCode == 201 else {
+            throw NSError(domain: "ERI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Không tạo được đơn hàng. Kiểm tra backend và ngân hàng."])
+        }
+        return try JSONDecoder().decode(ERIOrder.self, from: responseData)
+    }
+    static func fetchOrder(_ id: String) async throws -> ERIOrder {
+        let base = try baseURL()
+        let (data, response) = try await URLSession.shared.data(from: base.appendingPathComponent("api/v1/orders/" + id))
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(ERIOrder.self, from: data)
     }
 }
