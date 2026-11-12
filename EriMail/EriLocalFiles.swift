@@ -98,7 +98,7 @@ struct EriLocalFilesView: View {
                 Section("Gói chứng chỉ ZIP") {
                     Text("Nhập ZIP chứa cert.p12, cert.mobileprovision và pass.txt.")
                     if let certificateArchive {
-                        LabeledContent("Đã nhập", value: certificateArchive.lastPathComponent)
+                        HStack { Text("Đã nhập"); Spacer(); Text(certificateArchive.lastPathComponent).foregroundColor(.secondary) }
                         Text("ZIP đã được lưu; chưa giải nén hoặc xác minh chữ ký.").font(.footnote).foregroundColor(.secondary)
                     }
                     SecureField("Mật khẩu P12 (nếu cần)", text: $certificatePassword)
