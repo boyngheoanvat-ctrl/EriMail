@@ -91,6 +91,7 @@ jobs:
           ERI_ADMIN_KEY: ci-test-admin-secret-123456789-0123456789
           ERI_DB_PATH: /tmp/eri-ci-pricing.sqlite3
           ERI_PAYMENT_MODE: static_momo
+          ERI_CORS_ORIGINS: https://eri-store-web.onrender.com
         run: |
           python - <<'PY'
           from fastapi.testclient import TestClient
@@ -144,3 +145,58 @@ jobs:
           test -s web/eri-store/icon.svg
           test -s web/eri-store/service-worker.js
           node --check web/eri-store/service-worker.js
+
+  live-smoke:
+    name: Check deployed ERI STORE and API
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify live API routes, PWA and CORS preflight
+        run: |
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.request
+          import urllib.error
+          api = "https://eri-api-dag8.onrender.com"
+          site = "https://eri-store-web.onrender.com"
+          def fetch(url, method="GET", headers=None):
+              last = None
+              for attempt in range(4):
+                  try:
+                      req = urllib.request.Request(url, method=method, headers=headers or {})
+                      with urllib.request.urlopen(req, timeout=45) as response:
+                          return response.status, dict(response.headers), response.read()
+                  except (urllib.error.URLError, TimeoutError) as exc:
+                      last = exc
+                      if attempt < 3:
+                          time.sleep(8)
+              raise RuntimeError("Remote service not reachable: " + str(last))
+          code, _, body = fetch(api + "/health")
+          assert code == 200 and json.loads(body)["status"] == "ok"
+          _, _, schema_body = fetch(api + "/openapi.json")
+          endpoints = json.loads(schema_body)["paths"]
+          for route in [
+              "/api/v1/auth/register", "/api/v1/auth/login",
+              "/api/v1/auth/me", "/api/v1/me/orders",
+              "/api/v1/orders", "/api/v1/payment/momo-qr"
+          ]:
+              assert route in endpoints, route
+          preflight_headers = {
+              "Origin": site,
+              "Access-Control-Request-Method": "POST",
+              "Access-Control-Request-Headers": "content-type,authorization"
+          }
+          code, headers, _ = fetch(api + "/api/v1/auth/register",
+                                   method="OPTIONS", headers=preflight_headers)
+          assert code == 200, code
+          allow = {k.lower(): v for k, v in headers.items()}
+          assert allow.get("access-control-allow-origin") == site, allow
+          assert "POST" in allow.get("access-control-allow-methods", ""), allow
+          assert "authorization" in allow.get("access-control-allow-headers", "").lower(), allow
+          _, _, home = fetch(site + "/")
+          assert b"ERI STORE" in home
+          _, _, manifest = fetch(site + "/manifest.webmanifest")
+          assert json.loads(manifest)["display"] == "standalone"
+          print("Live website, API auth routes, and browser CORS preflight: OK")
+          PY
