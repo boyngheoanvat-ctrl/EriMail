@@ -40,29 +40,29 @@ jobs:
           python3 - <<'PY'
           import os, pathlib, textwrap
           app, bundle, display = (os.environ[x] for x in ("APP", "BUNDLE", "DISPLAY"))
-          content = f"""name: {app}
-          options:
-            deploymentTarget:
-              iOS: '15.0'
-          targets:
-            {app}:
-              type: application
-              platform: iOS
-              sources:
-                - Sources
-              settings:
-                base:
-                  PRODUCT_BUNDLE_IDENTIFIER: {bundle}
-                  PRODUCT_NAME: {app}
-                  INFOPLIST_KEY_CFBundleDisplayName: "{display}"
-                  GENERATE_INFOPLIST_FILE: YES
-                  SWIFT_VERSION: '5.0'
-                  TARGETED_DEVICE_FAMILY: '1,2'
-                  CODE_SIGNING_ALLOWED: NO
-                  CODE_SIGNING_REQUIRED: NO
-                  CODE_SIGN_IDENTITY: ""
-          """
-          pathlib.Path("build-project/project.yml").write_text(textwrap.dedent(content))
+          content = "\\n".join([
+              f"name: {app}",
+              "options:",
+              "  deploymentTarget:",
+              "    iOS: '15.0'",
+              "targets:",
+              f"  {app}:",
+              "    type: application",
+              "    platform: iOS",
+              "    sources:",
+              "      - Sources",
+              "    settings:",
+              "      base:",
+              f"        PRODUCT_BUNDLE_IDENTIFIER: {bundle}",
+              f"        PRODUCT_NAME: {app}",
+              f"        INFOPLIST_KEY_CFBundleDisplayName: '{display}'",
+              "        GENERATE_INFOPLIST_FILE: YES",
+              "        SWIFT_VERSION: '5.0'",
+              "        TARGETED_DEVICE_FAMILY: '1,2'",
+              "        CODE_SIGNING_ALLOWED: NO",
+              "        CODE_SIGNING_REQUIRED: NO",
+          ]) + "\\n"
+          pathlib.Path("build-project/project.yml").write_text(content)
           PY
           cd build-project
           xcodegen generate
