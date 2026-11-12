@@ -40,7 +40,7 @@ jobs:
           python3 - <<'PY'
           import os, pathlib, textwrap
           app, bundle, display = (os.environ[x] for x in ("APP", "BUNDLE", "DISPLAY"))
-          content = "\\n".join([
+          content = "\n".join([
               f"name: {app}",
               "options:",
               "  deploymentTarget:",
@@ -61,7 +61,7 @@ jobs:
               "        TARGETED_DEVICE_FAMILY: '1,2'",
               "        CODE_SIGNING_ALLOWED: NO",
               "        CODE_SIGNING_REQUIRED: NO",
-          ]) + "\\n"
+          ]) + "\n"
           pathlib.Path("build-project/project.yml").write_text(content)
           PY
           cd build-project
