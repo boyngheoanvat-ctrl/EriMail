@@ -47,6 +47,7 @@ private struct IPAEntry: Encodable {
     let download_url: String
     let sha256: String
     let authorized: Bool
+    let price_vnd: Int
 }
 
 @MainActor
@@ -228,7 +229,7 @@ private struct IPAUpdateView: View {
     @State private var bundle = ""
     @State private var link = ""
     @State private var hash = ""
-    @State private var authorized = false\n    @State private var price = ""
+    @State private var authorized = false    @State private var price = ""
     @State private var status = ""
     var body: some View {
         Form {
@@ -241,7 +242,7 @@ private struct IPAUpdateView: View {
                     .textInputAutocapitalization(.never).keyboardType(.URL)
                 TextField("SHA-256 của file IPA", text: $hash)
                     .textInputAutocapitalization(.never)
-                TextField("Giá vốn (VND)", text: $price).keyboardType(.numberPad)\n                Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
+                TextField("Giá vốn (VND)", text: $price).keyboardType(.numberPad)                Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
                 Button("Đăng IPA lên danh mục") { Task { await publish() } }
                     .disabled(!valid)
                 if !status.isEmpty { Text(status).font(.footnote) }
