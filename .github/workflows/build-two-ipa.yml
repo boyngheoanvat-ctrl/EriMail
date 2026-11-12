@@ -38,7 +38,7 @@ jobs:
           mkdir -p build-project/Sources
           cp "apps/$APP/$APP"App.swift build-project/Sources/App.swift
           python3 - <<'PY'
-          import os, pathlib
+          import os, pathlib, textwrap
           app, bundle, display = (os.environ[x] for x in ("APP", "BUNDLE", "DISPLAY"))
           content = f"""name: {app}
           options:
@@ -62,7 +62,7 @@ jobs:
                   CODE_SIGNING_REQUIRED: NO
                   CODE_SIGN_IDENTITY: ""
           """
-          pathlib.Path("build-project/project.yml").write_text(content)
+          pathlib.Path("build-project/project.yml").write_text(textwrap.dedent(content))
           PY
           cd build-project
           xcodegen generate
