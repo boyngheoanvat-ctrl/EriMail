@@ -19,9 +19,8 @@ struct ContentView: View {
             EmailToolsView().tabItem { Label("Email", systemImage: "envelope") }.tag(0)
             StoreIPAView(selection: ipaSelection, openSigner: { tab = 2 }).tabItem { Label("IPA", systemImage: "square.and.arrow.down") }.tag(1)
             SignIPAView(selection: ipaSelection).tabItem { Label("Ký IPA", systemImage: "checkmark.shield") }.tag(2)
-            StoreOffersView().tabItem { Label("Ưu đãi", systemImage: "tag") }.tag(3)
-            InstallToolsView().tabItem { Label("ESign/KSign", systemImage: "iphone") }.tag(4)
-            AIPlusStoreView().tabItem { Label("AI Plus", systemImage: "sparkles") }.tag(5)
+            InstallToolsView().tabItem { Label("Chứng chỉ", systemImage: "checkmark.seal") }.tag(3)
+            AIPlusStoreView().tabItem { Label("AI Plus", systemImage: "sparkles") }.tag(4)
         }
         .accentColor(.cyan)
         .toolbar { Button("Máy chủ") { showAPISettings = true } }
@@ -568,36 +567,6 @@ struct SignIPAView: View {
     }
 }
 
-struct StoreOffersView: View {
-    @State private var items: [ERIOffer] = []
-    @State private var status = "Đang chờ cấu hình API"
-    var body: some View {
-        NavigationView {
-            Form {
-                Section("Ưu đãi · ERI NGUYỄN") {
-                    Text("Danh mục riêng của ERI NGUYỄN").font(.subheadline)
-                    Text("Ưu đãi bên thứ ba; giá và điều kiện áp dụng theo nhà cung cấp.").font(.footnote).foregroundColor(.secondary)
-                    Button("Làm mới") { Task { await load() } }
-                    Text(status).font(.footnote).foregroundColor(.secondary)
-                    if items.isEmpty { Text("Chưa có ưu đãi nào trong cửa hàng ERI.").foregroundColor(.secondary) }
-                    ForEach(items) { item in
-                        VStack(alignment: .leading) {
-                            Text(item.title).font(.headline)
-                            Text(item.description)
-                            Text(item.source_url).font(.caption).textSelection(.enabled)
-                        }
-                    }
-                }
-            }.navigationTitle("ERI NGUYỄN · Ưu đãi")
-            .task { await load() }
-        }
-    }
-    @MainActor private func load() async {
-        do { items = try await ERIAPI.load("/api/v1/offers", as: ERIOffer.self); status = "Dữ liệu từ ERI Backend" }
-        catch { status = error.localizedDescription }
-    }
-}
-
 struct EriInstallCatalog: Decodable {
     let esign: [EriInstallItem]
     let ksign: [EriInstallItem]
@@ -673,30 +642,12 @@ struct InstallToolsView: View {
     }
 }
 
-struct OfficialInstallWebView: UIViewRepresentable {
-    func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
-        webView.load(URLRequest(url: URL(string: "https://khoindvn.io.vn/install/")!))
-        return webView
-    }
-    func updateUIView(_ view: WKWebView, context: Context) {}
-}
-
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: items, applicationActivities: nil)
     }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
-}
-
-struct F4IPAWebView: UIViewRepresentable {
-    func makeUIView(context: Context) -> WKWebView {
-        let view = WKWebView()
-        view.load(URLRequest(url: URL(string: "https://decrypt.160-191-242-70.sslip.io/")!))
-        return view
-    }
-    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 struct AIPlusStoreView: View {
@@ -712,7 +663,7 @@ struct AIPlusStoreView: View {
                 }
                 Section("Gói AI") {
                     if items.isEmpty { Text("Chưa có gói AI nào để đặt mua.").foregroundColor(.secondary) }
-                    Text("Giá bán ERI đã cộng 30% trên giá nhập.")
+                    Text("Giá bán theo danh mục riêng của ERI NGUYỄN.")
                         .font(.footnote).foregroundColor(.secondary)
                     ForEach(items) { item in
                         VStack(alignment: .leading, spacing: 6) {
@@ -734,15 +685,6 @@ struct AIPlusStoreView: View {
         do { items = try await ERIAPI.load("/api/v1/products", as: ERIProduct.self); status = "Bảng giá từ ERI Backend" }
         catch { status = error.localizedDescription }
     }
-}
-
-struct AIPlusStoreWebView: UIViewRepresentable {
-    func makeUIView(context: Context) -> WKWebView {
-        let view = WKWebView()
-        view.load(URLRequest(url: URL(string: "https://sky-sky-sky.com/#bang-gia")!))
-        return view
-    }
-    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 struct ERIList<T: Decodable>: Decodable { let items: [T] }
