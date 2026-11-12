@@ -228,7 +228,7 @@ private struct IPAUpdateView: View {
     @State private var bundle = ""
     @State private var link = ""
     @State private var hash = ""
-    @State private var authorized = false
+    @State private var authorized = false\n    @State private var price = ""
     @State private var status = ""
     var body: some View {
         Form {
@@ -241,7 +241,7 @@ private struct IPAUpdateView: View {
                     .textInputAutocapitalization(.never).keyboardType(.URL)
                 TextField("SHA-256 của file IPA", text: $hash)
                     .textInputAutocapitalization(.never)
-                Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
+                TextField("Giá vốn (VND)", text: $price).keyboardType(.numberPad)\n                Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
                 Button("Đăng IPA lên danh mục") { Task { await publish() } }
                     .disabled(!valid)
                 if !status.isEmpty { Text(status).font(.footnote) }
@@ -254,13 +254,13 @@ private struct IPAUpdateView: View {
         .navigationTitle("Update IPA Mod")
     }
     private var valid: Bool {
-        !name.isEmpty && !version.isEmpty && !bundle.isEmpty && authorized &&
+        !name.isEmpty && !version.isEmpty && !bundle.isEmpty && authorized && (Int(price) ?? 0) > 0 &&
         link.hasPrefix("https://") && hash.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil
     }
     private func publish() async {
         do {
             let item = IPAEntry(name: name, version: version, bundle_id: bundle,
-                                download_url: link, sha256: hash, authorized: true)
+                                download_url: link, sha256: hash, authorized: true, price_vnd: Int(price) ?? 0)
             let data = try JSONEncoder().encode(item)
             _ = try await session.send("/api/v1/admin/ipa", method: "POST", data: data)
             status = "Đã cập nhật danh mục IPA."
