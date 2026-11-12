@@ -296,7 +296,6 @@ struct SignIPAView: View {
     @State private var profileURL: URL?
     @State private var p12Password = ""
     @State private var signToken = ""
-    @State private var signingKey = ""
     @State private var removeEmbeddedProfile = false
     @State private var newBundleID = ""
     @State private var newBundleName = ""
@@ -336,7 +335,6 @@ struct SignIPAView: View {
                     fileRow("Chọn file .p12", kind: .p12, url: p12URL)
                     SecureField("Mật khẩu .p12", text: $p12Password)
                     SecureField("ERI_SIGN_TOKEN (máy chủ riêng)", text: $signToken)
-                    SecureField("Khóa API ký ERI", text: $signingKey)
                     fileRow("Chọn file .mobileprovision", kind: .mobileprovision, url: profileURL)
                 }
                 Section("Tùy chọn") {
@@ -401,8 +399,8 @@ struct SignIPAView: View {
     }
 
     @MainActor private func sign() async {
-        guard let ipaURL, let p12URL, let profileURL, !p12Password.isEmpty, !signingKey.isEmpty else {
-            message = "Cần chọn IPA, P12, mobileprovision, mật khẩu P12 và khóa API ký ERI."
+        guard let ipaURL, let p12URL, let profileURL, !p12Password.isEmpty, !signToken.isEmpty else {
+            message = "Cần chọn IPA, P12, mobileprovision, mật khẩu P12 và ERI_SIGN_TOKEN."
             return
         }
         guard let base = ERIAPI.configuredBase(),
@@ -447,7 +445,6 @@ struct SignIPAView: View {
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue(signToken, forHTTPHeaderField: "X-ERI-SIGN-TOKEN")
-            request.setValue("Bearer " + signingKey, forHTTPHeaderField: "Authorization")
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 600
             let (data, response) = try await URLSession.shared.upload(for: request, fromFile: temporary)
