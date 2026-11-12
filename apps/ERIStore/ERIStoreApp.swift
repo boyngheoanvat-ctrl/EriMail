@@ -205,31 +205,52 @@ private struct OrderDetailView: View {
 }
 private struct ModResponse: Decodable { let items: [ModItem] }
 private struct ModCatalog: View {
-    @Environment(\.openERISettings) private var openSettings
-    @AppStorage("eri_store_api") private var api = ""
+    @AppStorage("eri_store_api") private var api = "https://eri-api-dag8.onrender.com"
     @State private var items: [ModItem] = []
-    @State private var status = "Chưa kết nối máy chủ"
+    @State private var status = ""
+    @State private var buying = false
+    @State private var checkout: CheckoutOrder?
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
-                if items.isEmpty { Text(status).foregroundColor(.secondary) }
+                if items.isEmpty { Text(status).foregroundStyle(.secondary) }
                 ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text(item.name).font(.headline)
                         Text("Phiên bản " + item.version)
-                        Text(item.bundle_id).font(.caption).foregroundColor(.secondary)
-                        if let url = URL(string: item.download_url), url.scheme == "https" {
-                            Link("Tải IPA", destination: url)
-                        }
-                    }.padding(.vertical, 5)
+                        Text(item.bundle_id).font(.caption).foregroundStyle(.secondary)
+                        Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
+                        Button(buying ? "Đang tạo đơn..." : "Mua ngay") {
+                            Task { await buy(item) }
+                        }.buttonStyle(.borderedProminent).disabled(buying)
+                    }.padding(.vertical, 6)
                 }
-            }.navigationTitle("Mod Game")
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarLeading) { Button { openSettings() } label: { Image(systemName: "gearshape") } }
-                    ToolbarItem(placement: .navigationBarTrailing) { Button("Làm mới") { Task { await load() } } }
-                }
-                .task { await load() }
+            }
+            .navigationTitle("Mod Game")
+            .toolbar { Button("Làm mới") { Task { await load() } } }
+            .sheet(item: $checkout) { order in OrderDetailView(order: order) }
+            .task { await load() }
         }
+    }
+    @MainActor private func buy(_ item: ModItem) async {
+        guard let url = URL(string: api + "/api/v1/orders"), url.scheme == "https" else {
+            status = "Không thể kết nối máy chủ"; return
+        }
+        buying = true
+        defer { buying = false }
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "kind": "mod", "product_id": item.id
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 201 else {
+                throw PurchaseError.server(String(data: data, encoding: .utf8) ?? "Không tạo được đơn")
+            }
+            checkout = try JSONDecoder().decode(CheckoutOrder.self, from: data)
+        } catch { status = error.localizedDescription }
     }
     @MainActor private func load() async {
         guard let url = URL(string: api + "/api/v1/mods"), url.scheme == "https" else {
