@@ -66,6 +66,11 @@ jobs:
           PY
           cd build-project
           xcodegen generate
+      - name: Check Swift source syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc -frontend -parse build-project/Sources/App.swift
       - name: Build iOS device app without signing
         shell: bash
         env:
