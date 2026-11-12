@@ -501,7 +501,6 @@ struct ERIBuyButton: View {
         Button(busy ? "Đang tạo đơn..." : "Mua ngay · QR ngân hàng") {
             Task { await create() }
         }.disabled(busy)
-        if !errorMessage.isEmpty { Text(errorMessage).font(.footnote).foregroundColor(.secondary) }
         .sheet(isPresented: $showOrder) {
             NavigationView {
                 Form {
@@ -531,6 +530,7 @@ struct ERIBuyButton: View {
                 .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Đóng") { showOrder = false } } }
             }
         }
+        if !errorMessage.isEmpty { Text(errorMessage).font(.footnote).foregroundColor(.secondary) }
     }
     @MainActor private func create() async {
         busy = true
