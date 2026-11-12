@@ -429,7 +429,6 @@ private struct OrdersView: View {
                         ))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .textContentType(.none)
                         if !validReference(order) {
                             Text("Nhập mã giao dịch MoMo hợp lệ (6–128 ký tự) sau khi đã kiểm tra tiền để bật nút Đã giao.")
                                 .font(.caption).foregroundStyle(.secondary)
