@@ -322,7 +322,7 @@ struct SignIPAView: View {
         NavigationView {
             Form {
                 Section("Tệp ứng dụng") {
-                    fileRow("Chọn file .ipa", kind: .ipa, url: ipaURL)
+                    fileRow("Chọn file .ipa từ ứng dụng Tệp", kind: .ipa, url: ipaURL)
                 }
                 Section("Chứng chỉ ký") {
                     fileRow("Chọn file .p12", kind: .p12, url: p12URL)
@@ -367,7 +367,7 @@ struct SignIPAView: View {
                 Text("Đã nhập đủ IPA, P12 và mobileprovision. Cần triển khai dịch vụ ký an toàn mới có thể tạo IPA đã ký.")
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item, .data, .archive], allowsMultipleSelection: false) { result in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [UTType(filenameExtension: importing?.rawValue ?? "ipa") ?? .data, .data], allowsMultipleSelection: false) { result in
             guard let kind = importing else { return }
             do {
                 guard let selected = try result.get().first else { return }
@@ -403,6 +403,8 @@ struct StoreOffersView: View {
         NavigationView {
             Form {
                 Section("Ưu đãi · ERI NGUYỄN") {
+                    Link("Xem ưu đãi GPT Plus/Pro tại BitTopup", destination: URL(string: "https://coupons.bittopup.com/vi/goods/gpt-plus-pro")!)
+                    Text("Ưu đãi bên thứ ba; giá và điều kiện áp dụng theo nhà cung cấp.").font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới") { Task { await load() } }
                     Text(status).font(.footnote).foregroundColor(.secondary)
                     ForEach(items) { item in
@@ -451,6 +453,7 @@ struct InstallToolsView: View {
         NavigationView {
             Form {
                 Section("Chứng chỉ · ERI NGUYỄN") {
+                    Link("Tham khảo danh mục MuaCert", destination: URL(string: "https://muacert.com/")!)
                     Text("Giá bán ERI đã cộng 30% trên giá nhập.")
                         .font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới danh mục chứng chỉ") { Task { await loadCertificates() } }
@@ -529,6 +532,7 @@ struct AIPlusStoreView: View {
         NavigationView {
             Form {
                 Section("AI Plus · ERI NGUYỄN") {
+                    Link("Tham khảo bảng giá Sky World", destination: URL(string: "https://sky-sky-sky.com/#bang-gia")!)
                     Button("Làm mới bảng giá") { Task { await load() } }
                     Text(status).font(.footnote).foregroundColor(.secondary)
                 }
