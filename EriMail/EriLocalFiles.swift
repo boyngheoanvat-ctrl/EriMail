@@ -110,7 +110,7 @@ struct EriLocalFilesView: View {
             }
             if mode == "certificates" {
                 Section("Chứng chỉ miễn phí và chứng chỉ riêng") {
-                    Text("Nếu không nhập chứng chỉ, ứng dụng không tự tạo hoặc lấy chứng chỉ Apple dùng chung. Chứng chỉ miễn phí chỉ sử dụng được khi còn hiệu lực và phù hợp thiết bị.")
+                    Text("Eri Mail không thể đọc khóa riêng .p12 trong vùng dữ liệu ESign hoặc GBox. Hãy xuất/chia sẻ chứng chỉ từ ứng dụng ký để nhập một lần; sau đó mới có thể thiết lập quy trình ký hợp lệ.")
                 }
                 Section("Bảo mật") {
                     Text("Tệp chứng chỉ chỉ được sao chép vào vùng tạm của ứng dụng. Không tải khóa riêng hoặc mật khẩu lên dịch vụ ngoài. Chưa hỗ trợ ký bằng chứng chỉ ngay trên máy.")
