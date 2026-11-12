@@ -80,7 +80,13 @@ private struct AdminHome: View {
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.userAuthenticationRequired) }
             orders = try JSONDecoder().decode(OrdersEnvelope.self, from: data).items
             status = "Đã kết nối · " + String(orders.count) + " đơn"
-        } catch { status = "Lỗi kết nối/xác thực: " + error.localizedDescription }
+        } catch {
+            if let error = error as? URLError, error.code == .userAuthenticationRequired {
+                status = "Cần nhập khóa ERI_ADMIN_KEY (ít nhất 32 ký tự) từ Render trước khi tải đơn hàng."
+            } else {
+                status = "Lỗi kết nối: " + error.localizedDescription
+            }
+        }
     }
     @MainActor private func change(_ order: AdminOrder, to newStatus: String) async {
         do {
