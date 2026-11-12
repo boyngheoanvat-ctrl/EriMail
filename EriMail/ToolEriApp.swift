@@ -709,7 +709,6 @@ struct ERIProduct: Decodable, Identifiable {
     let name: String
     let description: String
     let price_vnd: Int
-    let cost_vnd: Int?
 }
 struct ERIOffer: Decodable, Identifiable {
     let id: Int
