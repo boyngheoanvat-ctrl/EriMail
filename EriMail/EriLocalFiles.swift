@@ -9,6 +9,7 @@ struct EriLocalFilesView: View {
     @State private var file: URL?
     @State private var message = "Chưa chọn tệp"
     @State private var share = false
+    @State private var shareAfterImport = false
     @State private var selectedTool = "ESign"
     @State private var appStoreLink = ""
     @State private var appStoreNotice = ""
@@ -73,18 +74,17 @@ struct EriLocalFilesView: View {
                     }
                     Text("Chọn IPA của " + selectedTool + " từ ứng dụng Tệp rồi chia sẻ sang ứng dụng ký.")
                     Button {
-                        share = true
+                        if file == nil { shareAfterImport = true; picker = true }
+                        else { share = true }
                     } label: {
                         Label("Xuất IPA " + selectedTool, systemImage: "square.and.arrow.up")
                     }
-                    .disabled(file == nil)
                     Button {
-                        message = "Mở ứng dụng ký đã cài để ký IPA trước khi cài."
-                        share = true
+                        if file == nil { shareAfterImport = true; picker = true }
+                        else { message = "Chọn ứng dụng ký trong bảng chia sẻ."; share = true }
                     } label: {
                         Label("Mở bằng ứng dụng ký / cài", systemImage: "iphone")
                     }
-                    .disabled(file == nil)
                 }
             }
             if mode == "tools" {
@@ -116,6 +116,7 @@ struct EriLocalFilesView: View {
                 }
             }
         }
+        .buttonStyle(.borderless)
         .fileImporter(isPresented: $picker, allowedContentTypes: [.data, .archive], allowsMultipleSelection: false) { result in
             do {
                 guard let source = try result.get().first else { return }
@@ -133,6 +134,10 @@ struct EriLocalFilesView: View {
                 } else {
                     file = target
                     message = "Đã nhập IPA vào Eri Mail"
+                    if shareAfterImport {
+                        shareAfterImport = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { share = true }
+                    }
                 }
             } catch {
                 message = error.localizedDescription
