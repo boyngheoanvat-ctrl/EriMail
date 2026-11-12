@@ -14,6 +14,10 @@ struct EriLocalFilesView: View {
     @State private var selectedTool = "ESign"
     @State private var appStoreLink = ""
     @State private var appStoreNotice = ""
+    @State private var appName = ""
+    @State private var appVersion = ""
+    @State private var appBundle = ""
+    @State private var lookingUp = false
 
     private var extensions: [String] {
         switch mode {
@@ -47,16 +51,17 @@ struct EriLocalFilesView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                    Button("Kiểm tra liên kết") {
-                        let link = appStoreLink.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if let url = URL(string: link),
-                           url.scheme == "https",
-                           ["apps.apple.com", "itunes.apple.com"].contains(url.host?.lowercased() ?? ""),
-                           url.path.range(of: "/id[0-9]+", options: .regularExpression) != nil {
-                            appStoreNotice = "Đã nhận liên kết App Store. Apple không cung cấp IPA trực tiếp qua liên kết này; để xuất IPA, cần nhập tệp IPA có quyền sử dụng hoặc URL tải .ipa trực tiếp."
-                        } else {
-                            appStoreNotice = "Liên kết App Store không hợp lệ."
-                        }
+                    Button {
+                        Task { await lookupAppStore() }
+                    } label: {
+                        Label(lookingUp ? "Đang tìm ứng dụng..." : "Tìm ứng dụng", systemImage: "magnifyingglass")
+                    }
+                    .disabled(lookingUp)
+                    if lookingUp { ProgressView() }
+                    if !appName.isEmpty {
+                        LabeledContent("Tên ứng dụng", value: appName)
+                        LabeledContent("Phiên bản", value: appVersion)
+                        LabeledContent("Bundle ID", value: appBundle)
                     }
                     Text(appStoreNotice).font(.footnote).foregroundColor(.secondary)
                 }
@@ -138,6 +143,45 @@ struct EriLocalFilesView: View {
         }
         .sheet(isPresented: $share) {
             if let file { EriLocalShare(items: [file]) }
+        }
+    }
+
+    @MainActor
+    private func lookupAppStore() async {
+        appName = ""
+        appVersion = ""
+        appBundle = ""
+        let link = appStoreLink.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let input = URL(string: link), input.scheme?.lowercased() == "https",
+              ["apps.apple.com", "itunes.apple.com"].contains(input.host?.lowercased() ?? ""),
+              let range = input.path.range(of: "id[0-9]+", options: .regularExpression) else {
+            appStoreNotice = "Link App Store không hợp lệ."
+            return
+        }
+        let appID = String(input.path[range].dropFirst(2))
+        let region = input.pathComponents.dropFirst().first ?? "vn"
+        var components = URLComponents(string: "https://itunes.apple.com/lookup")!
+        components.queryItems = [
+            URLQueryItem(name: "id", value: appID),
+            URLQueryItem(name: "country", value: region.count == 2 ? region : "vn")
+        ]
+        guard let url = components.url else { return }
+        lookingUp = true
+        defer { lookingUp = false }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let result = (json["results"] as? [[String: Any]])?.first else {
+                appStoreNotice = "Không tìm thấy ứng dụng trong khu vực này."
+                return
+            }
+            appName = result["trackName"] as? String ?? "Không rõ"
+            appVersion = result["version"] as? String ?? "Không rõ"
+            appBundle = result["bundleId"] as? String ?? "Không rõ"
+            appStoreNotice = "Đã lấy thông tin từ App Store. Để xuất IPA cần nguồn IPA được cấp quyền hoặc dịch vụ xử lý được cấu hình; link App Store không chứa IPA."
+        } catch {
+            appStoreNotice = "Không thể truy vấn App Store: " + error.localizedDescription
         }
     }
 
