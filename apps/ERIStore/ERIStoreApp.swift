@@ -81,8 +81,10 @@ private struct StoreCatalog: View {
     @Environment(\.openERISettings) private var openSettings
     let title: String
     let endpoint: String
-    @AppStorage("eri_store_api") private var api = ""
+    @AppStorage("eri_store_api") private var api = "https://eri-api-dag8.onrender.com"
     @State private var items: [StoreItem] = []
+    @State private var checkout: CheckoutOrder?
+    @State private var buying = false
     @State private var status = "Chưa kết nối máy chủ"
     var body: some View {
         NavigationView {
@@ -93,16 +95,40 @@ private struct StoreCatalog: View {
                         Text(item.name).font(.headline)
                         Text(item.description).font(.subheadline)
                         Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
-                        Text("Chưa mở đặt hàng tự động").font(.caption).foregroundColor(.secondary)
+                        Button(buying ? "Đang tạo đơn..." : "Mua ngay") { Task { await buy(item) } }
+                            .buttonStyle(.borderedProminent).disabled(buying)
                     }.padding(.vertical, 5)
                 }
             }.navigationTitle(title)
+                .sheet(item: $checkout) { order in OrderDetailView(order: order) }
                 .toolbar {
                     ToolbarItem(placement: .navigationBarLeading) { Button { openSettings() } label: { Image(systemName: "gearshape") } }
                     ToolbarItem(placement: .navigationBarTrailing) { Button("Làm mới") { Task { await load() } } }
                 }
                 .task { await load() }
         }
+    }
+    @MainActor private func buy(_ item: StoreItem) async {
+        guard let url = URL(string: api + "/api/v1/orders"), url.scheme == "https" else {
+            status = "Không thể kết nối máy chủ"; return
+        }
+        buying = true
+        defer { buying = false }
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "kind": endpoint == "products" ? "ai" : "certificate",
+                "product_id": item.id
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 201 else {
+                let message = String(data: data, encoding: .utf8) ?? ""
+                throw PurchaseError.server(message.isEmpty ? "HTTP lỗi" : message)
+            }
+            checkout = try JSONDecoder().decode(CheckoutOrder.self, from: data)
+        } catch { status = "Không tạo được đơn: " + error.localizedDescription }
     }
     @MainActor private func load() async {
         guard let url = URL(string: api + "/api/v1/" + endpoint), url.scheme == "https" else {
@@ -116,7 +142,60 @@ private struct StoreCatalog: View {
         } catch { status = "Không tải được danh mục: \(error.localizedDescription)" }
     }
 }
-private struct ModItem: Decodable, Identifiable {
+
+private enum PurchaseError: LocalizedError {
+    case server(String)
+    var errorDescription: String? {
+        switch self { case .server(let message): return message }
+    }
+}
+private struct CheckoutOrder: Decodable, Identifiable {
+    let id: String
+    let product_name: String
+    let amount_vnd: Int
+    let status: String
+    let payment_method: String?
+    let payment_instructions: String?
+    let transfer_note: String?
+    let checkout_url: String?
+}
+private struct OrderDetailView: View {
+    let order: CheckoutOrder
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Đơn hàng đã tạo") {
+                    Text(order.product_name).font(.headline)
+                    LabeledContent("Mã đơn", value: order.id)
+                    LabeledContent("Số tiền", value: order.amount_vnd.formatted(.currency(code: "VND")))
+                    LabeledContent("Trạng thái", value: order.status)
+                }
+                Section("Thanh toán") {
+                    if let instructions = order.payment_instructions {
+                        Text(instructions)
+                    }
+                    if let note = order.transfer_note {
+                        LabeledContent("Nội dung chuyển", value: note)
+                            .textSelection(.enabled)
+                    }
+                    if let link = order.checkout_url, let url = URL(string: link),
+                       url.scheme == "https" {
+                        Link("Đi đến trang thanh toán", destination: url)
+                    } else {
+                        Text("Chuyển khoản theo hướng dẫn của người bán. Đơn chỉ được xác nhận sau khi người bán kiểm tra giao dịch.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Đặt hàng")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                Button("Đóng") { dismiss() }
+            }}
+        }
+    }
+}
+\nprivate struct ModItem: Decodable, Identifiable {
     let id: Int
     let name: String
     let version: String
