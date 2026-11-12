@@ -15,7 +15,7 @@ class MainActivity : Activity() {
     private val api = "https://eri-api-dag8.onrender.com"
     private lateinit var list: LinearLayout
     private lateinit var title: TextView
-    private var category = "products"
+    private var category = "mods"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +30,7 @@ class MainActivity : Activity() {
         }
         root.addView(title)
         val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for ((label, endpoint) in listOf("AI Plus" to "products", "Chứng chỉ" to "certificates", "Mod Game" to "mods")) {
+        for ((label, endpoint) in listOf("Mod Game" to "mods", "AI Plus" to "products")) {
             tabs.addView(Button(this).apply {
                 text = label
                 textSize = 12f
