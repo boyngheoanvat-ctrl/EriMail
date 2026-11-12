@@ -195,13 +195,14 @@ private struct OrderDetailView: View {
         }
     }
 }
-\nprivate struct ModItem: Decodable, Identifiable {
+private struct ModItem: Decodable, Identifiable {
     let id: Int
     let name: String
     let version: String
     let bundle_id: String
-    let download_url: String
-    let sha256: String
+    let download_url: String?
+    let sha256: String?
+    let price_vnd: Int
 }
 private struct ModResponse: Decodable { let items: [ModItem] }
 private struct ModCatalog: View {
