@@ -58,7 +58,7 @@ def sign(ipa: Path, p12: Path, profile: Path, output: Path):
                     total += info.file_size
                     if total > 6 * 1024**3:
                         raise ValueError("IPA expanded size too large")
-                    if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                    if ((info.external_attr >> 16) & 0o170000) == 0o120000:
                         raise ValueError("IPA contains symbolic links")
                 archive.extractall(work)
             apps = list((work / "Payload").glob("*.app"))
