@@ -6,7 +6,7 @@ private let server = "https://eri-api-dag8.onrender.com"
 
 @main
 struct ERIAdminApp: App {
-    var body: some Scene { WindowGroup { AdminHome() } }
+    var body: some Scene { WindowGroup { AdminHome().frame(maxWidth: .infinity, maxHeight: .infinity) } }
 }
 
 private enum SecureKey {
@@ -260,6 +260,19 @@ private enum UploadKind: String {
         case .ai: return ["txt", "json", "csv", "zip"]
         }
     }
+    // Explicit types keep .ipa, .p12 and .mobileprovision selectable in Files.
+    var contentTypes: [UTType] {
+        switch self {
+        case .ipa:
+            return [UTType(filenameExtension: "ipa", conformingTo: .data)
+                    ?? UTType(importedAs: "com.eri.ipa", conformingTo: .data),
+                    .archive, .data, .item]
+        case .certificate:
+            return [.item, .data, .archive]
+        case .ai:
+            return [.item, .data, .archive, .text, .json, .commaSeparatedText]
+        }
+    }
     var maxBytes: Int {
         switch self {
         case .ipa: return 512 * 1_048_576
@@ -323,6 +336,7 @@ private struct AdminUploadView: View {
     @State private var authorized = false
     @State private var selectedFile: URL?
     @State private var showImporter = false
+    @State private var importing = false
     @State private var working = false
     @State private var status = ""
 
@@ -347,15 +361,27 @@ private struct AdminUploadView: View {
                     .keyboardType(.numberPad)
             }
             Section("Nhập tệp từ ứng dụng Tệp") {
-                Button("Chọn tệp") { showImporter = true }
-                    .disabled(working)
-                if let file = selectedFile { Text(file.lastPathComponent).font(.footnote) }
+                Button(importing ? "Đang đọc tệp..." : "Chọn tệp từ Files") { showImporter = true }
+                    .disabled(working || importing)
+                if let file = selectedFile {
+                    Label("Đã chọn: " + file.lastPathComponent, systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    if let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+                       let count = attributes[.size] as? NSNumber {
+                        Text(ByteCountFormatter.string(fromByteCount: count.int64Value, countStyle: .file))
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if kind == .ipa {
+                    Text("Sau khi chọn IPA, nhập phiên bản, Bundle ID, giá vốn và xác nhận quyền phân phối để bật nút cập nhật.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Text("Định dạng: " + kind.accepted.map { "." + $0 }.joined(separator: ", "))
                     .font(.footnote).foregroundStyle(.secondary)
                 Button(working ? "Đang tải tệp..." : "Cập nhật lên máy chủ") {
                     Task { await publish() }
                 }
-                .disabled(!valid || working)
+                .disabled(!valid || working || importing)
                 if !status.isEmpty { Text(status).font(.footnote) }
             }
             Section {
@@ -368,18 +394,38 @@ private struct AdminUploadView: View {
             }
         }
         .navigationTitle(kind.title)
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: kind.contentTypes,
+                      allowsMultipleSelection: false) { result in
             switch result {
             case .success(let urls):
-                guard let file = urls.first else { return }
-                guard kind.accepted.contains(file.pathExtension.lowercased()) else {
-                    selectedFile = nil
-                    status = "Định dạng tệp không phù hợp."
+                guard let file = urls.first else {
+                    status = "Chưa có tệp được chọn."
                     return
                 }
-                selectedFile = file
-                if name.isEmpty { name = file.deletingPathExtension().lastPathComponent }
-                status = ""
+                guard kind.accepted.contains(file.pathExtension.lowercased()) else {
+                    status = "Tệp không đúng định dạng: ." + file.pathExtension.lowercased()
+                    return
+                }
+                importing = true
+                status = "Đang sao chép tệp vào ứng dụng..."
+                Task {
+                    do {
+                        let copied = try await Task.detached(priority: .userInitiated) {
+                            try ImportedFile.copy(file, maxBytes: kind.maxBytes)
+                        }.value
+                        if let previous = selectedFile {
+                            try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
+                        }
+                        selectedFile = copied
+                        if name.isEmpty {
+                            name = file.deletingPathExtension().lastPathComponent
+                        }
+                        status = "Chọn tệp thành công. Hãy điền các thông tin còn thiếu."
+                    } catch {
+                        status = "Không đọc được tệp: " + error.localizedDescription
+                    }
+                    importing = false
+                }
             case .failure(let error):
                 status = "Không chọn được tệp: " + error.localizedDescription
             }
@@ -414,6 +460,7 @@ private struct AdminUploadView: View {
                                          fields: fields, maxBytes: kind.maxBytes)
             status = "Đã tải tệp và cập nhật sản phẩm thành công."
             selectedFile = nil
+            try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         } catch {
             status = "Cập nhật thất bại: " + error.localizedDescription
         }

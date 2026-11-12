@@ -101,6 +101,8 @@ jobs:
               f"        PRODUCT_NAME: {app}",
               f"        INFOPLIST_KEY_CFBundleDisplayName: '{display}'",
               "        GENERATE_INFOPLIST_FILE: YES",
+              "        INFOPLIST_KEY_UILaunchScreen_Generation: YES",
+              "        INFOPLIST_KEY_UIRequiresFullScreen: YES",
               "        SWIFT_VERSION: '5.0'",
               "        TARGETED_DEVICE_FAMILY: '1,2'",
               "        CODE_SIGNING_ALLOWED: NO",
@@ -126,6 +128,23 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath derived CODE_SIGNING_ALLOWED=NO build
           test -d "derived/Build/Products/Release-iphoneos/$APP.app"
+      - name: Verify full-screen iOS launch configuration
+        shell: bash
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import plistlib
+          from pathlib import Path
+          app = os.environ["APP"]
+          path = Path("build-project/derived/Build/Products/Release-iphoneos") / f"{app}.app" / "Info.plist"
+          with path.open("rb") as handle:
+              data = plistlib.load(handle)
+          assert isinstance(data.get("UILaunchScreen"), dict), "Missing modern launch screen"
+          assert data.get("UIRequiresFullScreen") is True, "Full-screen support not enabled"
+          print(f"{app}: native full-screen configuration verified")
+          PY
       - name: Package unsigned IPA
         shell: bash
         env:

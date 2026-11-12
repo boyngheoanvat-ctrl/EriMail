@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct ERIStoreApp: App {
-    var body: some Scene { WindowGroup { StoreHome() } }
+    var body: some Scene { WindowGroup { StoreHome().frame(maxWidth: .infinity, maxHeight: .infinity) } }
 }
 
 private let publicAPI = "https://eri-api-dag8.onrender.com"

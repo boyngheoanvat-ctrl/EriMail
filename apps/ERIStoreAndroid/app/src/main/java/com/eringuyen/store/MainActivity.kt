@@ -3,8 +3,12 @@ package com.eringuyen.store
 import android.app.Activity
 import android.app.AlertDialog
 import android.os.Bundle
+import android.os.Build
+import android.graphics.Color
 import android.graphics.Typeface
 import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.widget.*
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -17,12 +21,65 @@ class MainActivity : Activity() {
     private lateinit var title: TextView
     private var category = "mods"
 
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    @Suppress("DEPRECATION")
+    private fun enableEdgeToEdge() {
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            val appearance = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(appearance, appearance)
+        } else {
+            var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
+            window.decorView.systemUiVisibility = flags
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applySafeInsets(root: View) {
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            val left: Int
+            val top: Int
+            val right: Int
+            val bottom: Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val safe = insets.getInsets(
+                    WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
+                )
+                left = safe.left
+                top = safe.top
+                right = safe.right
+                bottom = safe.bottom
+            } else {
+                left = insets.systemWindowInsetLeft
+                top = insets.systemWindowInsetTop
+                right = insets.systemWindowInsetRight
+                bottom = insets.systemWindowInsetBottom
+            }
+            view.setPadding(dp(16) + left, dp(12) + top, dp(16) + right, dp(12) + bottom)
+            insets
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(20, 30, 20, 12)
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
         }
+        applySafeInsets(root)
         title = TextView(this).apply {
             text = "ERI STORE"
             textSize = 24f
@@ -47,6 +104,7 @@ class MainActivity : Activity() {
         scroll.addView(list)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
+        root.requestApplyInsets()
         load()
     }
 
