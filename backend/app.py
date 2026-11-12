@@ -1,6 +1,9 @@
 """ERI NGUYEN backend — independently hosted API. No third-party scraping or fake signing."""
 import os
 import sqlite3
+import secrets
+import re
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends
@@ -37,6 +40,11 @@ def init():
         CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
           price_vnd INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS orders (
+          id TEXT PRIMARY KEY, kind TEXT NOT NULL, product_id INTEGER NOT NULL,
+          product_name TEXT NOT NULL, amount_vnd INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS certificates (\n          id INTEGER PRIMARY KEY, name TEXT NOT NULL, issuer TEXT NOT NULL,\n          description TEXT NOT NULL, price_vnd INTEGER NOT NULL,\n          active INTEGER NOT NULL DEFAULT 1\n        );\n        CREATE TABLE IF NOT EXISTS offers (
           id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
@@ -143,3 +151,74 @@ def add_certificate(item: CertificateProduct):
         cur = db.execute("INSERT INTO certificates(name,issuer,description,price_vnd,active) VALUES(?,?,?,?,?)",
             (item.name,item.issuer,item.description,item.price_vnd,int(item.active)))
     return {"id": cur.lastrowid}
+
+BANK_BIN = os.getenv("ERI_BANK_BIN", "").strip()
+BANK_ACCOUNT = os.getenv("ERI_BANK_ACCOUNT", "").strip()
+BANK_NAME = os.getenv("ERI_BANK_NAME", "").strip()
+
+class NewOrder(BaseModel):
+    kind: str = Field(pattern="^(ai|certificate)$")
+    product_id: int = Field(gt=0)
+
+def public_order(row):
+    data = dict(row)
+    data.pop("product_id", None)
+    data.pop("created_at", None)
+    if data["status"] == "pending" and BANK_BIN and BANK_ACCOUNT:
+        from urllib.parse import quote
+        note = "ERI " + data["id"]
+        data["transfer_note"] = note
+        data["bank_name"] = BANK_NAME
+        data["bank_account"] = BANK_ACCOUNT
+        data["qr_url"] = "https://img.vietqr.io/image/" + quote(BANK_BIN, safe="") + "-" + quote(BANK_ACCOUNT, safe="") + "-compact2.png?amount=" + str(data["amount_vnd"]) + "&addInfo=" + quote(note, safe="") + "&accountName=" + quote(BANK_NAME, safe="")
+    else:
+        data["payment_setup_required"] = not (BANK_BIN and BANK_ACCOUNT)
+    return data
+
+@app.post("/api/v1/orders", status_code=201)
+def create_order(item: NewOrder):
+    if not BANK_BIN or not BANK_ACCOUNT or not BANK_NAME:
+        raise HTTPException(503, "Bank payment is not configured")
+    table = "products" if item.kind == "ai" else "certificates"
+    with connection() as db:
+        product = db.execute("SELECT name,price_vnd FROM " + table + " WHERE id=? AND active=1", (item.product_id,)).fetchone()
+        if product is None:
+            raise HTTPException(404, "Product not available")
+        if product["price_vnd"] <= 0:
+            raise HTTPException(422, "Product price must be positive")
+        oid = secrets.token_hex(6).upper()
+        db.execute("INSERT INTO orders(id,kind,product_id,product_name,amount_vnd,status,created_at) VALUES(?,?,?,?,?,?,?)",
+            (oid,item.kind,item.product_id,product["name"],product["price_vnd"],"pending",datetime.now(timezone.utc).isoformat()))
+        row = db.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    return public_order(row)
+
+@app.get("/api/v1/orders/{order_id}")
+def order_status(order_id: str):
+    if not re.fullmatch(r"[A-F0-9]{12}", order_id):
+        raise HTTPException(404, "Order not found")
+    with connection() as db:
+        row = db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Order not found")
+    return public_order(row)
+
+class OrderStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(paid|cancelled|fulfilled)$")
+
+@app.post("/api/v1/admin/orders/{order_id}/status", dependencies=[Depends(require_admin)])
+def update_order_status(order_id: str, item: OrderStatusUpdate):
+    with connection() as db:
+        old = db.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+        if old is None:
+            raise HTTPException(404, "Order not found")
+        allowed = {"pending": {"paid", "cancelled"}, "paid": {"fulfilled"}, "cancelled": set(), "fulfilled": set()}
+        if item.status not in allowed[old["status"]]:
+            raise HTTPException(409, "Invalid order status transition")
+        db.execute("UPDATE orders SET status=? WHERE id=?", (item.status,order_id))
+    return {"id": order_id, "status": item.status}
+
+@app.get("/api/v1/admin/orders", dependencies=[Depends(require_admin)])
+def admin_orders():
+    with connection() as db:
+        rows = db.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 200").fetchall()
+    return {"items": [dict(x) for x in rows]}
