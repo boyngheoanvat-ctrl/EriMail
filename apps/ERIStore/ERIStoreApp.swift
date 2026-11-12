@@ -59,15 +59,47 @@ private struct StoreCatalog: View {
         } catch { status = "Không tải được danh mục: \(error.localizedDescription)" }
     }
 }
+private struct ModItem: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let version: String
+    let bundle_id: String
+    let download_url: String
+    let sha256: String
+}
+private struct ModResponse: Decodable { let items: [ModItem] }
 private struct ModCatalog: View {
+    @AppStorage("eri_store_api") private var api = ""
+    @State private var items: [ModItem] = []
+    @State private var status = "Chưa kết nối máy chủ"
     var body: some View {
         NavigationView {
             List {
-                Text("IPA mod game").font(.headline)
-                Text("Chỉ phân phối IPA có quyền chia sẻ. Danh mục và cập nhật được quản lý qua ERI ADMIN.")
-                    .foregroundColor(.secondary)
-                Text("Chưa có bản IPA được xác minh để tải.")
+                if items.isEmpty { Text(status).foregroundColor(.secondary) }
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(item.name).font(.headline)
+                        Text("Phiên bản " + item.version)
+                        Text(item.bundle_id).font(.caption).foregroundColor(.secondary)
+                        if let url = URL(string: item.download_url), url.scheme == "https" {
+                            Link("Tải IPA", destination: url)
+                        }
+                    }.padding(.vertical, 5)
+                }
             }.navigationTitle("Mod Game")
+                .toolbar { Button("Làm mới") { Task { await load() } } }
+                .task { await load() }
         }
+    }
+    @MainActor private func load() async {
+        guard let url = URL(string: api + "/api/v1/mods"), url.scheme == "https" else {
+            status = "Cần cấu hình máy chủ ERI"; return
+        }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+            items = try JSONDecoder().decode(ModResponse.self, from: data).items
+            status = items.isEmpty ? "Chưa có IPA được phép phân phối" : ""
+        } catch { status = "Không tải được IPA: " + error.localizedDescription }
     }
 }
