@@ -59,9 +59,9 @@ struct EriLocalFilesView: View {
                     .disabled(lookingUp)
                     if lookingUp { ProgressView() }
                     if !appName.isEmpty {
-                        LabeledContent("Tên ứng dụng", value: appName)
-                        LabeledContent("Phiên bản", value: appVersion)
-                        LabeledContent("Bundle ID", value: appBundle)
+                        HStack { Text("Tên ứng dụng"); Spacer(); Text(appName).foregroundColor(.secondary) }
+                        HStack { Text("Phiên bản"); Spacer(); Text(appVersion).foregroundColor(.secondary) }
+                        HStack { Text("Bundle ID"); Spacer(); Text(appBundle).foregroundColor(.secondary) }
                     }
                     Text(appStoreNotice).font(.footnote).foregroundColor(.secondary)
                 }
