@@ -282,6 +282,47 @@ private enum UploadKind: String {
     }
 }
 
+private enum ImportedFile {
+    // The Files picker may return a security-scoped document-provider URL.
+    // Copy it into our private sandbox before the picker access expires.
+    static func copy(_ source: URL, maxBytes: Int) throws -> URL {
+        let access = source.startAccessingSecurityScopedResource()
+        defer { if access { source.stopAccessingSecurityScopedResource() } }
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eri-import-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let destination = folder.appendingPathComponent(source.lastPathComponent)
+        var coordinationError: NSError?
+        var copyingError: Error?
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        coordinator.coordinate(readingItemAt: source, options: [], error: &coordinationError) { readable in
+            do {
+                guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+                    throw URLError(.cannotCreateFile)
+                }
+                let input = try FileHandle(forReadingFrom: readable)
+                defer { try? input.close() }
+                let output = try FileHandle(forWritingTo: destination)
+                defer { try? output.close() }
+                var total = 0
+                while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
+                    total += chunk.count
+                    guard total <= maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
+                    try output.write(contentsOf: chunk)
+                }
+                guard total > 0 else { throw URLError(.zeroByteResource) }
+            } catch {
+                copyingError = error
+            }
+        }
+        if let issue = coordinationError ?? (copyingError as NSError?) {
+            try? FileManager.default.removeItem(at: folder)
+            throw issue
+        }
+        return destination
+    }
+}
+
 private enum MultipartBuilder {
     static func make(source: URL, boundary: String, fields: [(String, String)], maxBytes: Int) throws -> URL {
         let permission = source.startAccessingSecurityScopedResource()
