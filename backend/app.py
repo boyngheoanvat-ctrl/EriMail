@@ -44,7 +44,7 @@ def init():
         CREATE TABLE IF NOT EXISTS ipa (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
           bundle_id TEXT NOT NULL, download_url TEXT NOT NULL,
-          sha256 TEXT NOT NULL, authorized INTEGER NOT NULL DEFAULT 0
+          sha256 TEXT NOT NULL, authorized INTEGER NOT NULL DEFAULT 0,\n          price_vnd INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
@@ -65,7 +65,7 @@ def init():
           source_url TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
         );
         """)
-        columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
+        ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}\n        if "price_vnd" not in ipa_columns:\n            db.execute("ALTER TABLE ipa ADD COLUMN price_vnd INTEGER NOT NULL DEFAULT 0")\n        columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
         for column, dtype in (("payos_order_code", "INTEGER"), ("payos_checkout_url", "TEXT")):
             if column not in columns:
                 db.execute("ALTER TABLE orders ADD COLUMN " + column + " " + dtype)
@@ -82,7 +82,7 @@ class IPA(BaseModel):
     bundle_id: str = Field(min_length=3, max_length=255)
     download_url: HttpUrl
     sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
-    authorized: bool = False
+    authorized: bool = False\n    price_vnd: int = Field(gt=0)
 
 class Product(BaseModel):
     name: str = Field(min_length=1, max_length=160)
@@ -104,7 +104,7 @@ def health():
 def ipa_catalog(q: str = ""):
     with connection() as db:
         rows = db.execute(
-            "SELECT id,name,version,bundle_id,download_url,sha256 FROM ipa WHERE authorized=1 AND (name LIKE ? OR bundle_id LIKE ?) ORDER BY id DESC LIMIT 100",
+            "SELECT id,name,version,bundle_id,price_vnd FROM ipa WHERE authorized=1 AND (name LIKE ? OR bundle_id LIKE ?) ORDER BY id DESC LIMIT 100",
             (f"%{q[:100]}%", f"%{q[:100]}%"),
         ).fetchall()
     return {"items": [dict(x) for x in rows]}
@@ -130,13 +130,13 @@ def capabilities():
 @app.get("/api/v1/admin/ipa", dependencies=[Depends(require_admin)])
 def admin_ipa_catalog():
     with connection() as db:
-        rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256,authorized FROM ipa ORDER BY id DESC LIMIT 200").fetchall()
+        rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256,authorized,price_vnd FROM ipa ORDER BY id DESC LIMIT 200").fetchall()
     return {"items": [dict(x) for x in rows]}
 
 @app.get("/api/v1/mods")
 def public_mod_catalog():
     with connection() as db:
-        rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256 FROM ipa WHERE authorized=1 ORDER BY id DESC LIMIT 100").fetchall()
+        rows = db.execute("SELECT id,name,version,bundle_id,price_vnd FROM ipa WHERE authorized=1 ORDER BY id DESC LIMIT 100").fetchall()
     return {"items": [dict(x) for x in rows]}
 
 @app.post("/api/v1/admin/ipa", dependencies=[Depends(require_admin)], status_code=201)
@@ -144,8 +144,8 @@ def add_ipa(item: IPA):
     if not item.authorized:
         raise HTTPException(422, "Distribution authorization required")
     with connection() as db:
-        cur = db.execute("INSERT INTO ipa(name,version,bundle_id,download_url,sha256,authorized) VALUES(?,?,?,?,?,1)",
-            (item.name,item.version,item.bundle_id,str(item.download_url),item.sha256.lower()))
+        cur = db.execute("INSERT INTO ipa(name,version,bundle_id,download_url,sha256,authorized,price_vnd) VALUES(?,?,?,?,?,1,?)",
+            (item.name,item.version,item.bundle_id,str(item.download_url),item.sha256.lower(),item.price_vnd))
     return {"id": cur.lastrowid}
 
 @app.post("/api/v1/admin/products", dependencies=[Depends(require_admin)], status_code=201)
@@ -222,7 +222,7 @@ def payos_create(order_code, amount):
     return payos_call("/v2/payment-requests", params)
 
 class NewOrder(BaseModel):
-    kind: str = Field(pattern="^(ai|certificate)$")
+    kind: str = Field(pattern="^(ai|certificate|mod)$")
     product_id: int = Field(gt=0)
 
 def public_order(row):
@@ -257,9 +257,9 @@ def create_order(item: NewOrder):
         raise HTTPException(503, "ERI payOS payment channel not configured")
     if PAYMENT_MODE not in ("static_momo", "payos") and (not BANK_BIN or not BANK_ACCOUNT or not BANK_NAME):
         raise HTTPException(503, "Bank payment is not configured")
-    table = "products" if item.kind == "ai" else "certificates"
+    table = {"ai": "products", "certificate": "certificates", "mod": "ipa"}[item.kind]
     with connection() as db:
-        product = db.execute("SELECT name,price_vnd FROM " + table + " WHERE id=? AND active=1", (item.product_id,)).fetchone()
+        product = db.execute("SELECT name,price_vnd FROM " + table + " WHERE id=? AND " + ("authorized=1" if item.kind == "mod" else "active=1"), (item.product_id,)).fetchone()
         if product is None:
             raise HTTPException(404, "Product not available")
         if product["price_vnd"] <= 0:
