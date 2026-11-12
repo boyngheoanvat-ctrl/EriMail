@@ -421,10 +421,10 @@ struct SignIPAView: View {
                 try writer.write(contentsOf: Data(string.utf8))
             }
             func field(_ name: String, _ value: String) throws {
-                try write("--\\(boundary)\r\nContent-Disposition: form-data; name=\\(name)\r\n\r\n\\(value)\r\n")
+                try write("--\(boundary)\r\nContent-Disposition: form-data; name=\(name)\r\n\r\n\(value)\r\n")
             }
             func attachment(_ name: String, _ file: URL, _ mime: String) throws {
-                try write("--\\(boundary)\r\nContent-Disposition: form-data; name=\\(name); filename=\\(file.lastPathComponent)\r\nContent-Type: \\(mime)\r\n\r\n")
+                try write("--\(boundary)\r\nContent-Disposition: form-data; name=\(name); filename=\(file.lastPathComponent)\r\nContent-Type: \(mime)\r\n\r\n")
                 let source = try FileHandle(forReadingFrom: file)
                 defer { try? source.close() }
                 while let chunk = try source.read(upToCount: 1024 * 1024), !chunk.isEmpty {
@@ -439,15 +439,15 @@ struct SignIPAView: View {
             try attachment("ipa", ipaURL, "application/octet-stream")
             try attachment("p12", p12URL, "application/x-pkcs12")
             try attachment("mobileprovision", profileURL, "application/octet-stream")
-            try write("--\\(boundary)--\r\n")
+            try write("--\(boundary)--\r\n")
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
-            request.setValue("multipart/form-data; boundary=\\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 600
             let (data, response) = try await URLSession.shared.upload(for: request, fromFile: temporary)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                throw NSError(domain: "ERI", code: code, userInfo: [NSLocalizedDescriptionKey: "Backend ký IPA chưa sẵn sàng (HTTP \\(code))."])
+                throw NSError(domain: "ERI", code: code, userInfo: [NSLocalizedDescriptionKey: "Backend ký IPA chưa sẵn sàng (HTTP \(code))."])
             }
             let result = try JSONDecoder().decode(ERISigningResponse.self, from: data)
             guard let signed = URL(string: result.download_url), signed.scheme == "https" else {
