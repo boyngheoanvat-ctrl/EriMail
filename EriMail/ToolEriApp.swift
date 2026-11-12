@@ -173,12 +173,12 @@ struct StoreIPAView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Xuất IPA · ERI NGUYỄN") {
-                    Button("Mở F4TEAM Decrypt / Kho IPA") { confirmF4 = true }
+                Section("Kho F4TEAM · ERI NGUYỄN") {
+                    Button("Mở toàn bộ kho IPA F4TEAM") { confirmF4 = true }
                     Text("Tìm App Store, chọn phiên bản và truy cập kho IPA của F4TEAM. Dịch vụ do F4TEAM vận hành; việc tải và giải mã phụ thuộc máy chủ của họ.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
-                Section("Tìm App Store") {
+                Section("Tìm App Store (kho ERI dự phòng)") {
                     TextField("https://apps.apple.com/.../id123456", text: $link).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Tìm ứng dụng và kiểm tra kho") { Task { await lookup() } }.disabled(busy)
                     if !appName.isEmpty {
@@ -186,7 +186,7 @@ struct StoreIPAView: View {
                         Text("App Store ID: " + appID)
                     }
                 }
-                Section("Kho IPA riêng") {
+                Section("Kho IPA riêng (dự phòng)") {
                     if matches.isEmpty {
                         Text(appID.isEmpty ? "Nhập link để kiểm tra kho." : "Chưa có IPA được phép phân phối trong kho cho ứng dụng này.")
                             .foregroundColor(.secondary)
@@ -461,7 +461,7 @@ struct ShareSheet: UIViewControllerRepresentable {
 struct F4IPAWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView()
-        view.load(URLRequest(url: URL(string: "https://160-191-242-70.sslip.io")!))
+        view.load(URLRequest(url: URL(string: "https://decrypt.160-191-242-70.sslip.io/")!))
         return view
     }
     func updateUIView(_ view: WKWebView, context: Context) {}
