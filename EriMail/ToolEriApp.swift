@@ -239,7 +239,7 @@ struct StoreIPAView: View {
         appID = String(id); appName = ""
         busy = true
         do {
-            let url = URL(string: "https://itunes.apple.com/lookup?id=\\(id)&country=vn")!
+            let url = URL(string: "https://itunes.apple.com/lookup?id=\(id)&country=vn")!
             let (data, _) = try await URLSession.shared.data(from: url)
             let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let apps = obj?["results"] as? [[String: Any]] ?? []
