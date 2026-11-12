@@ -216,15 +216,7 @@ private struct ModCatalog: View {
             List {
                 if items.isEmpty { Text(status).foregroundStyle(.secondary) }
                 ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(item.name).font(.headline)
-                        Text("Phiên bản " + item.version)
-                        Text(item.bundle_id).font(.caption).foregroundStyle(.secondary)
-                        Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
-                        Button(buying ? "Đang tạo đơn..." : "Mua ngay") {
-                            Task { await buy(item) }
-                        }.buttonStyle(.borderedProminent).disabled(buying)
-                    }.padding(.vertical, 6)
+                    modRow(item)
                 }
             }
             .navigationTitle("Mod Game")
@@ -232,6 +224,20 @@ private struct ModCatalog: View {
             .sheet(item: $checkout) { order in OrderDetailView(order: order) }
             .task { await load() }
         }
+    }
+    private func modRow(_ item: ModItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(item.name).font(.headline)
+            Text("Phiên bản " + item.version)
+            Text(item.bundle_id).font(.caption).foregroundStyle(.secondary)
+            Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
+            Button(buying ? "Đang tạo đơn..." : "Mua ngay") {
+                Task { await buy(item) }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(buying)
+        }
+        .padding(.vertical, 6)
     }
     @MainActor private func buy(_ item: ModItem) async {
         guard let url = URL(string: api + "/api/v1/orders"), url.scheme == "https" else {
