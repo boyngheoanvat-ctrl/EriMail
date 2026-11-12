@@ -31,7 +31,7 @@ private extension EnvironmentValues {
 }
 private struct ServerSettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("eri_store_api") private var api = ""
+    @AppStorage("eri_store_api") private var api = "https://eri-api-dag8.onrender.com"
     @State private var draft = ""
     @State private var message = ""
     var body: some View {
@@ -145,7 +145,10 @@ private struct ModCatalog: View {
                     }.padding(.vertical, 5)
                 }
             }.navigationTitle("Mod Game")
-                .toolbar { Button("Làm mới") { Task { await load() } } }
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) { Button { openSettings() } label: { Image(systemName: "gearshape") } }
+                    ToolbarItem(placement: .navigationBarTrailing) { Button("Làm mới") { Task { await load() } } }
+                }
                 .task { await load() }
         }
     }
