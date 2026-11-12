@@ -69,7 +69,7 @@ struct EmailToolsView: View {
                         ForEach(aliases, id: \.self) { alias in
                             Button(alias) { UIPasteboard.general.string = alias }
                         }
-                        Text("Gmail alias chuyển thư về hộp thư Gmail gốc, không tạo tài khoản Google mới.").font(.footnote)
+                        Text("Alias Gmail chuyển thư về Gmail gốc; không tạo tài khoản Google mới.").font(.footnote)
                     }
                 } else {
                     Section("Hộp thư tạm") {
@@ -96,7 +96,7 @@ struct EmailToolsView: View {
                         }
                     }
                 }
-            }.navigationTitle("Tạo Gmail giả")
+            }.navigationTitle("Email · ERI NGUYỄN")
         }
     }
     @MainActor private func createMailbox() async {
@@ -177,6 +177,7 @@ struct IPACatalogEntry: Decodable, Identifiable {
 }
 struct StoreIPAView: View {
     @State private var link = ""
+    @State private var directIPALink = ""
     @State private var appName = ""
     @State private var appID = ""
     @State private var message = ""
@@ -189,7 +190,7 @@ struct StoreIPAView: View {
     var body: some View {
         NavigationView {
             Form {
-                Section("Tìm App Store") {
+                Section("Tra cứu ứng dụng App Store") {
                     TextField("https://apps.apple.com/.../id123456", text: $link).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Tìm ứng dụng và kiểm tra kho") { Task { await lookup() } }.disabled(busy)
                     if !appName.isEmpty {
@@ -214,10 +215,12 @@ struct StoreIPAView: View {
                     Text("Kho chỉ cung cấp IPA được chủ sở hữu cho phép phân phối. Không tự trích xuất ứng dụng thương mại từ App Store.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
-                Section("Tải IPA · ERI NGUYỄN") {
-                    Button(busy ? "Đang kiểm tra kho..." : "Tìm IPA để tải") {
-                        Task { await loadCatalog() }
-                    }.disabled(busy)
+                Section("Tải IPA bằng link trực tiếp") {
+                    TextField("https://example.com/app.ipa", text: $directIPALink)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button(busy ? "Đang tải..." : "Tải IPA từ link") { Task { await downloadDirectIPA() } }.disabled(busy)
+                    Text("Chỉ tải IPA từ nguồn bạn tin cậy và có quyền sử dụng.").font(.caption).foregroundColor(.secondary)
                     if let imported {
                         Text("IPA đã tải: " + imported.lastPathComponent)
                         Button("Lưu IPA vào Tệp") { share = true }
@@ -228,7 +231,7 @@ struct StoreIPAView: View {
                     Text(message).font(.footnote)
                 }
             }
-            .navigationTitle("ERI NGUYỄN · Xuất IPA")
+            .navigationTitle("ERI NGUYỄN · IPA")
             .task { await loadCatalog() }
             .sheet(isPresented: $share) { if let imported { ShareSheet(items: [imported]) } }
         }
@@ -261,6 +264,35 @@ struct StoreIPAView: View {
         } catch { message = error.localizedDescription }
         busy = false
         await loadCatalog()
+    }
+    @MainActor private func downloadDirectIPA() async {
+        let input = directIPALink.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: input), url.scheme == "https", url.host != nil else {
+            message = "Hãy nhập link HTTPS tải IPA hợp lệ."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            let (temp, response) = try await URLSession.shared.download(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let handle = try FileHandle(forReadingFrom: temp)
+            defer { try? handle.close() }
+            let signature = try handle.read(upToCount: 4) ?? Data()
+            guard signature.starts(with: [0x50, 0x4B]) else {
+                message = "Tệp tải xuống không có định dạng ZIP/IPA hợp lệ."
+                return
+            }
+            let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+            try FileManager.default.moveItem(at: temp, to: destination)
+            imported = destination
+            message = "Đã tải IPA. Bạn có thể lưu vào ứng dụng Tệp."
+            share = true
+        } catch {
+            message = "Không tải được IPA: " + error.localizedDescription
+        }
     }
     @MainActor private func download(_ entry: IPACatalogEntry) async {
         busy = true; defer { busy = false }
@@ -502,6 +534,7 @@ struct StoreOffersView: View {
                     Text("Ưu đãi bên thứ ba; giá và điều kiện áp dụng theo nhà cung cấp.").font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới") { Task { await load() } }
                     Text(status).font(.footnote).foregroundColor(.secondary)
+                    if items.isEmpty { Text("Chưa có ưu đãi nào trong cửa hàng ERI.").foregroundColor(.secondary) }
                     ForEach(items) { item in
                         VStack(alignment: .leading) {
                             Text(item.title).font(.headline)
@@ -553,6 +586,7 @@ struct InstallToolsView: View {
                         .font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới danh mục chứng chỉ") { Task { await loadCertificates() } }
                     Text(catalogStatus).font(.footnote).foregroundColor(.secondary)
+                    if certificates.isEmpty { Text("Chưa có chứng chỉ để đặt mua.").foregroundColor(.secondary) }
                     ForEach(certificates) { item in
                         VStack(alignment: .leading, spacing: 5) {
                             Text(item.name).font(.headline)
@@ -632,6 +666,7 @@ struct AIPlusStoreView: View {
                     Text(status).font(.footnote).foregroundColor(.secondary)
                 }
                 Section("Gói AI") {
+                    if items.isEmpty { Text("Chưa có gói AI nào để đặt mua.").foregroundColor(.secondary) }
                     Text("Giá bán ERI đã cộng 30% trên giá nhập.")
                         .font(.footnote).foregroundColor(.secondary)
                     ForEach(items) { item in
