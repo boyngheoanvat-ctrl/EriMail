@@ -2,11 +2,14 @@
 import os
 import sqlite3
 import secrets
+import hmac
+import hashlib
+import json
 import re
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -114,9 +117,9 @@ def offers():
 
 @app.get("/api/v1/capabilities")
 def capabilities():
-    return {"ipa_catalog": True, "ai_products": True, "offers": True, "markup_percent": 30,
+    return {"ipa_catalog": True, "ai_products": True, "offers": False,
             "ipa_signing": False, "payments": False, "third_party_catalog_sync": False,
-            "install_manifest_catalog": False}
+            "automatic_fulfillment": False, "install_manifest_catalog": False}
 
 @app.post("/api/v1/admin/ipa", dependencies=[Depends(require_admin)], status_code=201)
 def add_ipa(item: IPA):
@@ -174,6 +177,7 @@ def public_order(row):
     data = dict(row)
     data.pop("product_id", None)
     data.pop("created_at", None)
+    data.pop("supplier_reference", None)
     if data["status"] == "pending" and PAYMENT_MODE == "static_momo":
         data["payment_method"] = "static_momo"
         data["payment_instructions"] = "Quét QR MoMo cố định trong ứng dụng. Nhập đúng số tiền và ghi mã đơn nếu ứng dụng ngân hàng hỗ trợ. Người bán xác nhận thủ công."
@@ -215,6 +219,54 @@ def order_status(order_id: str):
     if row is None:
         raise HTTPException(404, "Order not found")
     return public_order(row)
+
+# Only a trusted payment verifier can confirm a transfer. A QR scan is not proof of payment.
+# This webhook is a private integration point, not a public customer confirmation endpoint.
+# Connect a payment provider that independently verifies incoming MoMo transactions.
+PAYMENT_WEBHOOK_SECRET = os.getenv("ERI_PAYMENT_WEBHOOK_SECRET", "")
+
+@app.post("/api/v1/private/payment-confirmation")
+async def trusted_payment_confirmation(request: Request, x_eri_signature: str | None = Header(default=None)):
+    if len(PAYMENT_WEBHOOK_SECRET) < 32:
+        raise HTTPException(503, "Payment verifier not configured")
+    body = await request.body()
+    if len(body) > 4096:
+        raise HTTPException(413, "Payload too large")
+    expected = hmac.new(PAYMENT_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(x_eri_signature or "", expected):
+        raise HTTPException(401, "Invalid signature")
+    try:
+        data = json.loads(body)
+        order_id = data["order_id"]
+        amount = data["amount_vnd"]
+        transaction_id = data["transaction_id"]
+        if not isinstance(order_id, str) or not re.fullmatch(r"[A-F0-9]{12}", order_id):
+            raise ValueError("Invalid order")
+        if type(amount) is not int or amount <= 0:
+            raise ValueError("Invalid amount")
+        if not isinstance(transaction_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", transaction_id):
+            raise ValueError("Invalid transaction")
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        raise HTTPException(422, "Invalid confirmation")
+    with connection() as db:
+        db.execute("CREATE TABLE IF NOT EXISTS payment_receipts (transaction_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, amount_vnd INTEGER NOT NULL)")
+        row = db.execute("SELECT id,amount_vnd,status FROM orders WHERE id=?", (order_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Order not found")
+        if row["amount_vnd"] != amount:
+            raise HTTPException(409, "Payment amount mismatch")
+        existing = db.execute("SELECT order_id,amount_vnd FROM payment_receipts WHERE transaction_id=?", (transaction_id,)).fetchone()
+        if existing:
+            if existing["order_id"] != order_id or existing["amount_vnd"] != amount:
+                raise HTTPException(409, "Transaction already assigned")
+            return {"status": row["status"]}
+        if row["status"] != "pending":
+            raise HTTPException(409, "Order not pending")
+        db.execute("INSERT INTO payment_receipts(transaction_id,order_id,amount_vnd) VALUES(?,?,?)", (transaction_id,order_id,amount))
+        db.execute("UPDATE orders SET status='paid' WHERE id=? AND status='pending'", (order_id,))
+    # Supplier ordering is deliberately NOT triggered until an authorized supplier
+    # integration and an idempotent fulfillment worker have been configured.
+    return {"status": "paid"}
 
 class OrderStatusUpdate(BaseModel):
     status: str = Field(pattern="^(paid|cancelled|fulfilled)$")
