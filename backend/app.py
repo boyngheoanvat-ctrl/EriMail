@@ -29,6 +29,10 @@ def connection():
     finally:
         db.close()
 
+def sale_price(base_price_vnd: int) -> int:
+    """30% markup, rounded up to the next VND; never trust client pricing."""
+    return (base_price_vnd * 130 + 99) // 100
+
 def init():
     with connection() as db:
         db.executescript("""
@@ -46,7 +50,12 @@ def init():
           product_name TEXT NOT NULL, amount_vnd INTEGER NOT NULL,
           status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS certificates (\n          id INTEGER PRIMARY KEY, name TEXT NOT NULL, issuer TEXT NOT NULL,\n          description TEXT NOT NULL, price_vnd INTEGER NOT NULL,\n          active INTEGER NOT NULL DEFAULT 1\n        );\n        CREATE TABLE IF NOT EXISTS offers (
+        CREATE TABLE IF NOT EXISTS certificates (
+          id INTEGER PRIMARY KEY, name TEXT NOT NULL, issuer TEXT NOT NULL,
+          description TEXT NOT NULL, price_vnd INTEGER NOT NULL,
+          active INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS offers (
           id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
           source_url TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
         );
@@ -95,7 +104,7 @@ def ipa_catalog(q: str = ""):
 def products():
     with connection() as db:
         rows = db.execute("SELECT id,name,description,price_vnd FROM products WHERE active=1 ORDER BY id DESC LIMIT 100").fetchall()
-    return {"items": [dict(x) for x in rows]}
+    return {"items": [{**dict(x), "price_vnd": sale_price(x["price_vnd"])} for x in rows]}
 
 @app.get("/api/v1/offers")
 def offers():
@@ -105,7 +114,7 @@ def offers():
 
 @app.get("/api/v1/capabilities")
 def capabilities():
-    return {"ipa_catalog": True, "ai_products": True, "offers": True,
+    return {"ipa_catalog": True, "ai_products": True, "offers": True, "markup_percent": 30,
             "ipa_signing": False, "payments": False, "third_party_catalog_sync": False,
             "install_manifest_catalog": False}
 
@@ -143,7 +152,7 @@ class CertificateProduct(BaseModel):
 def certificates():
     with connection() as db:
         rows = db.execute("SELECT id,name,issuer,description,price_vnd FROM certificates WHERE active=1 ORDER BY id DESC LIMIT 100").fetchall()
-    return {"items": [dict(x) for x in rows]}
+    return {"items": [{**dict(x), "price_vnd": sale_price(x["price_vnd"])} for x in rows]}
 
 @app.post("/api/v1/admin/certificates", dependencies=[Depends(require_admin)], status_code=201)
 def add_certificate(item: CertificateProduct):
@@ -193,7 +202,7 @@ def create_order(item: NewOrder):
             raise HTTPException(422, "Product price must be positive")
         oid = secrets.token_hex(6).upper()
         db.execute("INSERT INTO orders(id,kind,product_id,product_name,amount_vnd,status,created_at) VALUES(?,?,?,?,?,?,?)",
-            (oid,item.kind,item.product_id,product["name"],product["price_vnd"],"pending",datetime.now(timezone.utc).isoformat()))
+            (oid,item.kind,item.product_id,product["name"],sale_price(product["price_vnd"]),"pending",datetime.now(timezone.utc).isoformat()))
         row = db.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
     return public_order(row)
 
