@@ -13,6 +13,7 @@ struct ContentView: View {
             SignIPAView().tabItem { Label("Ký IPA", systemImage: "checkmark.shield") }.tag(2)
             StoreOffersView().tabItem { Label("Ưu đãi", systemImage: "tag") }.tag(3)
             InstallToolsView().tabItem { Label("ESign/KSign", systemImage: "iphone") }.tag(4)
+            AIPlusStoreView().tabItem { Label("AI Plus", systemImage: "sparkles") }.tag(5)
         }
         .accentColor(.cyan)
     }
@@ -462,6 +463,55 @@ struct F4IPAWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView()
         view.load(URLRequest(url: URL(string: "https://decrypt.160-191-242-70.sslip.io/")!))
+        return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {}
+}
+
+struct AIPlusStoreView: View {
+    @State private var showStore = false
+    private let storeURL = URL(string: "https://sky-sky-sky.com/#bang-gia")!
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("AI Plus · ERI NGUYỄN") {
+                    Text("Khám phá các gói công cụ AI và bảng giá trên Sky World.")
+                        .font(.headline)
+                    Button("Xem bảng giá và các gói AI") { showStore = true }
+                    Button("Mở Sky World trong Safari") {
+                        UIApplication.shared.open(storeURL)
+                    }
+                }
+                Section("Thông tin nhà cung cấp") {
+                    Text("Nguồn: sky-sky-sky.com (Sky World). Đây là cửa hàng bên thứ ba, không phải dịch vụ bán hàng do ERI NGUYỄN hoặc OpenAI vận hành.")
+                    Text("Sản phẩm, giá, đăng nhập, ví coin, thanh toán, giao hàng và hỗ trợ được quản lý bởi Sky World. Kiểm tra kỹ điều kiện và tính hợp lệ của gói trước khi mua.")
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("ERI NGUYỄN · AI Plus")
+            .sheet(isPresented: $showStore) {
+                NavigationView {
+                    AIPlusStoreWebView()
+                        .navigationTitle("ERI NGUYỄN · AI Plus")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("Đóng") { showStore = false }
+                            }
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Safari") { UIApplication.shared.open(storeURL) }
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
+
+struct AIPlusStoreWebView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.load(URLRequest(url: URL(string: "https://sky-sky-sky.com/#bang-gia")!))
         return view
     }
     func updateUIView(_ view: WKWebView, context: Context) {}
