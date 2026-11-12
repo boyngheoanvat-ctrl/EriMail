@@ -340,6 +340,8 @@ struct InstallToolsView: View {
         NavigationView {
             Form {
                 Section("Chứng chỉ · ERI NGUYỄN") {
+                    Text("Giá bán ERI đã cộng 30% trên giá nhập.")
+                        .font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới danh mục chứng chỉ") { Task { await loadCertificates() } }
                     Text(catalogStatus).font(.footnote).foregroundColor(.secondary)
                     ForEach(certificates) { item in
@@ -420,6 +422,8 @@ struct AIPlusStoreView: View {
                     Text(status).font(.footnote).foregroundColor(.secondary)
                 }
                 Section("Gói AI") {
+                    Text("Giá bán ERI đã cộng 30% trên giá nhập.")
+                        .font(.footnote).foregroundColor(.secondary)
                     ForEach(items) { item in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(item.name).font(.headline)
@@ -429,7 +433,7 @@ struct AIPlusStoreView: View {
                             ERIBuyButton(kind: "ai", productID: item.id)
                         }
                     }
-                    Text("Chưa tích hợp thanh toán hoặc giao hàng. Không thu tiền khi chưa có hệ thống đơn hàng.")
+                    Text("Thanh toán QR MoMo và xác nhận đơn thủ công. Chỉ đặt hàng khi máy chủ ERI đã được triển khai và có sản phẩm hợp lệ.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
             }.navigationTitle("ERI NGUYỄN · AI Plus")
