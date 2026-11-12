@@ -47,21 +47,29 @@ jobs:
 
           test -f build-source/EriMail.xcodeproj/project.pbxproj
           test -f build-source/build_ipa.sh
-      - name: Set app display name
+      - name: Set app display name safely
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('build-source/EriMail.xcodeproj/project.pbxproj')
-          s=p.read_text()
-          import re
-          s = re.sub(r'INFOPLIST_KEY_CFBundleDisplayName\s*=\s*[^;]+;', 'INFOPLIST_KEY_CFBundleDisplayName = "TOOL ERI NGUYỄN";', s)
-          if 'INFOPLIST_KEY_CFBundleDisplayName' not in s:
-              s = s.replace('buildSettings = {', 'buildSettings = {\\n                INFOPLIST_KEY_CFBundleDisplayName = "TOOL ERI NGUYỄN";')
-          p.write_text(s)
-          print('Configured app display name: TOOL ERI NGUYỄN')
+          import plistlib
+          root = Path("build-source")
+          for plist in root.rglob("Info.plist"):
+              if ".xcode-build" in str(plist):
+                  continue
+              try:
+                  with plist.open("rb") as f:
+                      data = plistlib.load(f)
+              except Exception:
+                  continue
+              if isinstance(data, dict) and ("CFBundleExecutable" in data or "CFBundleIdentifier" in data):
+                  data["CFBundleDisplayName"] = "TOOL ERI NGUYỄN"
+                  with plist.open("wb") as f:
+                      plistlib.dump(data, f)
+                  print("Updated", plist)
           PY
+          plutil -lint build-source/EriMail.xcodeproj/project.pbxproj
       - name: Build unsigned IPA
         run: |
           cd build-source
