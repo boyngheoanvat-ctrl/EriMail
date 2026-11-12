@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "brand": "Eri Mail",
+  "apps": [
+    {
+      "id": "esign",
+      "name": "ESign",
+      "version": "",
+      "bundleId": "",
+      "ipaURL": "",
+      "manifestURL": "",
+      "sha256": "",
+      "signing": {
+        "status": "unconfigured",
+        "distribution": "",
+        "expiresAt": null
+      }
+    },
+    {
+      "id": "ksign",
+      "name": "KSign",
+      "version": "",
+      "bundleId": "",
+      "ipaURL": "",
+      "manifestURL": "",
+      "sha256": "",
+      "signing": {
+        "status": "unconfigured",
+        "distribution": "",
+        "expiresAt": null
+      }
+    },
+    {
+      "id": "feather",
+      "name": "Feather",
+      "version": "",
+      "bundleId": "",
+      "ipaURL": "",
+      "manifestURL": "",
+      "sha256": "",
+      "signing": {
+        "status": "unconfigured",
+        "distribution": "",
+        "expiresAt": null
+      }
+    },
+    {
+      "id": "gbox",
+      "name": "GBox",
+      "version": "",
+      "bundleId": "",
+      "ipaURL": "",
+      "manifestURL": "",
+      "sha256": "",
+      "signing": {
+        "status": "unconfigured",
+        "distribution": "",
+        "expiresAt": null
+      }
+    },
+    {
+      "id": "scarlet",
+      "name": "Scarlet",
+      "version": "",
+      "bundleId": "",
+      "ipaURL": "",
+      "manifestURL": "",
+      "sha256": "",
+      "signing": {
+        "status": "unconfigured",
+        "distribution": "",
+        "expiresAt": null
+      }
+    }
+  ]
+}
