@@ -295,6 +295,7 @@ struct SignIPAView: View {
     @State private var p12URL: URL?
     @State private var profileURL: URL?
     @State private var p12Password = ""
+    @State private var signToken = ""
     @State private var signingKey = ""
     @State private var removeEmbeddedProfile = false
     @State private var newBundleID = ""
@@ -334,6 +335,7 @@ struct SignIPAView: View {
                 Section("Chứng chỉ ký") {
                     fileRow("Chọn file .p12", kind: .p12, url: p12URL)
                     SecureField("Mật khẩu .p12", text: $p12Password)
+                    SecureField("ERI_SIGN_TOKEN (máy chủ riêng)", text: $signToken)
                     SecureField("Khóa API ký ERI", text: $signingKey)
                     fileRow("Chọn file .mobileprovision", kind: .mobileprovision, url: profileURL)
                 }
@@ -357,7 +359,7 @@ struct SignIPAView: View {
                     }.disabled(busy)
                     Text(message).font(.footnote).foregroundColor(.secondary)
                     if let signedURL {
-                        Link("Tải IPA đã ký", destination: signedURL)
+                        ShareLink(item: signedURL) { Label("Chia sẻ / Lưu IPA đã ký", systemImage: "square.and.arrow.up") }
                     }
                 }
                 Section {
@@ -444,6 +446,7 @@ struct SignIPAView: View {
             try write("--\(boundary)--\r\n")
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
+            request.setValue(signToken, forHTTPHeaderField: "X-ERI-SIGN-TOKEN")
             request.setValue("Bearer " + signingKey, forHTTPHeaderField: "Authorization")
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
             request.timeoutInterval = 600
@@ -452,12 +455,10 @@ struct SignIPAView: View {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 throw NSError(domain: "ERI", code: code, userInfo: [NSLocalizedDescriptionKey: "Backend ký IPA chưa sẵn sàng (HTTP \(code))."])
             }
-            let result = try JSONDecoder().decode(ERISigningResponse.self, from: data)
-            guard let signed = URL(string: result.download_url), signed.scheme == "https" else {
-                throw NSError(domain: "ERI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Backend trả về liên kết IPA không hợp lệ."])
-            }
-            signedURL = signed
-            message = result.message ?? "Đã ký IPA thành công."
+            let output = FileManager.default.temporaryDirectory.appendingPathComponent("ERI-signed-" + UUID().uuidString + ".ipa")
+            try data.write(to: output, options: .atomic)
+            signedURL = output
+            message = "Đã nhận IPA đã ký. Dùng nút Chia sẻ để lưu tệp."
             p12Password = ""
         } catch {
             message = "Không thể ký IPA: " + error.localizedDescription
