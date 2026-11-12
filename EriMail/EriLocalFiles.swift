@@ -9,8 +9,6 @@ struct EriLocalFilesView: View {
     @State private var file: URL?
     @State private var message = "Chưa chọn tệp"
     @State private var share = false
-    @State private var remote = ""
-    @State private var downloading = false
     @State private var selectedTool = "ESign"
     @State private var appStoreLink = ""
     @State private var appStoreNotice = ""
@@ -18,10 +16,12 @@ struct EriLocalFilesView: View {
     @State private var appVersion = ""
     @State private var appBundle = ""
     @State private var lookingUp = false
+    @State private var certificateArchive: URL?
+    @State private var certificatePassword = ""
 
     private var extensions: [String] {
         switch mode {
-        case "certificates": return ["p12", "pfx", "cer", "mobileprovision"]
+        case "certificates": return ["zip", "p12", "pfx", "cer", "mobileprovision"]
         case "inject": return ["ipa", "dylib", "deb"]
         default: return ["ipa"]
         }
@@ -71,7 +71,7 @@ struct EriLocalFilesView: View {
                     Picker("Công cụ", selection: $selectedTool) {
                         ForEach(["ESign", "KSign", "Feather", "GBox", "Scarlet"], id: \.self) { Text($0) }
                     }
-                    Text("Chọn tệp IPA của " + selectedTool + " để xuất hoặc tải IPA từ URL HTTPS trực tiếp.")
+                    Text("Chọn IPA của " + selectedTool + " từ ứng dụng Tệp rồi chia sẻ sang ứng dụng ký.")
                     Button {
                         share = true
                     } label: {
@@ -79,26 +79,12 @@ struct EriLocalFilesView: View {
                     }
                     .disabled(file == nil)
                     Button {
-                        message = "Chưa có IPA được ký bằng chứng chỉ hợp lệ. Không thể cài trực tiếp bằng chứng chỉ free không xác minh được."
+                        message = "Mở ứng dụng ký đã cài để ký IPA trước khi cài."
+                        share = true
                     } label: {
-                        Label("Cài trực tiếp", systemImage: "iphone")
+                        Label("Mở bằng ứng dụng ký / cài", systemImage: "iphone")
                     }
                     .disabled(file == nil)
-                }
-            }
-            if mode == "ipa" || mode == "tools" {
-                Section("Tải IPA trực tiếp vào Eri Mail") {
-                    TextField("https://example.com/app.ipa", text: $remote)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    Button {
-                        Task { await downloadIPA() }
-                    } label: {
-                        Label(downloading ? "Đang tải..." : "Tải IPA", systemImage: "arrow.down.circle")
-                    }
-                    .disabled(downloading)
-                    if downloading { ProgressView() }
                 }
             }
             if mode == "tools" {
@@ -109,8 +95,14 @@ struct EriLocalFilesView: View {
                 }
             }
             if mode == "certificates" {
-                Section("Chứng chỉ miễn phí và chứng chỉ riêng") {
-                    Text("Eri Mail không thể đọc khóa riêng .p12 trong vùng dữ liệu ESign hoặc GBox. Hãy xuất/chia sẻ chứng chỉ từ ứng dụng ký để nhập một lần; sau đó mới có thể thiết lập quy trình ký hợp lệ.")
+                Section("Gói chứng chỉ ZIP") {
+                    Text("Nhập ZIP chứa cert.p12, cert.mobileprovision và pass.txt.")
+                    if let certificateArchive {
+                        LabeledContent("Đã nhập", value: certificateArchive.lastPathComponent)
+                        Text("ZIP đã được lưu; chưa giải nén hoặc xác minh chữ ký.").font(.footnote).foregroundColor(.secondary)
+                    }
+                    SecureField("Mật khẩu P12 (nếu cần)", text: $certificatePassword)
+                    Text("iOS không cho phép tự lấy khóa riêng từ ESign/GBox.").font(.footnote).foregroundColor(.secondary)
                 }
                 Section("Bảo mật") {
                     Text("Tệp chứng chỉ chỉ được sao chép vào vùng tạm của ứng dụng. Không tải khóa riêng hoặc mật khẩu lên dịch vụ ngoài. Chưa hỗ trợ ký bằng chứng chỉ ngay trên máy.")
@@ -135,8 +127,13 @@ struct EriLocalFilesView: View {
                 defer { if access { source.stopAccessingSecurityScopedResource() } }
                 let target = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-" + source.lastPathComponent)
                 try FileManager.default.copyItem(at: source, to: target)
-                file = target
-                message = "Đã nhập tệp vào Eri Mail"
+                if mode == "certificates" {
+                    certificateArchive = target.pathExtension.lowercased() == "zip" ? target : nil
+                    message = "Đã nhập gói chứng chỉ"
+                } else {
+                    file = target
+                    message = "Đã nhập IPA vào Eri Mail"
+                }
             } catch {
                 message = error.localizedDescription
             }
@@ -185,31 +182,6 @@ struct EriLocalFilesView: View {
         }
     }
 
-    @MainActor
-    private func downloadIPA() async {
-        guard let url = URL(string: remote.trimmingCharacters(in: .whitespacesAndNewlines)),
-              url.scheme?.lowercased() == "https",
-              url.path.lowercased().hasSuffix(".ipa"),
-              url.user == nil, url.password == nil else {
-            message = "Cần URL HTTPS trỏ trực tiếp tới file .ipa"
-            return
-        }
-        downloading = true
-        defer { downloading = false }
-        do {
-            let (temporary, response) = try await URLSession.shared.download(from: url)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                message = "Máy chủ không trả về IPA hợp lệ"
-                return
-            }
-            let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
-            try FileManager.default.moveItem(at: temporary, to: destination)
-            file = destination
-            message = "Đã tải IPA vào Eri Mail. Chưa xác minh chữ ký."
-        } catch {
-            message = "Lỗi tải: " + error.localizedDescription
-        }
-    }
 }
 
 struct EriLocalShare: UIViewControllerRepresentable {
