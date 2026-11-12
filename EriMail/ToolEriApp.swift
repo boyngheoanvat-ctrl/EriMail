@@ -610,7 +610,7 @@ struct InstallToolsView: View {
                             ERIBuyButton(kind: "certificate", productID: item.id)
                         }
                     }
-                    Text("Đặt hàng bằng QR MoMo; người bán xác nhận và giao chứng chỉ thủ công. Danh mục cần được thêm vào backend ERI.")
+                    Text("Chọn sản phẩm, xem giá và quét QR MoMo để chuyển khoản. Đơn chờ ERI xác nhận sau khi kiểm tra giao dịch. Danh mục cần được thêm vào backend ERI.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
                 Section("Cài ESign / KSign") {
@@ -674,7 +674,7 @@ struct AIPlusStoreView: View {
                             ERIBuyButton(kind: "ai", productID: item.id)
                         }
                     }
-                    Text("Thanh toán QR MoMo và xác nhận đơn thủ công. Chỉ đặt hàng khi máy chủ ERI đã được triển khai và có sản phẩm hợp lệ.")
+                    Text("Xem giá, chọn Mua ngay và quét QR MoMo. ERI kiểm tra chuyển khoản trước khi xác nhận đơn. Chỉ đặt hàng khi máy chủ ERI đã được triển khai và có sản phẩm hợp lệ.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
             }.navigationTitle("ERI NGUYỄN · AI Plus")
@@ -741,7 +741,7 @@ struct ERIBuyButton: View {
     @State private var busy = false
     @State private var showOrder = false
     var body: some View {
-        Button(busy ? "Đang tạo đơn..." : "Mua ngay · QR ngân hàng") {
+        Button(busy ? "Đang tạo đơn..." : "Mua ngay · QR MoMo") {
             Task { await create() }
         }.disabled(busy)
         .sheet(isPresented: $showOrder) {
@@ -771,7 +771,7 @@ struct ERIBuyButton: View {
                                 Text("Người nhận: NGUYEN MINH THIEN")
                                 Text("Số tài khoản được che trên ảnh gốc (đuôi 790).")
                                     .font(.footnote).foregroundColor(.secondary)
-                                Text("QR cố định: hãy tự nhập đúng số tiền theo đơn. QR không tự điền số tiền hay mã đơn.")
+                                Text("QR MoMo cố định: vui lòng nhập đúng số tiền hiển thị và nội dung chuyển khoản. Mã QR không tự điền thông tin đơn hàng.")
                                     .font(.footnote).foregroundColor(.secondary)
                             }
                             if let raw = order.qr_url, let url = URL(string: raw) {
