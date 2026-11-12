@@ -1,0 +1,19 @@
+{
+  "name": "ERI STORE",
+  "short_name": "ERI STORE",
+  "description": "ERI STORE — Cửa hàng số Mod Game, AI Plus, Chứng chỉ",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8f8fc",
+  "theme_color": "#f5f5ff",
+  "lang": "vi",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

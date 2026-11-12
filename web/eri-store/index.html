@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f5ff"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ERI STORE">
+<meta name="description" content="ERI STORE — Mod Game, AI Plus và Chứng chỉ. Đăng ký, mua hàng và theo dõi đơn.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://eri-api-dag8.onrender.com; img-src 'self' data: https://eri-api-dag8.onrender.com; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css"><script defer src="/app.js"></script>
+<title>ERI STORE — Cửa hàng số</title>
+</head><body>
+<header class="header"><div class="wrap header-inner">
+<a class="brand" href="#store"><span class="brand-mark">E</span><span><strong>ERI STORE</strong><small>Cửa hàng số</small></span></a>
+<button id="header-account" type="button" class="avatar" aria-label="Tài khoản">↗</button>
+</div></header>
+<main class="wrap content">
+<div id="banner" class="banner hidden" role="alert"></div>
+<section class="hero" id="hero"><div>
+<div class="eyebrow"><span class="live-dot"></span> ERI DIGITAL STORE</div>
+<h1>Sản phẩm số,<br><em>mua thật dễ.</em></h1>
+<p>Mod Game, AI Plus và Chứng chỉ. Chọn sản phẩm, đặt hàng với tài khoản riêng và thanh toán bằng QR MoMo.</p>
+<div class="hero-buttons"><button id="explore" class="btn primary" type="button">Khám phá sản phẩm ↗</button><button id="hero-install" class="btn light" type="button">Cài trên iPhone ⇩</button></div>
+</div><div class="hero-art" aria-hidden="true"><span class="orbit one"></span><span class="orbit two"></span><span class="hero-symbol">E</span><span class="float-label a">✦ AI Plus</span><span class="float-label b">✓ Giao thủ công</span></div></section>
+<div class="features"><div><span>♙</span><div><b>Tài khoản riêng</b><small>Đăng ký nhanh chóng</small></div></div><div><span>▣</span><div><b>Thanh toán MoMo</b><small>QR do Admin cung cấp</small></div></div><div><span>✓</span><div><b>Theo dõi đơn</b><small>Lịch sử mua hàng</small></div></div></div>
+<section id="store" class="section"><div class="heading"><div><span class="overline">KHÁM PHÁ</span><h2>Danh mục sản phẩm</h2></div><button id="reload" class="link-button" type="button">↻ Làm mới</button></div>
+<div id="tabs" class="tabs" role="tablist" aria-label="Loại sản phẩm">
+<button class="tab selected" type="button" role="tab" aria-selected="true" data-kind="mod">🎮 Mod Game</button>
+<button class="tab" type="button" role="tab" aria-selected="false" data-kind="ai">✦ AI Plus</button>
+<button class="tab" type="button" role="tab" aria-selected="false" data-kind="certificate">✓ Chứng chỉ</button>
+</div><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><div id="products" class="products"></div></section>
+<section id="orders-view" class="section hidden"><div class="heading"><div><span class="overline">ĐƠN HÀNG</span><h2>Lịch sử mua hàng</h2></div><button id="refresh-orders" class="link-button" type="button">↻ Làm mới</button></div><div id="orders" class="order-list"></div></section>
+<section id="account-view" class="section hidden"><div class="heading"><div><span class="overline">TÀI KHOẢN</span><h2>Thông tin của bạn</h2></div></div><div id="profile" class="profile"></div></section>
+<section class="install"><span class="install-mark">E</span><div><b>Dùng ERI STORE như ứng dụng iPhone</b><p>Mở bằng Safari → Chia sẻ → Thêm vào Màn hình chính. Không cần IPA hay chứng chỉ.</p></div><button id="install-button" class="btn outline" type="button">Cách cài</button></section>
+</main>
+<nav class="bottom-nav" aria-label="Điều hướng">
+<button data-view="store" class="nav-button selected" type="button"><span>⌂</span>Cửa hàng</button>
+<button data-view="orders" class="nav-button" type="button"><span>▤</span>Đơn hàng</button>
+<button data-view="account" class="nav-button" type="button"><span>♙</span>Tài khoản</button>
+</nav>
+<div id="overlay" class="overlay hidden"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header class="dialog-header"><h2 id="dialog-title">ERI STORE</h2><button id="dialog-close" type="button" aria-label="Đóng" class="close">×</button></header><div id="dialog-body"></div></div></div>
+</body></html>

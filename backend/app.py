@@ -23,7 +23,7 @@ app = FastAPI(title="ERI NGUYEN API", version="0.1.0")
 # No wildcard CORS: native iOS clients do not require browser CORS.
 origins = [x.strip() for x in os.getenv("ERI_CORS_ORIGINS", "").split(",") if x.strip()]
 if origins:
-    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET"], allow_headers=["*"])
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Authorization", "Content-Type"], max_age=600)
 
 @contextmanager
 def connection():
@@ -416,7 +416,7 @@ def create_order(item: NewOrder, customer=Depends(require_customer)):
             raise HTTPException(422, "Product price must be positive")
         oid = secrets.token_hex(6).upper()
         db.execute("INSERT INTO orders(id,kind,product_id,product_name,amount_vnd,status,created_at,customer_id) VALUES(?,?,?,?,?,?,?,?)",
-            (oid,item.kind,item.product_id,product["name"],sale_price(product["price_vnd"]),"pending",datetime.now(timezone.utc).isoformat(),customer["id"]))
+            (oid,item.kind,item.product_id,product["name"],product["price_vnd"] if item.kind == "mod" else sale_price(product["price_vnd"]),"pending",datetime.now(timezone.utc).isoformat(),customer["id"]))
         row = db.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
     if PAYMENT_MODE == "payos":
         order_code = secrets.randbelow(1_900_000_000) + 100_000_000
