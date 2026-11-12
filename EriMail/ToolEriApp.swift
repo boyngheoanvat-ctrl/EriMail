@@ -166,7 +166,6 @@ struct StoreIPAView: View {
     @State private var message = ""
     @State private var catalog: [IPACatalogEntry] = []
     @State private var imported: URL?
-    @State private var pick = false
     @State private var share = false
     @State private var busy = false
     private let catalogURL = URL(string: "https://raw.githubusercontent.com/boyngheoanvat-ctrl/EriMail/main/ipa-catalog/catalog.json")!
@@ -204,11 +203,16 @@ struct StoreIPAView: View {
                     Text("Kho chỉ cung cấp IPA được chủ sở hữu cho phép phân phối. Không tự trích xuất ứng dụng thương mại từ App Store.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
-                Section("IPA đã tải hoặc nhập") {
-                    Button("Nhập IPA từ Tệp") { pick = true }
+                Section("Tải IPA · ERI NGUYỄN") {
+                    Button(busy ? "Đang kiểm tra kho..." : "Tìm IPA để tải") {
+                        Task { await loadCatalog() }
+                    }.disabled(busy)
                     if let imported {
-                        Text(imported.lastPathComponent)
-                        Button("Lưu IPA / chia sẻ sang ứng dụng ký") { share = true }
+                        Text("IPA đã tải: " + imported.lastPathComponent)
+                        Button("Lưu IPA vào Tệp") { share = true }
+                    } else {
+                        Text("Chọn phiên bản có sẵn phía trên và nhấn Tải IPA về máy. Nếu kho chưa có bản phù hợp, ứng dụng không thể tạo tệp IPA từ App Store ID.")
+                            .font(.footnote).foregroundColor(.secondary)
                     }
                     Text(message).font(.footnote)
                 }
@@ -231,17 +235,6 @@ struct StoreIPAView: View {
                 }
             }
             .task { await loadCatalog() }
-            .fileImporter(isPresented: $pick, allowedContentTypes: [.data, .archive], allowsMultipleSelection: false) { result in
-                do {
-                    guard let url = try result.get().first else { return }
-                    guard url.pathExtension.lowercased() == "ipa" else { message = "Vui lòng chọn .ipa"; return }
-                    let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    let dst = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
-                    try FileManager.default.copyItem(at: url, to: dst)
-                    imported = dst; message = "Đã nhập IPA."
-                } catch { message = error.localizedDescription }
-            }
             .sheet(isPresented: $share) { if let imported { ShareSheet(items: [imported]) } }
         }
     }
