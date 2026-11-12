@@ -88,7 +88,7 @@ jobs:
       - name: Test Mod Game original price and AI/Certificate 30% markup
         working-directory: backend
         env:
-          ERI_ADMIN_KEY: ci-test-admin-secret-123456789
+          ERI_ADMIN_KEY: ci-test-admin-secret-123456789-0123456789
           ERI_DB_PATH: /tmp/eri-ci-pricing.sqlite3
           ERI_PAYMENT_MODE: static_momo
         run: |
@@ -96,7 +96,7 @@ jobs:
           from fastapi.testclient import TestClient
           from app import app
           client = TestClient(app)
-          h = {"X-ERI-Admin-Key": "ci-test-admin-secret-123456789"}
+          h = {"X-ERI-Admin-Key": "ci-test-admin-secret-123456789-0123456789"}
           m = client.post("/api/v1/admin/ipa", headers=h, json={
               "name":"Mod Example", "version":"1.0", "bundle_id":"com.eri.example",
               "download_url":"https://example.org/test.ipa", "sha256":"a"*64,
