@@ -5,6 +5,8 @@ import secrets
 import hmac
 import hashlib
 import json
+import urllib.request
+import urllib.error
 import re
 from datetime import datetime, timezone
 from contextlib import contextmanager
@@ -63,6 +65,10 @@ def init():
           source_url TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
         );
         """)
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
+        for column, dtype in (("payos_order_code", "INTEGER"), ("payos_checkout_url", "TEXT")):
+            if column not in columns:
+                db.execute("ALTER TABLE orders ADD COLUMN " + column + " " + dtype)
 
 init()
 
@@ -164,10 +170,44 @@ def add_certificate(item: CertificateProduct):
             (item.name,item.issuer,item.description,item.price_vnd,int(item.active)))
     return {"id": cur.lastrowid}
 
-PAYMENT_MODE = os.getenv("ERI_PAYMENT_MODE", "static_momo").strip()
+PAYMENT_MODE = os.getenv("ERI_PAYMENT_MODE", "payos").strip()
+PAYOS_CLIENT_ID = os.getenv("PAYOS_CLIENT_ID", "").strip()
+PAYOS_API_KEY = os.getenv("PAYOS_API_KEY", "").strip()
+PAYOS_CHECKSUM_KEY = os.getenv("PAYOS_CHECKSUM_KEY", "").strip()
+PAYOS_RETURN_URL = os.getenv("PAYOS_RETURN_URL", "").strip()
+PAYOS_CANCEL_URL = os.getenv("PAYOS_CANCEL_URL", "").strip()
 BANK_BIN = os.getenv("ERI_BANK_BIN", "").strip()
 BANK_ACCOUNT = os.getenv("ERI_BANK_ACCOUNT", "").strip()
 BANK_NAME = os.getenv("ERI_BANK_NAME", "").strip()
+
+def payos_configured():
+    return all((PAYOS_CLIENT_ID, PAYOS_API_KEY, PAYOS_CHECKSUM_KEY,
+                PAYOS_RETURN_URL.startswith("https://"), PAYOS_CANCEL_URL.startswith("https://")))
+
+def payos_call(path, payload=None):
+    if not payos_configured():
+        raise HTTPException(503, "ERI payOS channel not configured")
+    headers = {"x-client-id": PAYOS_CLIENT_ID, "x-api-key": PAYOS_API_KEY}
+    if payload is not None: headers["Content-Type"] = "application/json"
+    request = urllib.request.Request("https://api-merchant.payos.vn" + path,
+        data=json.dumps(payload).encode() if payload is not None else None,
+        headers=headers, method="POST" if payload is not None else "GET")
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            result = json.load(response)
+    except (urllib.error.URLError, ValueError) as exc:
+        raise HTTPException(502, "Payment provider unavailable") from exc
+    if result.get("code") != "00" or not isinstance(result.get("data"), dict):
+        raise HTTPException(502, "Payment provider rejected request")
+    return result["data"]
+
+def payos_create(order_code, amount):
+    params = {"amount": amount, "cancelUrl": PAYOS_CANCEL_URL,
+              "description": "ERI" + str(order_code), "orderCode": order_code,
+              "returnUrl": PAYOS_RETURN_URL}
+    signed = "&".join(k + "=" + str(params[k]) for k in sorted(params))
+    params["signature"] = hmac.new(PAYOS_CHECKSUM_KEY.encode(), signed.encode(), hashlib.sha256).hexdigest()
+    return payos_call("/v2/payment-requests", params)
 
 class NewOrder(BaseModel):
     kind: str = Field(pattern="^(ai|certificate)$")
@@ -177,6 +217,12 @@ def public_order(row):
     data = dict(row)
     data.pop("product_id", None)
     data.pop("created_at", None)
+    data.pop("payos_order_code", None)
+    checkout = data.pop("payos_checkout_url", None)
+    if data["status"] == "pending" and PAYMENT_MODE == "payos":
+        data["payment_method"] = "payos"
+        if checkout: data["checkout_url"] = checkout
+        return data
     data.pop("supplier_reference", None)
     if data["status"] == "pending" and PAYMENT_MODE == "static_momo":
         data["payment_method"] = "static_momo"
@@ -195,7 +241,9 @@ def public_order(row):
 
 @app.post("/api/v1/orders", status_code=201)
 def create_order(item: NewOrder):
-    if PAYMENT_MODE != "static_momo" and (not BANK_BIN or not BANK_ACCOUNT or not BANK_NAME):
+    if PAYMENT_MODE == "payos" and not payos_configured():
+        raise HTTPException(503, "ERI payOS payment channel not configured")
+    if PAYMENT_MODE not in ("static_momo", "payos") and (not BANK_BIN or not BANK_ACCOUNT or not BANK_NAME):
         raise HTTPException(503, "Bank payment is not configured")
     table = "products" if item.kind == "ai" else "certificates"
     with connection() as db:
@@ -208,6 +256,15 @@ def create_order(item: NewOrder):
         db.execute("INSERT INTO orders(id,kind,product_id,product_name,amount_vnd,status,created_at) VALUES(?,?,?,?,?,?,?)",
             (oid,item.kind,item.product_id,product["name"],sale_price(product["price_vnd"]),"pending",datetime.now(timezone.utc).isoformat()))
         row = db.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if PAYMENT_MODE == "payos":
+        order_code = secrets.randbelow(1_900_000_000) + 100_000_000
+        checkout = payos_create(order_code, row["amount_vnd"])
+        checkout_url = checkout.get("checkoutUrl", "")
+        if not isinstance(checkout_url, str) or not checkout_url.startswith("https://pay.payos.vn/"):
+            raise HTTPException(502, "Invalid payOS checkout link")
+        with connection() as db:
+            db.execute("UPDATE orders SET payos_order_code=?,payos_checkout_url=? WHERE id=?", (order_code,checkout_url,oid))
+            row = db.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
     return public_order(row)
 
 @app.get("/api/v1/orders/{order_id}")
@@ -267,6 +324,28 @@ async def trusted_payment_confirmation(request: Request, x_eri_signature: str | 
     # Supplier ordering is deliberately NOT triggered until an authorized supplier
     # integration and an idempotent fulfillment worker have been configured.
     return {"status": "paid"}
+
+@app.post("/api/v1/webhooks/payos")
+async def payos_webhook(request: Request):
+    if not payos_configured():
+        raise HTTPException(503, "payOS not configured")
+    raw = await request.body()
+    if len(raw) > 8192: raise HTTPException(413, "Webhook too large")
+    try:
+        data = json.loads(raw)["data"]
+        code = data["orderCode"]
+        if type(code) is not int or code <= 0: raise ValueError()
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(422, "Invalid webhook")
+    with connection() as db:
+        row = db.execute("SELECT * FROM orders WHERE payos_order_code=?", (code,)).fetchone()
+    if row is None:
+        return {"success": True}
+    verified = payos_call("/v2/payment-requests/" + str(code))
+    if verified.get("status") == "PAID" and verified.get("amount") == row["amount_vnd"] and verified.get("amountPaid", 0) >= row["amount_vnd"]:
+        with connection() as db:
+            db.execute("UPDATE orders SET status='paid' WHERE id=? AND status='pending'", (row["id"],))
+    return {"success": True}
 
 class OrderStatusUpdate(BaseModel):
     status: str = Field(pattern="^(paid|cancelled|fulfilled)$")
