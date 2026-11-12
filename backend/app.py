@@ -38,7 +38,7 @@ def init():
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
           price_vnd INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1
         );
-        CREATE TABLE IF NOT EXISTS offers (
+        CREATE TABLE IF NOT EXISTS certificates (\n          id INTEGER PRIMARY KEY, name TEXT NOT NULL, issuer TEXT NOT NULL,\n          description TEXT NOT NULL, price_vnd INTEGER NOT NULL,\n          active INTEGER NOT NULL DEFAULT 1\n        );\n        CREATE TABLE IF NOT EXISTS offers (
           id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
           source_url TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
         );
@@ -122,4 +122,24 @@ def add_offer(item: Offer):
     with connection() as db:
         cur = db.execute("INSERT INTO offers(title,description,source_url,active) VALUES(?,?,?,?)",
             (item.title,item.description,str(item.source_url),int(item.active)))
+    return {"id": cur.lastrowid}
+
+class CertificateProduct(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    issuer: str = Field(min_length=1, max_length=160)
+    description: str = Field(max_length=2000)
+    price_vnd: int = Field(ge=0)
+    active: bool = True
+
+@app.get("/api/v1/certificates")
+def certificates():
+    with connection() as db:
+        rows = db.execute("SELECT id,name,issuer,description,price_vnd FROM certificates WHERE active=1 ORDER BY id DESC LIMIT 100").fetchall()
+    return {"items": [dict(x) for x in rows]}
+
+@app.post("/api/v1/admin/certificates", dependencies=[Depends(require_admin)], status_code=201)
+def add_certificate(item: CertificateProduct):
+    with connection() as db:
+        cur = db.execute("INSERT INTO certificates(name,issuer,description,price_vnd,active) VALUES(?,?,?,?,?)",
+            (item.name,item.issuer,item.description,item.price_vnd,int(item.active)))
     return {"id": cur.lastrowid}
