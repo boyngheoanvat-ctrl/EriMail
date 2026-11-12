@@ -1,4 +1,5 @@
 import SwiftUI
+import Security
 
 private func eriMoney(_ amount: Int) -> String {
     let formatter = NumberFormatter()
@@ -16,18 +17,288 @@ struct ERIStoreApp: App {
 
 private let publicAPI = "https://eri-api-dag8.onrender.com"
 
-private struct StoreHome: View {
+
+private enum BuyerToken {
+    private static let service = "vn.eri.store.customer"
+    private static let account = "customer_bearer_token"
+
+    static func read() -> String {
+        let attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(attributes as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    static func write(_ value: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: account
+        ]
+        SecItemDelete(query as CFDictionary)
+        guard !value.isEmpty else { return }
+        var data = query
+        data[kSecValueData as String] = Data(value.utf8)
+        data[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(data as CFDictionary, nil)
+    }
+}
+
+private struct Buyer: Decodable {
+    let id: Int
+    let username: String
+    let display_name: String
+    let contact: String
+}
+
+private struct BuyerAuthentication: Decodable {
+    let token: String
+    let customer: Buyer
+}
+private struct BuyerOrderResponse: Decodable { let items: [CheckoutOrder] }
+
+@MainActor
+private final class BuyerSession: ObservableObject {
+    @Published private(set) var buyer: Buyer?
+    @Published private(set) var token = BuyerToken.read()
+
+    private func call(_ path: String, method: String = "GET", data: Data? = nil,
+                      needsLogin: Bool = true) async throws -> Data {
+        guard let url = URL(string: publicAPI + path), url.scheme == "https" else {
+            throw PurchaseError.server("Địa chỉ máy chủ không hợp lệ")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = 30
+        if data != nil {
+            req.httpBody = data
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        if needsLogin {
+            guard !token.isEmpty else { throw PurchaseError.server("Vui lòng đăng nhập trước khi mua") }
+            req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        }
+        let (body, result) = try await URLSession.shared.data(for: req)
+        let code = (result as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(code) else {
+            if code == 401 && needsLogin {
+                token = ""
+                buyer = nil
+                BuyerToken.write("")
+                throw PurchaseError.server("Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.")
+            }
+            if code == 409 { throw PurchaseError.server("Tên đăng nhập đã được sử dụng") }
+            let detail = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+            let message = detail?["detail"] as? String ?? "Máy chủ trả về HTTP " + String(code)
+            throw PurchaseError.server(message)
+        }
+        return body
+    }
+
+    func restore() async {
+        guard !token.isEmpty else { return }
+        do {
+            buyer = try JSONDecoder().decode(Buyer.self,
+                from: await call("/api/v1/auth/me"))
+        } catch {
+            buyer = nil
+            token = ""
+            BuyerToken.write("")
+        }
+    }
+
+    func authenticate(register: Bool, username: String, password: String,
+                      name: String, contact: String) async throws {
+        var parameters: [String: String] = [
+            "username": username.trimmingCharacters(in: .whitespacesAndNewlines),
+            "password": password
+        ]
+        if register {
+            parameters["display_name"] = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            parameters["contact"] = contact.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let body = try JSONEncoder().encode(parameters)
+        let data = try await call(register ? "/api/v1/auth/register" : "/api/v1/auth/login",
+                                  method: "POST", data: body, needsLogin: false)
+        let auth = try JSONDecoder().decode(BuyerAuthentication.self, from: data)
+        token = auth.token
+        buyer = auth.customer
+        BuyerToken.write(token)
+    }
+
+    func buy(kind: String, productID: Int) async throws -> CheckoutOrder {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "kind": kind, "product_id": productID
+        ])
+        return try JSONDecoder().decode(CheckoutOrder.self,
+            from: await call("/api/v1/orders", method: "POST", data: payload))
+    }
+
+    func orders() async throws -> [CheckoutOrder] {
+        let data = try await call("/api/v1/me/orders")
+        return try JSONDecoder().decode(BuyerOrderResponse.self, from: data).items
+    }
+
+    func signOut() async {
+        if !token.isEmpty {
+            _ = try? await call("/api/v1/auth/logout", method: "POST")
+        }
+        token = ""
+        buyer = nil
+        BuyerToken.write("")
+    }
+}
+
+private struct BuyerAuthView: View {
+    @EnvironmentObject private var session: BuyerSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var registerMode = false
+    @State private var username = ""
+    @State private var password = ""
+    @State private var name = ""
+    @State private var contact = ""
+    @State private var waiting = false
+    @State private var message = ""
+
     var body: some View {
-        TabView {
-            StoreCatalog(title: "AI Plus", endpoint: "products")
-                .tabItem { Label("AI Plus", systemImage: "sparkles") }
-            StoreCatalog(title: "Chứng chỉ", endpoint: "certificates")
-                .tabItem { Label("Chứng chỉ", systemImage: "checkmark.seal") }
-            ModCatalog()
-                .tabItem { Label("Mod Game", systemImage: "gamecontroller") }
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Tài khoản", selection: $registerMode) {
+                        Text("Đăng nhập").tag(false)
+                        Text("Đăng ký").tag(true)
+                    }.pickerStyle(.segmented)
+                }
+                Section("Tài khoản ERI STORE") {
+                    TextField("Tên đăng nhập (3–32 ký tự)", text: $username)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .textContentType(.username)
+                    SecureField("Mật khẩu", text: $password)
+                        .textContentType(registerMode ? .newPassword : .password)
+                    if registerMode {
+                        TextField("Tên người nhận", text: $name)
+                            .textContentType(.name)
+                        TextField("Liên hệ nhận hàng (Zalo / điện thoại)", text: $contact)
+                            .textContentType(.telephoneNumber)
+                    }
+                }
+                Section {
+                    Button(waiting ? "Đang xử lý..." : (registerMode ? "Tạo tài khoản" : "Đăng nhập")) {
+                        Task { await submit() }
+                    }.disabled(waiting || username.isEmpty || password.isEmpty ||
+                               (registerMode && (name.isEmpty || contact.isEmpty)))
+                    if !message.isEmpty { Text(message).foregroundStyle(.red).font(.footnote) }
+                }
+                Section {
+                    Text("Mỗi khách cần tài khoản riêng để mua hàng. Liên hệ nhận hàng chỉ hiển thị cho Admin, không hiển thị công khai. Không dùng mật khẩu MoMo.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(registerMode ? "Đăng ký" : "Đăng nhập")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                Button("Đóng") { dismiss() }
+            } }
+        }
+    }
+
+    private func submit() async {
+        waiting = true
+        defer { waiting = false }
+        do {
+            try await session.authenticate(register: registerMode, username: username,
+                                           password: password, name: name, contact: contact)
+            dismiss()
+        } catch {
+            message = error.localizedDescription
         }
     }
 }
+
+private struct BuyerProfileView: View {
+    @EnvironmentObject private var session: BuyerSession
+    @Binding var showAuth: Bool
+    @State private var history: [CheckoutOrder] = []
+    @State private var selected: CheckoutOrder?
+    @State private var message = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let buyer = session.buyer {
+                    Section("Tài khoản của tôi") {
+                        LabeledContent("Tên", value: buyer.display_name)
+                        LabeledContent("Tên đăng nhập", value: buyer.username)
+                        LabeledContent("Liên hệ nhận hàng", value: buyer.contact)
+                        Button("Đăng xuất", role: .destructive) {
+                            Task {
+                                await session.signOut()
+                                history = []
+                            }
+                        }
+                    }
+                    Section("Lịch sử mua hàng") {
+                        Button("Làm mới lịch sử") { Task { await refresh() } }
+                        if !message.isEmpty { Text(message).font(.footnote) }
+                        ForEach(history) { order in
+                            Button { selected = order } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(order.product_name).font(.headline)
+                                    Text("Mã đơn: " + order.id)
+                                    Text(eriMoney(order.amount_vnd) + " · " + order.status)
+                                    Text(order.created_at ?? "").font(.caption)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Section {
+                        Text("Đăng ký hoặc đăng nhập để mua và xem lịch sử đơn hàng.")
+                        Button("Đăng nhập / Đăng ký") { showAuth = true }
+                    }
+                }
+            }
+            .navigationTitle("Tài khoản")
+            .sheet(item: $selected) { order in OrderDetailView(order: order) }
+            .task { await refresh() }
+        }
+    }
+
+    private func refresh() async {
+        guard session.buyer != nil else { return }
+        do {
+            history = try await session.orders()
+            message = history.isEmpty ? "Chưa có đơn hàng." : ""
+        } catch { message = error.localizedDescription }
+    }
+}
+
+private struct StoreHome: View {
+    @StateObject private var session = BuyerSession()
+    @State private var showAuth = false
+
+    var body: some View {
+        TabView {
+            StoreCatalog(title: "AI Plus", endpoint: "products", showAuth: $showAuth)
+                .tabItem { Label("AI Plus", systemImage: "sparkles") }
+            StoreCatalog(title: "Chứng chỉ", endpoint: "certificates", showAuth: $showAuth)
+                .tabItem { Label("Chứng chỉ", systemImage: "checkmark.seal") }
+            ModCatalog(showAuth: $showAuth)
+                .tabItem { Label("Mod Game", systemImage: "gamecontroller") }
+            BuyerProfileView(showAuth: $showAuth)
+                .tabItem { Label("Tài khoản", systemImage: "person.crop.circle") }
+        }
+        .environmentObject(session)
+        .sheet(isPresented: $showAuth) { BuyerAuthView().environmentObject(session) }
+        .task { await session.restore() }
+    }
+}
+
 private struct StoreItem: Decodable, Identifiable {
     let id: Int
     let name: String
@@ -36,8 +307,10 @@ private struct StoreItem: Decodable, Identifiable {
 }
 private struct StoreResponse: Decodable { let items: [StoreItem] }
 private struct StoreCatalog: View {
+    @EnvironmentObject private var session: BuyerSession
     let title: String
     let endpoint: String
+    @Binding var showAuth: Bool
     @State private var items: [StoreItem] = []
     @State private var checkout: CheckoutOrder?
     @State private var buying = false
@@ -51,6 +324,8 @@ private struct StoreCatalog: View {
                         Text(item.name).font(.headline)
                         Text(item.description).font(.subheadline)
                         Text(eriMoney(item.price_vnd)).fontWeight(.semibold)
+                        Text("Giao thủ công sau khi đối chiếu tiền MoMo")
+                            .font(.footnote).foregroundStyle(.secondary)
                         Button(buying ? "Đang tạo đơn..." : "Mua ngay") { Task { await buy(item) } }
                             .buttonStyle(.borderedProminent).disabled(buying)
                     }.padding(.vertical, 5)
@@ -64,25 +339,17 @@ private struct StoreCatalog: View {
         }
     }
     @MainActor private func buy(_ item: StoreItem) async {
-        guard let url = URL(string: publicAPI + "/api/v1/orders"), url.scheme == "https" else {
-            status = "Không thể kết nối máy chủ"; return
+        guard session.buyer != nil else {
+            showAuth = true
+            return
         }
         buying = true
         defer { buying = false }
         do {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "kind": endpoint == "products" ? "ai" : "certificate",
-                "product_id": item.id
-            ])
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 201 else {
-                let message = String(data: data, encoding: .utf8) ?? ""
-                throw PurchaseError.server(message.isEmpty ? "HTTP lỗi" : message)
-            }
-            checkout = try JSONDecoder().decode(CheckoutOrder.self, from: data)
+            checkout = try await session.buy(
+                kind: endpoint == "products" ? "ai" : "certificate",
+                productID: item.id
+            )
         } catch { status = "Không tạo được đơn: " + error.localizedDescription }
     }
     @MainActor private func load() async {
@@ -110,6 +377,8 @@ private struct CheckoutOrder: Decodable, Identifiable {
     let amount_vnd: Int
     let status: String
     let payment_method: String?
+    let created_at: String?
+    let kind: String?
     let payment_instructions: String?
     let transfer_note: String?
     let checkout_url: String?
@@ -127,6 +396,12 @@ private struct OrderDetailView: View {
                     LabeledContent("Mã đơn", value: order.id)
                     LabeledContent("Số tiền", value: eriMoney(order.amount_vnd))
                     LabeledContent("Trạng thái", value: order.status)
+                }
+                if order.kind == "ai" || order.kind == "certificate" {
+                    Section("Nhận sản phẩm") {
+                        Text("Sản phẩm được giao thủ công sau khi Admin xác nhận thanh toán. Dùng mã đơn để liên hệ nhận hàng.")
+                            .font(.footnote)
+                    }
                 }
                 Section("Thanh toán") {
                     if let path = order.qr_url,
@@ -188,6 +463,8 @@ private struct ModItem: Decodable, Identifiable {
 }
 private struct ModResponse: Decodable { let items: [ModItem] }
 private struct ModCatalog: View {
+    @EnvironmentObject private var session: BuyerSession
+    @Binding var showAuth: Bool
     @State private var items: [ModItem] = []
     @State private var status = ""
     @State private var buying = false
@@ -222,24 +499,15 @@ private struct ModCatalog: View {
         .padding(.vertical, 6)
     }
     @MainActor private func buy(_ item: ModItem) async {
-        guard let url = URL(string: publicAPI + "/api/v1/orders"), url.scheme == "https" else {
-            status = "Không thể kết nối máy chủ"; return
+        guard session.buyer != nil else {
+            showAuth = true
+            return
         }
         buying = true
         defer { buying = false }
         do {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "kind": "mod", "product_id": item.id
-            ])
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 201 else {
-                throw PurchaseError.server(String(data: data, encoding: .utf8) ?? "Không tạo được đơn")
-            }
-            checkout = try JSONDecoder().decode(CheckoutOrder.self, from: data)
-        } catch { status = error.localizedDescription }
+            checkout = try await session.buy(kind: "mod", productID: item.id)
+        } catch { status = "Không tạo được đơn: " + error.localizedDescription }
     }
     @MainActor private func load() async {
         guard let url = URL(string: publicAPI + "/api/v1/mods"), url.scheme == "https" else {

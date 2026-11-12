@@ -180,6 +180,7 @@ jobs:
           ERI_ADMIN_KEY: test-ci-admin-key-please-replace-1234567890
           ERI_DB_PATH: /tmp/eri-ci.sqlite3
           ERI_UPLOAD_DIR: /tmp/eri-ci-private-uploads
+          ERI_PAYMENT_MODE: static_momo
         run: |
           python - <<'PY'
           import io
@@ -261,14 +262,93 @@ jobs:
           assert qr.status_code == 200 and qr.content == png
           assert qr.headers["content-type"].startswith("image/png")
           assert client.get("/api/v1/admin/payment/momo", headers=headers).json()["linked"] is True
-          # In static MoMo mode only, the order points to the linked image.
-          from app import PAYMENT_MODE
-          if PAYMENT_MODE == "static_momo":
+          # Every customer must register or log in; orders are never anonymous.
+          register = client.post("/api/v1/auth/register", json={
+              "username": "customer_one", "password": "AnExampleStrongPassword2026!",
+              "display_name": "Khách thử nghiệm", "contact": "zalo:example_contact"
+          })
+          assert register.status_code == 201, register.text
+          token = register.json()["token"]
+          assert len(token) > 40
+          customer_headers = {"Authorization": "Bearer " + token}
+          assert client.post("/api/v1/auth/register", json={
+              "username": "CUSTOMER_ONE", "password": "AnExampleStrongPassword2026!",
+              "display_name": "Duplicated", "contact": "zalo:example_contact"
+          }).status_code == 409
+          assert client.post("/api/v1/auth/login", json={
+              "username": "customer_one", "password": "wrongpass"
+          }).status_code == 401
+          login = client.post("/api/v1/auth/login", json={
+              "username": "customer_one", "password": "AnExampleStrongPassword2026!"
+          })
+          assert login.status_code == 200
+          assert login.json()["customer"]["display_name"] == "Khách thử nghiệm"
+          assert client.get("/api/v1/auth/me", headers=customer_headers).status_code == 200
+          assert client.post("/api/v1/orders", json={
+              "kind": "mod", "product_id": item["id"]
+          }).status_code == 401
+
+          # Admin publishes AI Plus and certificate listings WITHOUT pre-uploading files.
+          ai = client.post("/api/v1/admin/products", headers=headers, json={
+              "name": "AI Plus theo đơn", "description": "Giao thủ công",
+              "price_vnd": 20000
+          })
+          cert = client.post("/api/v1/admin/certificates", headers=headers, json={
+              "name": "Chứng chỉ theo đơn", "issuer": "Chưa xác định",
+              "description": "Giao thủ công", "price_vnd": 10000
+          })
+          assert ai.status_code == 201 and cert.status_code == 201
+          for category, product_id in [
+              ("mod", item["id"]), ("ai", ai.json()["id"]),
+              ("certificate", cert.json()["id"])
+          ]:
               checkout = client.post("/api/v1/orders", json={
-                  "kind": "mod", "product_id": item["id"]
-              })
+                  "kind": category, "product_id": product_id
+              }, headers=customer_headers)
               assert checkout.status_code == 201, checkout.text
               assert checkout.json()["qr_url"] == "/api/v1/payment/momo-qr"
+              assert "buyer_contact" not in checkout.text
+              order_id = checkout.json()["id"]
+              assert client.get("/api/v1/orders/" + order_id).status_code == 401
+              assert client.get("/api/v1/orders/" + order_id, headers=customer_headers).status_code == 200
+
+          mine = client.get("/api/v1/me/orders", headers=customer_headers)
+          assert mine.status_code == 200 and len(mine.json()["items"]) == 3
+          assert set(x["kind"] for x in mine.json()["items"]) == {"mod", "ai", "certificate"}
+          assert "buyer_contact" not in mine.text
+
+          second = client.post("/api/v1/auth/register", json={
+              "username": "customer_two", "password": "SecondUserStrongPassword2026!",
+              "display_name": "Khách khác", "contact": "zalo:another_contact"
+          })
+          assert second.status_code == 201
+          second_headers = {"Authorization": "Bearer " + second.json()["token"]}
+          assert client.get("/api/v1/me/orders", headers=second_headers).json()["items"] == []
+          assert client.get("/api/v1/orders/" + order_id, headers=second_headers).status_code == 404
+
+          admin_orders = client.get("/api/v1/admin/orders", headers=headers)
+          assert admin_orders.status_code == 200
+          assert any(
+              x["buyer_username"] == "customer_one" and
+              x["buyer_contact"] == "zalo:example_contact"
+              for x in admin_orders.json()["items"]
+          )
+          assert client.get("/api/v1/admin/orders", headers=customer_headers).status_code == 403
+
+          # Admin alone confirms payment and marks items as delivered.
+          paid = client.post("/api/v1/admin/orders/" + order_id + "/status",
+                             headers=headers, json={
+                  "status": "paid", "transaction_reference": "MOMO_TEST_123456"
+              })
+          assert paid.status_code == 200, paid.text
+          fulfilled = client.post("/api/v1/admin/orders/" + order_id + "/status",
+                                  headers=headers, json={"status": "fulfilled"})
+          assert fulfilled.status_code == 200, fulfilled.text
+          assert client.get("/api/v1/orders/" + order_id,
+                            headers=customer_headers).json()["status"] == "fulfilled"
+          logged_out = client.post("/api/v1/auth/logout", headers=customer_headers)
+          assert logged_out.status_code == 200
+          assert client.get("/api/v1/me/orders", headers=customer_headers).status_code == 401
           # Deletion is protected and does not disclose private file locations.
           path = "/api/v1/admin/catalog/ipa/" + str(item["id"])
           assert client.delete(path).status_code == 403

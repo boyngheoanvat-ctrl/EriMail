@@ -49,6 +49,10 @@ private struct Order: Decodable, Identifiable {
     let product_name: String
     let amount_vnd: Int
     let status: String
+    let created_at: String?
+    let buyer_username: String?
+    let buyer_name: String?
+    let buyer_contact: String?
 }
 @MainActor
 private final class AdminSession: ObservableObject {
@@ -221,16 +225,18 @@ private struct AdminHome: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Nhập tệp để cập nhật sản phẩm") {
+                Section("IPA Mod Game") {
                     NavigationLink {
                         AdminUploadView(kind: .ipa).environmentObject(session)
-                    } label: { Label("IPA Mod Game", systemImage: "square.and.arrow.up") }
+                    } label: { Label("Nhập tệp IPA", systemImage: "square.and.arrow.up") }
+                }
+                Section("Đăng sản phẩm — giao sau khi khách mua") {
                     NavigationLink {
-                        AdminUploadView(kind: .certificate).environmentObject(session)
-                    } label: { Label("Chứng chỉ", systemImage: "checkmark.seal") }
+                        ManualListingView(kind: .certificate).environmentObject(session)
+                    } label: { Label("Đăng bán chứng chỉ", systemImage: "checkmark.seal") }
                     NavigationLink {
-                        AdminUploadView(kind: .ai).environmentObject(session)
-                    } label: { Label("AI Plus", systemImage: "sparkles") }
+                        ManualListingView(kind: .ai).environmentObject(session)
+                    } label: { Label("Đăng bán AI Plus", systemImage: "sparkles") }
                 }
                 Section("Thanh toán MoMo") {
                     NavigationLink {
@@ -249,6 +255,11 @@ private struct AdminHome: View {
                     NavigationLink { AdminCatalogView(kind: .ai).environmentObject(session) } label: {
                         Label("Xóa AI Plus", systemImage: "trash")
                     }
+                }
+                Section("Lịch sử khách đã đặt mua") {
+                    NavigationLink {
+                        OrdersView(kind: "all").environmentObject(session)
+                    } label: { Label("Tất cả đơn hàng / Khách mua", systemImage: "person.2") }
                 }
                 Section("Xử lý đơn hàng") {
                     NavigationLink { OrdersView(kind: "mod").environmentObject(session) } label: {
@@ -323,49 +334,109 @@ private struct OrdersView: View {
     @State private var orders: [Order] = []
     @State private var references: [String: String] = [:]
     @State private var status = ""
+
+    private var visible: [Order] {
+        kind == "all" ? orders : orders.filter { $0.kind == kind }
+    }
+    private func productCategory(_ type: String) -> String {
+        switch type {
+        case "mod": return "Mod Game"
+        case "ai": return "AI Plus"
+        case "certificate": return "Chứng chỉ"
+        default: return type
+        }
+    }
+    private func readableStatus(_ value: String) -> String {
+        switch value {
+        case "pending": return "Chờ xác nhận thanh toán"
+        case "paid": return "Đã thanh toán · Chưa giao"
+        case "fulfilled": return "Đã giao hàng"
+        case "cancelled": return "Đã hủy"
+        default: return value
+        }
+    }
+
     var body: some View {
         List {
+            Section {
+                Text("Đơn hàng gắn với tài khoản khách. Kiểm tra giao dịch MoMo thật trước khi xác nhận nhận tiền; chỉ đánh dấu Đã giao khi đã giao cho khách.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             if !status.isEmpty { Text(status).foregroundStyle(.secondary) }
-            ForEach(orders.filter { $0.kind == kind }) { order in
-                VStack(alignment: .leading, spacing: 8) {
+            ForEach(visible) { order in
+                VStack(alignment: .leading, spacing: 7) {
                     Text(order.product_name).font(.headline)
-                    Text("Mã đơn: " + order.id).font(.caption)
-                    Text(eriMoney(order.amount_vnd))
-                    Text("Trạng thái: " + order.status)
+                    Text("Loại: " + productCategory(order.kind))
+                    Text("Khách: " + (order.buyer_name ?? "Đơn cũ chưa có tài khoản"))
+                        .fontWeight(.semibold)
+                    if let username = order.buyer_username {
+                        Text("Tài khoản: @" + username)
+                    }
+                    if let contact = order.buyer_contact, !contact.isEmpty {
+                        Text("Liên hệ giao hàng: " + contact)
+                            .textSelection(.enabled)
+                    }
+                    Text("Mã đơn: " + order.id).textSelection(.enabled)
+                    if let created = order.created_at {
+                        Text("Đặt lúc: " + created).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Giá: " + eriMoney(order.amount_vnd))
+                    Text(readableStatus(order.status))
+                        .fontWeight(.medium)
                     if order.status == "pending" {
                         TextField("Mã giao dịch MoMo đã đối chiếu", text: Binding(
                             get: { references[order.id] ?? "" },
                             set: { references[order.id] = $0 }
-                        )).textInputAutocapitalization(.never)
-                        Button("Xác nhận đã nhận tiền") { Task { await update(order, "paid") } }
-                            .disabled((references[order.id] ?? "").count < 6)
-                        Button("Hủy đơn", role: .destructive) { Task { await update(order, "cancelled") } }
+                        ))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        Button("Xác nhận đã nhận tiền") {
+                            Task { await update(order, "paid") }
+                        }.disabled((references[order.id] ?? "").count < 6)
+                        Button("Hủy đơn", role: .destructive) {
+                            Task { await update(order, "cancelled") }
+                        }
                     } else if order.status == "paid" {
-                        Button("Đã giao sản phẩm thực tế") { Task { await update(order, "fulfilled") } }
+                        Text("Hãy liên hệ khách và giao hàng thực tế trước khi đánh dấu.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Button("Xác nhận đã giao cho khách") {
+                            Task { await update(order, "fulfilled") }
+                        }
                     }
-                }.padding(.vertical, 6)
+                }
+                .padding(.vertical, 7)
             }
         }
-        .navigationTitle(kind == "ai" ? "Giao hàng AI" : "Giao chứng chỉ")
+        .navigationTitle(kind == "all" ? "Lịch sử khách mua" : "Đơn " + productCategory(kind))
         .toolbar { Button("Làm mới") { Task { await refresh() } } }
         .task { await refresh() }
     }
+
     private func refresh() async {
         do {
-            orders = try JSONDecoder().decode(Envelope<Order>.self,
-                from: await session.send("/api/v1/admin/orders")).items
-            status = orders.filter { $0.kind == kind }.isEmpty ? "Chưa có đơn hàng." : ""
-        } catch { status = error.localizedDescription }
+            orders = try JSONDecoder().decode(
+                Envelope<Order>.self,
+                from: await session.send("/api/v1/admin/orders")
+            ).items
+            status = visible.isEmpty ? "Chưa có đơn hàng." : ""
+        } catch {
+            status = "Không tải được đơn: " + error.localizedDescription
+        }
     }
+
     private func update(_ order: Order, _ newStatus: String) async {
         var payload = ["status": newStatus]
-        if newStatus == "paid" { payload["transaction_reference"] = references[order.id] ?? "" }
+        if newStatus == "paid" {
+            payload["transaction_reference"] = references[order.id] ?? ""
+        }
         do {
             let body = try JSONEncoder().encode(payload)
             _ = try await session.send("/api/v1/admin/orders/" + order.id + "/status",
                                        method: "POST", data: body)
             await refresh()
-        } catch { status = error.localizedDescription }
+        } catch {
+            status = "Không cập nhật được đơn: " + error.localizedDescription
+        }
     }
 }
 
@@ -623,6 +694,81 @@ private struct AdminUploadView: View {
     }
 }
 
+
+// AI Plus and Chứng chỉ: public listings with manual fulfillment after payment.
+// No IPA, private certificate, passwords or AI credentials are uploaded here.
+private struct ManualListingView: View {
+    @EnvironmentObject private var session: AdminSession
+    let kind: UploadKind
+    @State private var name = ""
+    @State private var description = ""
+    @State private var issuer = ""
+    @State private var price = ""
+    @State private var posting = false
+    @State private var message = ""
+
+    private var certificate: Bool { kind == .certificate }
+    private var valid: Bool {
+        session.authenticated &&
+        (1...160).contains(name.trimmingCharacters(in: .whitespacesAndNewlines).count) &&
+        description.count <= 2000 && (Int(price) ?? 0) > 0 && !posting
+    }
+
+    var body: some View {
+        Form {
+            Section("Hiển thị tại ERI STORE") {
+                TextField(certificate ? "Tên gói chứng chỉ" : "Tên gói AI Plus", text: $name)
+                TextField("Mô tả và thời gian giao hàng", text: $description, axis: .vertical)
+                    .lineLimit(3...6)
+                if certificate {
+                    TextField("Nhà phát hành (không bắt buộc)", text: $issuer)
+                }
+                TextField("Giá vốn (VND)", text: $price)
+                    .keyboardType(.numberPad)
+            }
+            Section("Đăng bán") {
+                Button(posting ? "Đang đăng..." : "Đăng lên cửa hàng") {
+                    Task { await post() }
+                }.disabled(!valid)
+                if !message.isEmpty { Text(message).font(.footnote) }
+            }
+            Section("Chỉ đăng thông tin") {
+                Text("Không cần tải chứng chỉ, tài khoản AI hay dữ liệu riêng tư trước. Khách đặt mua bằng tài khoản ERI STORE, bạn sẽ thấy tên và liên hệ tại Lịch sử khách mua.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Sau khi đối chiếu giao dịch MoMo, liên hệ khách để giao sản phẩm rồi nhấn Xác nhận đã giao.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(certificate ? "Đăng chứng chỉ" : "Đăng AI Plus")
+    }
+
+    private func post() async {
+        guard valid, let amount = Int(price) else { return }
+        posting = true
+        defer { posting = false }
+        do {
+            var payload: [String: Any] = [
+                "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
+                "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+                "price_vnd": amount, "active": true
+            ]
+            if certificate {
+                let text = issuer.trimmingCharacters(in: .whitespacesAndNewlines)
+                payload["issuer"] = text.isEmpty ? "Chưa xác định" : text
+            }
+            let body = try JSONSerialization.data(withJSONObject: payload)
+            let path = certificate ? "/api/v1/admin/certificates" : "/api/v1/admin/products"
+            _ = try await session.send(path, method: "POST", data: body)
+            message = "Đã đăng bán. Chờ khách đặt mua, xác nhận tiền rồi giao thủ công."
+            name = ""
+            description = ""
+            issuer = ""
+            price = ""
+        } catch {
+            message = "Không đăng được: " + error.localizedDescription
+        }
+    }
+}
 
 private struct CatalogProduct: Decodable, Identifiable {
     let id: Int

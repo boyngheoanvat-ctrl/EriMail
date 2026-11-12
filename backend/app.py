@@ -10,7 +10,7 @@ import urllib.error
 import re
 import zipfile
 import plistlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
@@ -53,6 +53,17 @@ def init():
           id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
           price_vnd INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1
         );
+        CREATE TABLE IF NOT EXISTS customers (
+          id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          display_name TEXT NOT NULL, contact TEXT NOT NULL,
+          salt TEXT NOT NULL, password_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS customer_sessions (
+          token_hash TEXT PRIMARY KEY, customer_id INTEGER NOT NULL,
+          expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_customer ON customer_sessions(customer_id);
         CREATE TABLE IF NOT EXISTS orders (
           id TEXT PRIMARY KEY, kind TEXT NOT NULL, product_id INTEGER NOT NULL,
           product_name TEXT NOT NULL, amount_vnd INTEGER NOT NULL,
@@ -84,15 +95,129 @@ def init():
         if "price_vnd" not in ipa_columns:
             db.execute("ALTER TABLE ipa ADD COLUMN price_vnd INTEGER NOT NULL DEFAULT 0")
         columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
-        for column, dtype in (("payos_order_code", "INTEGER"), ("payos_checkout_url", "TEXT")):
+        for column, dtype in (("payos_order_code", "INTEGER"), ("payos_checkout_url", "TEXT"),
+                              ("customer_id", "INTEGER")):
             if column not in columns:
                 db.execute("ALTER TABLE orders ADD COLUMN " + column + " " + dtype)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer_created ON orders(customer_id, created_at)")
 
 init()
 
 def require_admin(x_eri_admin_key: str | None = Header(default=None)):
     if len(ADMIN_KEY) < 32 or not secrets.compare_digest(x_eri_admin_key or "", ADMIN_KEY):
         raise HTTPException(403, "Admin access denied")
+
+
+# Customers have individual credentials and scoped order access.
+# Passwords are never stored in plaintext; session tokens are stored only as SHA-256 hashes.
+CUSTOMER_PBKDF2_ITERATIONS = 390_000
+CUSTOMER_SESSION_DAYS = 30
+USERNAME_RULE = re.compile(r"^[a-zA-Z0-9_.-]{3,32}$")
+
+class CustomerRegistration(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=10, max_length=128)
+    display_name: str = Field(min_length=2, max_length=80)
+    contact: str = Field(min_length=6, max_length=100)
+
+class CustomerLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=32)
+    password: str = Field(min_length=1, max_length=128)
+
+def _customer_password_hash(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, CUSTOMER_PBKDF2_ITERATIONS
+    ).hex()
+
+def _customer_response(row):
+    return {
+        "id": row["id"], "username": row["username"],
+        "display_name": row["display_name"], "contact": row["contact"]
+    }
+
+def _customer_session(db, row):
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    db.execute(
+        "INSERT INTO customer_sessions(token_hash,customer_id,expires_at,created_at)"
+        " VALUES(?,?,?,?)",
+        (hashlib.sha256(token.encode()).hexdigest(), row["id"],
+         (now + timedelta(days=CUSTOMER_SESSION_DAYS)).isoformat(), now.isoformat())
+    )
+    return {"token": token, "customer": _customer_response(row)}
+
+def require_customer(authorization: str | None = Header(default=None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Vui lòng đăng nhập tài khoản ERI STORE")
+    token = authorization[7:]
+    if len(token) < 40 or len(token) > 128:
+        raise HTTPException(401, "Phiên đăng nhập không hợp lệ")
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    with connection() as db:
+        row = db.execute(
+            "SELECT c.id,c.username,c.display_name,c.contact,s.expires_at "
+            "FROM customer_sessions s JOIN customers c ON c.id=s.customer_id "
+            "WHERE s.token_hash=?", (digest,)
+        ).fetchone()
+    if row is None or datetime.fromisoformat(row["expires_at"]) <= datetime.now(timezone.utc):
+        raise HTTPException(401, "Phiên đăng nhập đã hết hạn")
+    return dict(row)
+
+@app.post("/api/v1/auth/register", status_code=201)
+def customer_register(body: CustomerRegistration):
+    username = body.username.strip().lower()
+    display_name = body.display_name.strip()
+    contact = body.contact.strip()
+    if not USERNAME_RULE.fullmatch(username) or not (2 <= len(display_name) <= 80) or not (6 <= len(contact) <= 100):
+        raise HTTPException(422, "Thông tin đăng ký không hợp lệ")
+    salt = secrets.token_bytes(16)
+    hashed = _customer_password_hash(body.password, salt)
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as db:
+        try:
+            cur = db.execute(
+                "INSERT INTO customers(username,display_name,contact,salt,password_hash,created_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (username, display_name, contact, salt.hex(), hashed, now)
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Tên đăng nhập đã được sử dụng")
+        row = db.execute("SELECT * FROM customers WHERE id=?", (cur.lastrowid,)).fetchone()
+        return _customer_session(db, row)
+
+@app.post("/api/v1/auth/login")
+def customer_login(body: CustomerLogin):
+    with connection() as db:
+        row = db.execute("SELECT * FROM customers WHERE username=?",
+                         (body.username.strip().lower(),)).fetchone()
+        if row is None:
+            # Consume comparable CPU time so unknown usernames are not trivially distinguishable.
+            _customer_password_hash(body.password, b"\0" * 16)
+            raise HTTPException(401, "Sai tên đăng nhập hoặc mật khẩu")
+        calculated = _customer_password_hash(body.password, bytes.fromhex(row["salt"]))
+        if not hmac.compare_digest(calculated, row["password_hash"]):
+            raise HTTPException(401, "Sai tên đăng nhập hoặc mật khẩu")
+        return _customer_session(db, row)
+
+@app.get("/api/v1/auth/me")
+def customer_me(customer=Depends(require_customer)):
+    return _customer_response(customer)
+
+@app.post("/api/v1/auth/logout")
+def customer_logout(authorization: str | None = Header(default=None),
+                    customer=Depends(require_customer)):
+    with connection() as db:
+        db.execute("DELETE FROM customer_sessions WHERE token_hash=?",
+                   (hashlib.sha256(authorization[7:].encode()).hexdigest(),))
+    return {"logged_out": True}
+
+@app.get("/api/v1/me/orders")
+def customer_order_history(customer=Depends(require_customer)):
+    with connection() as db:
+        rows = db.execute(
+            "SELECT * FROM orders WHERE customer_id=? ORDER BY created_at DESC LIMIT 200",
+            (customer["id"],)).fetchall()
+    return {"items": [public_order(x) for x in rows]}
 
 class IPA(BaseModel):
     name: str = Field(min_length=1, max_length=160)
@@ -246,8 +371,8 @@ class NewOrder(BaseModel):
 
 def public_order(row):
     data = dict(row)
+    data.pop("customer_id", None)
     data.pop("product_id", None)
-    data.pop("created_at", None)
     data.pop("payos_order_code", None)
     checkout = data.pop("payos_checkout_url", None)
     if data["status"] == "pending" and PAYMENT_MODE == "payos":
@@ -277,7 +402,7 @@ def public_order(row):
     return data
 
 @app.post("/api/v1/orders", status_code=201)
-def create_order(item: NewOrder):
+def create_order(item: NewOrder, customer=Depends(require_customer)):
     if PAYMENT_MODE == "payos" and not payos_configured():
         raise HTTPException(503, "ERI payOS payment channel not configured")
     if PAYMENT_MODE not in ("static_momo", "payos") and (not BANK_BIN or not BANK_ACCOUNT or not BANK_NAME):
@@ -290,8 +415,8 @@ def create_order(item: NewOrder):
         if product["price_vnd"] <= 0:
             raise HTTPException(422, "Product price must be positive")
         oid = secrets.token_hex(6).upper()
-        db.execute("INSERT INTO orders(id,kind,product_id,product_name,amount_vnd,status,created_at) VALUES(?,?,?,?,?,?,?)",
-            (oid,item.kind,item.product_id,product["name"],sale_price(product["price_vnd"]),"pending",datetime.now(timezone.utc).isoformat()))
+        db.execute("INSERT INTO orders(id,kind,product_id,product_name,amount_vnd,status,created_at,customer_id) VALUES(?,?,?,?,?,?,?,?)",
+            (oid,item.kind,item.product_id,product["name"],sale_price(product["price_vnd"]),"pending",datetime.now(timezone.utc).isoformat(),customer["id"]))
         row = db.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
     if PAYMENT_MODE == "payos":
         order_code = secrets.randbelow(1_900_000_000) + 100_000_000
@@ -305,11 +430,12 @@ def create_order(item: NewOrder):
     return public_order(row)
 
 @app.get("/api/v1/orders/{order_id}")
-def order_status(order_id: str):
+def order_status(order_id: str, customer=Depends(require_customer)):
     if not re.fullmatch(r"[A-F0-9]{12}", order_id):
         raise HTTPException(404, "Order not found")
     with connection() as db:
-        row = db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+        row = db.execute("SELECT * FROM orders WHERE id=? AND customer_id=?",
+                         (order_id, customer["id"])).fetchone()
     if row is None:
         raise HTTPException(404, "Order not found")
     return public_order(row)
@@ -411,7 +537,11 @@ def update_order_status(order_id: str, item: OrderStatusUpdate):
 @app.get("/api/v1/admin/orders", dependencies=[Depends(require_admin)])
 def admin_orders():
     with connection() as db:
-        rows = db.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 200").fetchall()
+        rows = db.execute(
+            "SELECT o.*, c.username AS buyer_username, c.display_name AS buyer_name, "
+            "c.contact AS buyer_contact FROM orders o LEFT JOIN customers c "
+            "ON c.id=o.customer_id ORDER BY o.created_at DESC LIMIT 300"
+        ).fetchall()
     return {"items": [dict(x) for x in rows]}
 
 # Private signing API (requires a macOS worker and ERI_SIGNING_KEY).
