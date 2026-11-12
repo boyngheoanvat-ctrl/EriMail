@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.os.Bundle
 import android.os.Build
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.view.View
 import android.view.WindowInsets
@@ -203,9 +204,48 @@ class MainActivity : Activity() {
                     "\nSản phẩm: " + order.optString("product_name") +
                     "\nSố tiền: " + "%,d đ".format(java.util.Locale.US, order.optLong("amount_vnd")) +
                     "\nNội dung chuyển: " + note + "\n\n" + instructions
+                val qrPath = order.optString("qr_url")
+                val qrBitmap = if (qrPath.isNotBlank()) {
+                    try {
+                        val imageUrl = if (qrPath.startsWith("https://")) qrPath else api + qrPath
+                        val conn = URL(imageUrl).openConnection() as HttpURLConnection
+                        try {
+                            conn.connectTimeout = 15000
+                            conn.readTimeout = 15000
+                            if (conn.responseCode != 200) null else {
+                                val bytes = conn.inputStream.use { it.readBytes() }
+                                if (bytes.size > 2 * 1024 * 1024) null else
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            }
+                        } finally { conn.disconnect() }
+                    } catch (_: Exception) { null }
+                } else null
                 runOnUiThread {
+                    val content = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(16), dp(8), dp(16), dp(8))
+                    }
+                    if (qrBitmap != null) {
+                        content.addView(TextView(this).apply {
+                            text = "Quét mã QR MoMo"
+                            textSize = 18f
+                        })
+                        content.addView(ImageView(this).apply {
+                            setImageBitmap(qrBitmap)
+                            adjustViewBounds = true
+                            scaleType = ImageView.ScaleType.FIT_CENTER
+                        }, LinearLayout.LayoutParams(-1, dp(260)))
+                    } else if (order.optBoolean("payment_setup_required", false)) {
+                        content.addView(TextView(this).apply {
+                            text = "Chủ cửa hàng chưa liên kết QR MoMo."
+                        })
+                    } else if (qrPath.isNotBlank()) {
+                        content.addView(TextView(this).apply { text = "Không tải được ảnh QR." })
+                    }
+                    content.addView(TextView(this).apply { text = details })
                     AlertDialog.Builder(this).setTitle("Đơn hàng đã tạo")
-                        .setMessage(details).setPositiveButton("Đóng", null).show()
+                        .setView(ScrollView(this).apply { addView(content) })
+                        .setPositiveButton("Đóng", null).show()
                 }
             } catch (e: Exception) {
                 runOnUiThread {

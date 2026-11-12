@@ -13,7 +13,7 @@ import plistlib
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -71,6 +71,11 @@ def init():
           id TEXT PRIMARY KEY, kind TEXT NOT NULL, product_id INTEGER NOT NULL,
           original_name TEXT NOT NULL, storage_name TEXT NOT NULL,
           size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS merchant_payment_qr (
+          id INTEGER PRIMARY KEY CHECK(id=1), image BLOB NOT NULL,
+          mime TEXT NOT NULL CHECK(mime IN ('image/png','image/jpeg')),
+          updated_at TEXT NOT NULL
         );
         """)
         ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}
@@ -252,8 +257,14 @@ def public_order(row):
     data.pop("supplier_reference", None)
     if data["status"] == "pending" and PAYMENT_MODE == "static_momo":
         data["payment_method"] = "static_momo"
-        data["payment_instructions"] = "Quét QR MoMo cố định trong ứng dụng. Nhập đúng số tiền và ghi mã đơn nếu ứng dụng ngân hàng hỗ trợ. Người bán xác nhận thủ công."
+        data["payment_instructions"] = "Quét QR MoMo, tự nhập đúng số tiền và nội dung chuyển khoản. Chỉ Admin xác nhận khi đã kiểm tra giao dịch thực tế."
         data["transfer_note"] = "ERI " + data["id"]
+        with connection() as db:
+            has_qr = db.execute("SELECT 1 FROM merchant_payment_qr WHERE id=1").fetchone() is not None
+        if has_qr:
+            data["qr_url"] = "/api/v1/payment/momo-qr"
+        else:
+            data["payment_setup_required"] = True
     elif data["status"] == "pending" and BANK_BIN and BANK_ACCOUNT:
         from urllib.parse import quote
         note = "ERI " + data["id"]
@@ -766,3 +777,96 @@ async def eri_finish_chunk_upload(upload_id: str):
             raise
         metadata_file.unlink(missing_ok=True)
     return {"id": product_id, "name": meta["name"], "uploaded": True}
+
+
+# Merchant-configured static MoMo QR. Never put admin tokens or buyer secrets here.
+# This image is the account's own QR, NOT a MoMo OAuth/API connection.
+MOMO_QR_LIMIT = 2 * 1024 * 1024
+
+def _validate_momo_qr(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        if 64 <= width <= 4096 and 64 <= height <= 4096:
+            return "image/png"
+    if data.startswith(b"\xff\xd8\xff") and data.endswith(b"\xff\xd9"):
+        return "image/jpeg"
+    raise HTTPException(422, "Chỉ chấp nhận ảnh QR PNG/JPG hợp lệ")
+
+@app.get("/api/v1/payment/momo-qr")
+def public_momo_qr():
+    with connection() as db:
+        row = db.execute("SELECT image,mime FROM merchant_payment_qr WHERE id=1").fetchone()
+    if row is None:
+        raise HTTPException(404, "Chưa liên kết QR MoMo")
+    return Response(content=row["image"], media_type=row["mime"],
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+@app.get("/api/v1/admin/payment/momo", dependencies=[Depends(require_admin)])
+def admin_momo_qr_status():
+    with connection() as db:
+        row = db.execute("SELECT updated_at FROM merchant_payment_qr WHERE id=1").fetchone()
+    return {"linked": row is not None, "updated_at": row["updated_at"] if row else None}
+
+@app.post("/api/v1/admin/payment/momo", dependencies=[Depends(require_admin)])
+async def admin_link_momo_qr(qr: UploadFile = File(...)):
+    length = 0
+    chunks = []
+    try:
+        while chunk := await qr.read(256 * 1024):
+            length += len(chunk)
+            if length > MOMO_QR_LIMIT:
+                raise HTTPException(413, "Ảnh QR quá 2MB")
+            chunks.append(chunk)
+    finally:
+        await qr.close()
+    data = b"".join(chunks)
+    mime = _validate_momo_qr(data)
+    now = datetime.now(timezone.utc).isoformat()
+    with connection() as db:
+        db.execute(
+            "INSERT INTO merchant_payment_qr(id,image,mime,updated_at) VALUES(1,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET image=excluded.image,mime=excluded.mime,"
+            "updated_at=excluded.updated_at", (data,mime,now))
+    return {"linked": True, "updated_at": now}
+
+@app.delete("/api/v1/admin/payment/momo", dependencies=[Depends(require_admin)])
+def admin_unlink_momo_qr():
+    with connection() as db:
+        db.execute("DELETE FROM merchant_payment_qr WHERE id=1")
+    return {"linked": False}
+
+@app.get("/api/v1/admin/catalog/{kind}", dependencies=[Depends(require_admin)])
+def admin_catalog_products(kind: str):
+    lookup = {"ipa": "ipa", "certificate": "certificates", "ai": "products"}
+    if kind not in lookup:
+        raise HTTPException(404, "Danh mục không tồn tại")
+    with connection() as db:
+        rows = db.execute("SELECT id,name,description,price_vnd FROM " + lookup[kind] +
+                          " ORDER BY id DESC LIMIT 300").fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+@app.delete("/api/v1/admin/catalog/{kind}/{product_id}",
+            dependencies=[Depends(require_admin)])
+def admin_delete_catalog_product(kind: str, product_id: int):
+    lookup = {"ipa": "ipa", "certificate": "certificates", "ai": "products"}
+    if kind not in lookup or product_id <= 0:
+        raise HTTPException(404, "Sản phẩm không tồn tại")
+    storage_names = []
+    with connection() as db:
+        row = db.execute("SELECT id FROM " + lookup[kind] + " WHERE id=?", (product_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "Sản phẩm không tồn tại")
+        matches = db.execute(
+            "SELECT storage_name FROM private_product_uploads WHERE kind=? AND product_id=?",
+            (kind, product_id)).fetchall()
+        storage_names = [x["storage_name"] for x in matches]
+        db.execute("DELETE FROM private_product_uploads WHERE kind=? AND product_id=?",
+                   (kind, product_id))
+        db.execute("DELETE FROM " + lookup[kind] + " WHERE id=?", (product_id,))
+        # Keep existing order records and payment history; they store a name/price snapshot.
+    # Remove only private files referenced by metadata. Never construct paths from user input.
+    for name in storage_names:
+        if Path(name).name == name and not name.startswith("."):
+            (UPLOAD_DIR / name).unlink(missing_ok=True)
+    return {"deleted": True, "id": product_id, "kind": kind}

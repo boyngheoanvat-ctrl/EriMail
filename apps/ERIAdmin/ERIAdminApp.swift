@@ -155,6 +155,25 @@ private final class AdminSession: ObservableObject {
         onProgress(1.0)
     }
 
+
+    func uploadMoMoQR(file: URL) async throws {
+        let bytes = try Data(contentsOf: file, options: .mappedIfSafe)
+        guard !bytes.isEmpty && bytes.count <= 2 * 1024 * 1024 else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        let boundary = "ERIQR-" + UUID().uuidString
+        var body = Data()
+        body.append(Data(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"qr\"; filename=\"momo-qr.png\"\r\nContent-Type: application/octet-stream\r\n\r\n").utf8))
+        body.append(bytes)
+        body.append(Data(("\r\n--" + boundary + "--\r\n").utf8))
+        var req = try request("/api/v1/admin/payment/momo", method: "POST")
+        req.setValue("multipart/form-data; boundary=" + boundary, forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 45
+        let (_, resp) = try await URLSession.shared.upload(for: req, from: body)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(status) else { throw AdminError.http(status) }
+    }
+
     func activate(_ candidate: String) async {
         let old = key
         key = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -203,6 +222,24 @@ private struct AdminHome: View {
                     NavigationLink {
                         AdminUploadView(kind: .ai).environmentObject(session)
                     } label: { Label("AI Plus", systemImage: "sparkles") }
+                }
+                Section("Thanh toán MoMo") {
+                    NavigationLink {
+                        MoMoLinkView().environmentObject(session)
+                    } label: {
+                        Label("Liên kết MoMo", systemImage: "qrcode")
+                    }
+                }
+                Section("Quản lý sản phẩm đã đăng") {
+                    NavigationLink { AdminCatalogView(kind: .ipa).environmentObject(session) } label: {
+                        Label("Xóa IPA Mod Game", systemImage: "trash")
+                    }
+                    NavigationLink { AdminCatalogView(kind: .certificate).environmentObject(session) } label: {
+                        Label("Xóa chứng chỉ", systemImage: "trash")
+                    }
+                    NavigationLink { AdminCatalogView(kind: .ai).environmentObject(session) } label: {
+                        Label("Xóa AI Plus", systemImage: "trash")
+                    }
                 }
                 Section("Xử lý đơn hàng") {
                     NavigationLink { OrdersView(kind: "mod").environmentObject(session) } label: {
@@ -575,4 +612,183 @@ private struct AdminUploadView: View {
             status = "Cập nhật thất bại: " + error.localizedDescription
         }
     }
+}
+
+
+private struct CatalogProduct: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String
+    let price_vnd: Int
+}
+
+private struct CatalogList: Decodable {
+    let items: [CatalogProduct]
+}
+
+private struct AdminCatalogView: View {
+    @EnvironmentObject private var session: AdminSession
+    let kind: UploadKind
+    @State private var products: [CatalogProduct] = []
+    @State private var toDelete: CatalogProduct?
+    @State private var busy = false
+    @State private var message = ""
+
+    var body: some View {
+        List {
+            if !message.isEmpty { Text(message).foregroundStyle(.secondary) }
+            ForEach(products) { item in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(item.name).font(.headline)
+                    if !item.description.isEmpty { Text(item.description) }
+                    Text(item.price_vnd.formatted(.currency(code: "VND")))
+                    Button("Xóa sản phẩm", role: .destructive) { toDelete = item }
+                        .disabled(busy)
+                }
+                .padding(.vertical, 5)
+            }
+        }
+        .navigationTitle("Quản lý " + kind.title.replacingOccurrences(of: "Cập nhật ", with: ""))
+        .toolbar { Button("Làm mới") { Task { await reload() } } }
+        .task { await reload() }
+        .confirmationDialog("Xóa sản phẩm khỏi ERI STORE?", isPresented: Binding(
+            get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }
+        ), titleVisibility: .visible) {
+            Button("Xóa vĩnh viễn", role: .destructive) {
+                guard let item = toDelete else { return }
+                toDelete = nil
+                Task { await delete(item) }
+            }
+            Button("Hủy", role: .cancel) { toDelete = nil }
+        } message: {
+            Text("Sản phẩm sẽ biến mất khỏi cửa hàng. Tệp đã upload được xóa trên server, còn lịch sử đơn hàng được giữ lại.")
+        }
+    }
+
+    private func reload() async {
+        do {
+            let result = try await session.send("/api/v1/admin/catalog/" + kind.rawValue)
+            products = try JSONDecoder().decode(CatalogList.self, from: result).items
+            message = products.isEmpty ? "Chưa có sản phẩm." : ""
+        } catch { message = error.localizedDescription }
+    }
+
+    private func delete(_ item: CatalogProduct) async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await session.send("/api/v1/admin/catalog/" + kind.rawValue +
+                                       "/" + String(item.id), method: "DELETE")
+            await reload()
+            message = "Đã xóa " + item.name
+        } catch {
+            message = "Xóa thất bại: " + error.localizedDescription
+        }
+    }
+}
+
+private struct MoMoStatus: Decodable {
+    let linked: Bool
+    let updated_at: String?
+}
+
+private struct MoMoLinkView: View {
+    @EnvironmentObject private var session: AdminSession
+    @State private var linked = false
+    @State private var updated = ""
+    @State private var picker = false
+    @State private var working = false
+    @State private var message = ""
+    @State private var unlinkConfirm = false
+
+    var body: some View {
+        Form {
+            Section("Liên kết MoMo") {
+                Label(linked ? "Đã liên kết mã QR" : "Chưa có mã QR", systemImage: "qrcode")
+                    .foregroundStyle(linked ? .green : .secondary)
+                if linked {
+                    AsyncImage(url: URL(string: server + "/api/v1/payment/momo-qr?preview=" +
+                                        updated.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed).orEmpty)) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        ProgressView()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 220)
+                }
+                Button(working ? "Đang cập nhật..." : (linked ? "Thay ảnh QR MoMo" : "Liên kết MoMo")) {
+                    picker = true
+                }
+                .disabled(working)
+                if linked {
+                    Button("Hủy liên kết", role: .destructive) {
+                        unlinkConfirm = true
+                    }
+                    .disabled(working)
+                }
+                if !message.isEmpty { Text(message).font(.footnote) }
+            }
+            Section {
+                Text("Chọn ảnh QR nhận tiền của tài khoản MoMo bạn quản lý (PNG hoặc JPG, tối đa 2 MB). Khách sẽ thấy ảnh này khi bấm Mua ngay, kèm số tiền và nội dung đơn hàng. Không phải liên kết API MoMo; không tự xác nhận thanh toán.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Chỉ nhập ảnh QR, không nhập mật khẩu hay mã OTP MoMo.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Liên kết MoMo")
+        .task { await refresh() }
+        .sheet(isPresented: $picker) {
+            ERIDocumentPicker(onPick: { url in
+                picker = false
+                Task { await upload(url) }
+            }, onCancel: { picker = false })
+        }
+        .confirmationDialog("Hủy mã QR MoMo đã liên kết?", isPresented: $unlinkConfirm,
+                            titleVisibility: .visible) {
+            Button("Hủy liên kết", role: .destructive) { Task { await unlink() } }
+            Button("Giữ lại", role: .cancel) {}
+        }
+    }
+
+    private func refresh() async {
+        do {
+            let data = try await session.send("/api/v1/admin/payment/momo")
+            let response = try JSONDecoder().decode(MoMoStatus.self, from: data)
+            linked = response.linked
+            updated = response.updated_at ?? ""
+        } catch { message = "Không lấy được trạng thái: " + error.localizedDescription }
+    }
+
+    private func upload(_ source: URL) async {
+        guard ["png", "jpg", "jpeg"].contains(source.pathExtension.lowercased()) else {
+            message = "Chỉ chọn ảnh .png, .jpg hoặc .jpeg."
+            return
+        }
+        working = true
+        defer { working = false }
+        do {
+            let copied = try await Task.detached(priority: .userInitiated) {
+                try ImportedFile.copy(source, maxBytes: 2 * 1024 * 1024)
+            }.value
+            defer { try? FileManager.default.removeItem(at: copied.deletingLastPathComponent()) }
+            try await session.uploadMoMoQR(file: copied)
+            message = "Đã cập nhật mã QR. Khách có thể xem ở bước thanh toán."
+            await refresh()
+        } catch { message = "Liên kết thất bại: " + error.localizedDescription }
+    }
+
+    private func unlink() async {
+        working = true
+        defer { working = false }
+        do {
+            _ = try await session.send("/api/v1/admin/payment/momo", method: "DELETE")
+            linked = false
+            updated = ""
+            message = "Đã hủy liên kết QR."
+        } catch { message = error.localizedDescription }
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var orEmpty: String { self ?? "" }
 }

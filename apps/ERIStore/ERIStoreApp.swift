@@ -104,6 +104,8 @@ private struct CheckoutOrder: Decodable, Identifiable {
     let payment_instructions: String?
     let transfer_note: String?
     let checkout_url: String?
+    let qr_url: String?
+    let payment_setup_required: Bool?
 }
 private struct OrderDetailView: View {
     let order: CheckoutOrder
@@ -118,6 +120,30 @@ private struct OrderDetailView: View {
                     LabeledContent("Trạng thái", value: order.status)
                 }
                 Section("Thanh toán") {
+                    if let path = order.qr_url,
+                       let url = URL(string: path.hasPrefix("https://") ? path : publicAPI + path),
+                       url.scheme == "https" {
+                        VStack(spacing: 12) {
+                            Text("Quét mã QR MoMo").font(.headline)
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().interpolation(.none)
+                                        .scaledToFit().frame(maxWidth: 300, maxHeight: 300)
+                                case .failure:
+                                    Text("Không tải được ảnh QR. Vui lòng thử lại.")
+                                        .foregroundStyle(.red)
+                                default:
+                                    ProgressView().frame(height: 220)
+                                }
+                            }
+                            Text("Mã QR là ảnh tài khoản nhận tiền, không tự điền số tiền hoặc mã đơn.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity)
+                    } else if order.payment_setup_required == true && order.checkout_url == nil {
+                        Text("Chủ cửa hàng chưa liên kết QR MoMo. Vui lòng liên hệ người bán trước khi thanh toán.")
+                            .foregroundStyle(.red)
+                    }
                     if let instructions = order.payment_instructions {
                         Text(instructions)
                     }
