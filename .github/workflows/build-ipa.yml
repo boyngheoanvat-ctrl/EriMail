@@ -41,7 +41,7 @@ jobs:
               if old not in code:
                   raise RuntimeError("Missing view: " + old)
               code = code.replace(old, new, 1)
-          code += "\\n" + Path("EriMail/EriLocalFiles.swift").read_text()
+          code += "\n" + Path("EriMail/EriLocalFiles.swift").read_text()
           p.write_text(code)
           PY
 
