@@ -578,12 +578,20 @@ struct EriInstallItem: Decodable, Identifiable {
     let manifestURL: URL
     let status: String
 }
+enum ERIPricing {
+    static func sellingPrice(fromCost cost: Int) -> Int {
+        guard cost > 0 else { return 0 }
+        return Int((Double(cost) * 1.30 / 1000.0).rounded(.up)) * 1000
+    }
+}
+
 struct ERICertificate: Decodable, Identifiable {
     let id: Int
     let name: String
     let issuer: String
     let description: String
     let price_vnd: Int
+    let cost_vnd: Int?
 }
 
 struct InstallToolsView: View {
@@ -615,7 +623,14 @@ struct InstallToolsView: View {
                             Text("Đơn vị phát hành: " + item.issuer).font(.caption)
                             Text(item.description)
                             Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
-                            ERIBuyButton(kind: "certificate", productID: item.id)
+                            if let cost = item.cost_vnd, cost > 0 {
+                                Text("Giá ERI: giá nhập + 30%, làm tròn lên 1.000đ").font(.caption).foregroundColor(.secondary)
+                                if item.price_vnd != ERIPricing.sellingPrice(fromCost: cost) {
+                                    Text("Giá chưa đồng bộ quy tắc 30% — tạm ngừng nhận đơn").foregroundColor(.orange)
+                                } else { ERIBuyButton(kind: "certificate", productID: item.id) }
+                            } else {
+                                Text("Chờ xác minh giá nhập — chưa mở đặt mua").font(.caption).foregroundColor(.secondary)
+                            }
                         }
                     }
                     Text("Chọn sản phẩm, xem giá và quét QR MoMo để chuyển khoản. Đơn chờ ERI xác nhận sau khi kiểm tra giao dịch. Danh mục cần được thêm vào backend ERI.")
@@ -687,7 +702,14 @@ struct AIPlusStoreView: View {
                             Text(item.description)
                             Text(item.price_vnd.formatted(.currency(code: "VND")))
                                 .fontWeight(.semibold)
-                            ERIBuyButton(kind: "ai", productID: item.id)
+                            if let cost = item.cost_vnd, cost > 0 {
+                                Text("Giá ERI: giá nhập + 30%, làm tròn lên 1.000đ").font(.caption).foregroundColor(.secondary)
+                                if item.price_vnd != ERIPricing.sellingPrice(fromCost: cost) {
+                                    Text("Giá chưa đồng bộ quy tắc 30% — tạm ngừng nhận đơn").foregroundColor(.orange)
+                                } else { ERIBuyButton(kind: "ai", productID: item.id) }
+                            } else {
+                                Text("Chờ xác minh giá nhập — chưa mở đặt mua").font(.caption).foregroundColor(.secondary)
+                            }
                         }
                     }
                     Text("Xem giá, chọn Mua ngay và quét QR MoMo. ERI kiểm tra chuyển khoản trước khi xác nhận đơn. Chỉ đặt hàng khi máy chủ ERI đã được triển khai và có sản phẩm hợp lệ.")
@@ -709,6 +731,7 @@ struct ERIProduct: Decodable, Identifiable {
     let name: String
     let description: String
     let price_vnd: Int
+    let cost_vnd: Int?
 }
 struct ERIOffer: Decodable, Identifiable {
     let id: Int
