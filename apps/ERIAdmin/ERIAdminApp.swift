@@ -260,19 +260,7 @@ private enum UploadKind: String {
         case .ai: return ["txt", "json", "csv", "zip"]
         }
     }
-    // Explicit types keep .ipa, .p12 and .mobileprovision selectable in Files.
-    var contentTypes: [UTType] {
-        switch self {
-        case .ipa:
-            return [UTType(filenameExtension: "ipa", conformingTo: .data)
-                    ?? UTType(importedAs: "com.eri.ipa", conformingTo: .data),
-                    .archive, .data, .item]
-        case .certificate:
-            return [.item, .data, .archive]
-        case .ai:
-            return [.item, .data, .archive, .text, .json, .commaSeparatedText]
-        }
-    }
+    // Use a broad system document picker; validate file extension after selection.
     var maxBytes: Int {
         switch self {
         case .ipa: return 512 * 1_048_576
@@ -365,6 +353,51 @@ private enum MultipartBuilder {
     }
 }
 
+// UIKit document picker avoids fileImporter selection issues on physical iPhones.
+// .item deliberately accepts any provider UTI; ERI validates the extension
+// after selection so .ipa is not disabled by an unrelated app's UTI registration.
+private struct ERIDocumentPicker: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+    let onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        picker.allowsMultipleSelection = false
+        picker.shouldShowFileExtensions = true
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onCancel: onCancel)
+    }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        let onCancel: () -> Void
+
+        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+            self.onPick = onPick
+            self.onCancel = onCancel
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController,
+                            didPickDocumentsAt urls: [URL]) {
+            guard let file = urls.first else {
+                onCancel()
+                return
+            }
+            onPick(file)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCancel()
+        }
+    }
+}
+
 private struct AdminUploadView: View {
     @EnvironmentObject private var session: AdminSession
     let kind: UploadKind
@@ -417,7 +450,7 @@ private struct AdminUploadView: View {
                     Text("Sau khi chọn IPA, nhập phiên bản, Bundle ID, giá vốn và xác nhận quyền phân phối để bật nút cập nhật.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Text("Định dạng: " + kind.accepted.map { "." + $0 }.joined(separator: ", "))
+                Text("Chọn tệp trong Files; hệ thống cho phép duyệt mọi định dạng và ứng dụng chỉ chấp nhận: " + kind.accepted.map { "." + $0 }.joined(separator: ", "))
                     .font(.footnote).foregroundStyle(.secondary)
                 Button(working ? "Đang tải tệp..." : "Cập nhật lên máy chủ") {
                     Task { await publish() }
@@ -435,41 +468,42 @@ private struct AdminUploadView: View {
             }
         }
         .navigationTitle(kind.title)
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: kind.contentTypes,
-                      allowsMultipleSelection: false) { result in
-            switch result {
-            case .success(let urls):
-                guard let file = urls.first else {
-                    status = "Chưa có tệp được chọn."
-                    return
+        .sheet(isPresented: $showImporter) {
+            ERIDocumentPicker(
+                onPick: { file in
+                    showImporter = false
+                    receivePickedFile(file)
+                },
+                onCancel: { showImporter = false }
+            )
+        }
+    }
+
+    private func receivePickedFile(_ file: URL) {
+        guard kind.accepted.contains(file.pathExtension.lowercased()) else {
+            status = "Sai định dạng. Vui lòng chọn: " + kind.accepted.map { "." + $0 }.joined(separator: ", ")
+            return
+        }
+        importing = true
+        status = "Đang sao chép tệp từ Files..."
+        Task {
+            do {
+                let limit = kind.maxBytes
+                let copied = try await Task.detached(priority: .userInitiated) {
+                    try ImportedFile.copy(file, maxBytes: limit)
+                }.value
+                if let previous = selectedFile {
+                    try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
                 }
-                guard kind.accepted.contains(file.pathExtension.lowercased()) else {
-                    status = "Tệp không đúng định dạng: ." + file.pathExtension.lowercased()
-                    return
+                selectedFile = copied
+                if name.isEmpty {
+                    name = file.deletingPathExtension().lastPathComponent
                 }
-                importing = true
-                status = "Đang sao chép tệp vào ứng dụng..."
-                Task {
-                    do {
-                        let copied = try await Task.detached(priority: .userInitiated) {
-                            try ImportedFile.copy(file, maxBytes: kind.maxBytes)
-                        }.value
-                        if let previous = selectedFile {
-                            try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
-                        }
-                        selectedFile = copied
-                        if name.isEmpty {
-                            name = file.deletingPathExtension().lastPathComponent
-                        }
-                        status = "Chọn tệp thành công. Hãy điền các thông tin còn thiếu."
-                    } catch {
-                        status = "Không đọc được tệp: " + error.localizedDescription
-                    }
-                    importing = false
-                }
-            case .failure(let error):
-                status = "Không chọn được tệp: " + error.localizedDescription
+                status = "Đã chọn và sao chép tệp thành công. Hãy điền thông tin rồi tải lên."
+            } catch {
+                status = "Không thể đọc tệp đã chọn: " + error.localizedDescription
             }
+            importing = false
         }
     }
 
