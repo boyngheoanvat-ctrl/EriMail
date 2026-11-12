@@ -1,0 +1,44 @@
+name: Build Eri Mail IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'EriMail-main.zip'
+      - '.github/workflows/build-ipa.yml'
+permissions:
+  contents: read
+concurrency:
+  group: eri-mail-build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract uploaded project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p extracted build-source
+          unzip -oq EriMail-main.zip -d extracted
+          test -f extracted/EriMail-main/gmail_fake_eri_mod_ios_cloud_build.zip
+          unzip -oq extracted/EriMail-main/gmail_fake_eri_mod_ios_cloud_build.zip -d build-source
+          cp extracted/EriMail-main/EriMail/ContentView.swift build-source/EriMail/ContentView.swift
+          test -f build-source/EriMail.xcodeproj/project.pbxproj
+          test -f build-source/build_ipa.sh
+      - name: Build unsigned IPA
+        run: |
+          cd build-source
+          bash build_ipa.sh unsigned
+      - name: Verify IPA
+        run: |
+          test -s "build-source/gmail fake eri mod.ipa"
+          unzip -tq "build-source/gmail fake eri mod.ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EriMail-unsigned-IPA
+          path: build-source/gmail fake eri mod.ipa
+          if-no-files-found: error
+          retention-days: 14
