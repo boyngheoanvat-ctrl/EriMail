@@ -1,4 +1,4 @@
-name: Build Eri Mail IPA
+name: Build TOOL ERI NGUYEN IPA
 on:
   workflow_dispatch:
   push:
@@ -6,7 +6,7 @@ on:
     paths:
       - 'EriMail-main.zip'
       - '.github/workflows/build-ipa.yml'
-      - 'EriMail/EriLocalFiles.swift'
+      - 'EriMail/ToolEriApp.swift'
 permissions:
   contents: read
 concurrency:
@@ -26,24 +26,11 @@ jobs:
           unzip -oq EriMail-main.zip -d extracted
           test -f extracted/EriMail-main/gmail_fake_eri_mod_ios_cloud_build.zip
           unzip -oq extracted/EriMail-main/gmail_fake_eri_mod_ios_cloud_build.zip -d build-source
-          cp extracted/EriMail-main/EriMail/ContentView.swift build-source/EriMail/ContentView.swift
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("build-source/EriMail/ContentView.swift")
-          code = p.read_text()
-          replacements = {
-              "IPAExportView()": 'EriLocalFilesView(mode: "ipa")',
-              "SigningToolsView()": 'EriLocalFilesView(mode: "tools")',
-              "CertificatesView()": 'EriLocalFilesView(mode: "certificates")',
-              "InjectDylibView()": 'EriLocalFilesView(mode: "inject")',
-          }
-          for old, new in replacements.items():
-              if old not in code:
-                  raise RuntimeError("Missing view: " + old)
-              code = code.replace(old, new, 1)
-          code += "\n" + Path("EriMail/EriLocalFiles.swift").read_text()
-          p.write_text(code)
-          PY
+          # Replace legacy interface with the new five-feature application.
+          cp EriMail/ToolEriApp.swift build-source/EriMail/ContentView.swift
+          # Confirm the new UI is present and the old views are not appended.
+          grep -q 'struct ContentView: View' build-source/EriMail/ContentView.swift
+          grep -q 'struct SignIPAView: View' build-source/EriMail/ContentView.swift
 
           test -f build-source/EriMail.xcodeproj/project.pbxproj
           test -f build-source/build_ipa.sh
@@ -80,7 +67,7 @@ jobs:
           unzip -tq "build-source/gmail fake eri mod.ipa"
       - uses: actions/upload-artifact@v4
         with:
-          name: EriMail-unsigned-IPA
+          name: TOOL-ERI-NGUYEN-unsigned-IPA
           path: build-source/gmail fake eri mod.ipa
           if-no-files-found: error
           retention-days: 14
