@@ -47,3 +47,15 @@ Chưa có server được triển khai, domain HTTPS, thanh toán MoMo tự đ�
 Admin upload qua HTTPS đến POST /api/v1/admin/uploads/{ipa|certificate|ai} dùng X-ERI-Admin-Key. Giới hạn IPA 512 MB, chứng chỉ 15 MB, AI Plus 20 MB. Tệp gốc được lưu riêng phía server và không hiển thị trong API danh mục của Store. Chưa có chức năng tải tệp công khai hay tự giao hàng: cần triển khai quyền truy cập và giao hàng sau thanh toán riêng.
 
 LƯU Ý: Render Free hiện đặt SQLite ở /tmp/eri.sqlite3 nên database và file upload không bền vững qua lần khởi động/triển khai lại. Trước khi bán hàng, hãy cấu hình ERI_DB_PATH và ERI_UPLOAD_DIR trên bộ lưu trữ riêng bền vững (hoặc object storage), mã hóa tệp chứa khóa riêng/credential, backup, giới hạn tốc độ và kiểm soát truy cập. Không đặt khóa quản trị hay khóa thanh toán trong app Store. URL công khai của API không phải bí mật.
+
+## Upload IPA lớn (kết nối không ổn định)
+
+ERI ADMIN mới gửi tệp theo từng phần tối đa 4 MiB qua endpoint quản trị:
+- `POST /api/v1/admin/upload-sessions`: tạo phiên upload, chỉ nhận metadata.
+- `PUT /api/v1/admin/upload-sessions/{id}`: gửi chunk với header `X-ERI-Upload-Offset`.
+- `GET /api/v1/admin/upload-sessions/{id}`: lấy offset đã nhận để tiếp tục sau mất mạng.
+- `POST /api/v1/admin/upload-sessions/{id}/complete`: kiểm tra IPA, tính SHA-256 và đăng lên danh mục.
+
+Máy chủ tự lấy `CFBundleIdentifier` và `CFBundleShortVersionString` từ `Payload/*.app/Info.plist`; người quản trị không cần điền Bundle ID và phiên bản. Mô tả được lưu ở cột `ipa.description` và hiển thị với giá sản phẩm tại ERI STORE.
+
+**Bắt buộc cập nhật cả ứng dụng ERI ADMIN và backend** lên cùng phiên bản. Nếu chỉ cài IPA mới mà server vẫn chạy code cũ, endpoint `/sessions` sẽ trả 404. Nếu chạy Render Free, các chunk đã tải và SQLite đều có thể mất khi dịch vụ ngủ, khởi động lại hoặc triển khai; chức năng retry chỉ chống mất kết nối ngắn hạn, **không thay thế bộ lưu trữ bền vững**. Để đưa file 232+ MB và chứng chỉ vào vận hành, hãy dùng storage riêng có quyền truy cập, mã hóa và cơ chế giao file có kiểm tra đơn hàng. Không công khai file .p12 hoặc credentials AI.

@@ -66,21 +66,93 @@ private final class AdminSession: ObservableObject {
         return body
     }
 
-    func uploadFile(kind: String, file: URL, fields: [(String, String)], maxBytes: Int) async throws {
-        var req = try request("/api/v1/admin/uploads/" + kind, method: "POST")
-        let boundary = "ERI-" + UUID().uuidString
-        req.setValue("multipart/form-data; boundary=" + boundary, forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 600
-        let multipart = try await Task.detached(priority: .userInitiated) {
-            try MultipartBuilder.make(source: file, boundary: boundary, fields: fields, maxBytes: maxBytes)
-        }.value
-        defer { try? FileManager.default.removeItem(at: multipart) }
-        let (_, response) = try await URLSession.shared.upload(for: req, fromFile: multipart)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200...299).contains(status) else {
-            if status == 401 || status == 403 { throw AdminError.invalidKey }
-            throw AdminError.http(status)
+
+    private struct UploadBegin: Decodable {
+        let upload_id: String
+        let size_bytes: Int
+        let chunk_bytes: Int
+        let offset: Int
+    }
+    private struct UploadPosition: Decodable { let offset: Int }
+
+    // Send 4MB chunks instead of a 200+ MB multipart body.
+    // When a request drops, read the server's acknowledged offset and resume.
+    func uploadFile(kind: String, file: URL, fields: [(String, String)], maxBytes: Int,
+                    onProgress: @escaping @MainActor (Double) -> Void) async throws {
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        guard let number = attributes[.size] as? NSNumber else { throw URLError(.fileDoesNotExist) }
+        let size = number.intValue
+        guard size > 0 && size <= maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
+        let values = Dictionary(fields, uniquingKeysWith: { _, newer in newer })
+        guard let price = Int(values["price_vnd"] ?? ""), price > 0 else {
+            throw URLError(.badURL)
         }
+        let payload: [String: Any] = [
+            "kind": kind,
+            "filename": file.lastPathComponent,
+            "size_bytes": size,
+            "name": values["name"] ?? "",
+            "description": values["description"] ?? "",
+            "price_vnd": price,
+            "issuer": values["issuer"] ?? "",
+            "authorized": values["authorized"] == "true"
+        ]
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let startData = try await send("/api/v1/admin/upload-sessions", method: "POST", data: body)
+        let session = try JSONDecoder().decode(UploadBegin.self, from: startData)
+        guard session.size_bytes == size, session.chunk_bytes > 0,
+              session.chunk_bytes <= 4 * 1024 * 1024 else { throw URLError(.badServerResponse) }
+
+        let reader = try FileHandle(forReadingFrom: file)
+        defer { try? reader.close() }
+        var offset = session.offset
+        let path = "/api/v1/admin/upload-sessions/" + session.upload_id
+        onProgress(Double(offset) / Double(size))
+        while offset < size {
+            try Task.checkCancellation()
+            try reader.seek(toOffset: UInt64(offset))
+            let count = min(session.chunk_bytes, size - offset)
+            guard let chunk = try reader.read(upToCount: count), chunk.count == count else {
+                throw URLError(.cannotOpenFile)
+            }
+            var sent = false
+            var lastError: Error = URLError(.networkConnectionLost)
+            for attempt in 0..<4 {
+                do {
+                    var req = try request(path, method: "PUT")
+                    req.setValue(String(offset), forHTTPHeaderField: "X-ERI-Upload-Offset")
+                    req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                    req.timeoutInterval = 90
+                    let (result, response) = try await URLSession.shared.upload(for: req, from: chunk)
+                    let http = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    guard (200...299).contains(http) else { throw AdminError.http(http) }
+                    let next = try JSONDecoder().decode(UploadPosition.self, from: result).offset
+                    guard next > offset && next <= size else { throw URLError(.badServerResponse) }
+                    offset = next
+                    onProgress(Double(offset) / Double(size))
+                    sent = true
+                    break
+                } catch {
+                    lastError = error
+                    // A lost response does not mean the server missed the chunk.
+                    // Always ask its committed offset before re-sending.
+                    if let data = try? await send(path),
+                       let position = try? JSONDecoder().decode(UploadPosition.self, from: data),
+                       position.offset > offset && position.offset <= size {
+                        offset = position.offset
+                        onProgress(Double(offset) / Double(size))
+                        sent = true
+                        break
+                    }
+                    if attempt < 3 {
+                        try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 700_000_000)
+                    }
+                }
+            }
+            if !sent { throw lastError }
+        }
+        _ = try await send(path + "/complete", method: "POST", data: Data())
+        onProgress(1.0)
     }
 
     func activate(_ candidate: String) async {
@@ -103,7 +175,14 @@ private enum AdminError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidKey: return "Khóa quản trị không đúng hoặc đã hết hiệu lực."
-        case .http(let status): return "Máy chủ trả về HTTP \(status)."
+        case .http(let status):
+            if status == 404 {
+                return "HTTP 404: Máy chủ chưa triển khai API upload từng phần. Hãy cập nhật backend Render."
+            }
+            if status == 413 {
+                return "HTTP 413: Dữ liệu tải lên vượt giới hạn của máy chủ."
+            }
+            return "Máy chủ trả về HTTP \(status)."
         }
     }
 }
@@ -311,51 +390,6 @@ private enum ImportedFile {
     }
 }
 
-private enum MultipartBuilder {
-    static func make(source: URL, boundary: String, fields: [(String, String)], maxBytes: Int) throws -> URL {
-        let permission = source.startAccessingSecurityScopedResource()
-        defer { if permission { source.stopAccessingSecurityScopedResource() } }
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".multipart")
-        guard FileManager.default.createFile(atPath: output.path, contents: nil) else {
-            throw URLError(.cannotCreateFile)
-        }
-        do {
-            let writer = try FileHandle(forWritingTo: output)
-            defer { try? writer.close() }
-            func append(_ value: String) throws { try writer.write(contentsOf: Data(value.utf8)) }
-            for (name, value) in fields {
-                try append("--" + boundary + "\r\n")
-                try append("Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n")
-                try append(value + "\r\n")
-            }
-            let filename = source.lastPathComponent
-                .replacingOccurrences(of: "\"", with: "")
-                .replacingOccurrences(of: "\r", with: "")
-                .replacingOccurrences(of: "\n", with: "")
-            try append("--" + boundary + "\r\n")
-            try append("Content-Disposition: form-data; name=\"upload\"; filename=\"" + filename + "\"\r\n")
-            try append("Content-Type: application/octet-stream\r\n\r\n")
-            let reader = try FileHandle(forReadingFrom: source)
-            defer { try? reader.close() }
-            var total = 0
-            while let chunk = try reader.read(upToCount: 1_048_576), !chunk.isEmpty {
-                total += chunk.count
-                guard total <= maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
-                try writer.write(contentsOf: chunk)
-            }
-            guard total > 0 else { throw URLError(.zeroByteResource) }
-            try append("\r\n--" + boundary + "--\r\n")
-            return output
-        } catch {
-            try? FileManager.default.removeItem(at: output)
-            throw error
-        }
-    }
-}
-
-// UIKit document picker avoids fileImporter selection issues on physical iPhones.
-// .item deliberately accepts any provider UTI; ERI validates the extension
-// after selection so .ipa is not disabled by an unrelated app's UTI registration.
 private struct ERIDocumentPicker: UIViewControllerRepresentable {
     let onPick: (URL) -> Void
     let onCancel: () -> Void
@@ -402,8 +436,6 @@ private struct AdminUploadView: View {
     @EnvironmentObject private var session: AdminSession
     let kind: UploadKind
     @State private var name = ""
-    @State private var version = ""
-    @State private var bundleID = ""
     @State private var issuer = ""
     @State private var description = ""
     @State private var price = ""
@@ -413,24 +445,20 @@ private struct AdminUploadView: View {
     @State private var importing = false
     @State private var working = false
     @State private var status = ""
+    @State private var progress = 0.0
 
     var body: some View {
         Form {
             Section("Thông tin sản phẩm") {
                 TextField("Tên sản phẩm", text: $name)
                 if kind == .ipa {
-                    TextField("Phiên bản IPA", text: $version)
-                    TextField("Bundle ID", text: $bundleID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
                     Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
-                } else {
-                    if kind == .certificate {
-                        TextField("Nhà phát hành chứng chỉ", text: $issuer)
-                    }
-                    TextField("Mô tả", text: $description, axis: .vertical)
-                        .lineLimit(2...4)
                 }
+                if kind == .certificate {
+                    TextField("Nhà phát hành chứng chỉ", text: $issuer)
+                }
+                TextField("Mô tả sản phẩm", text: $description, axis: .vertical)
+                    .lineLimit(2...5)
                 TextField("Giá vốn (VND)", text: $price)
                     .keyboardType(.numberPad)
             }
@@ -447,12 +475,17 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
-                    Text("Sau khi chọn IPA, nhập phiên bản, Bundle ID, giá vốn và xác nhận quyền phân phối để bật nút cập nhật.")
+                    Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Text("Chọn tệp trong Files; hệ thống cho phép duyệt mọi định dạng và ứng dụng chỉ chấp nhận: " + kind.accepted.map { "." + $0 }.joined(separator: ", "))
                     .font(.footnote).foregroundStyle(.secondary)
-                Button(working ? "Đang tải tệp..." : "Cập nhật lên máy chủ") {
+                if working {
+                    ProgressView(value: progress)
+                    Text("Đã tải " + Int(progress * 100).description + "%")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Button(working ? "Đang tải " + Int(progress * 100).description + "%" : "Cập nhật lên máy chủ") {
                     Task { await publish() }
                 }
                 .disabled(!valid || working || importing)
@@ -512,7 +545,7 @@ private struct AdminUploadView: View {
               !name.trimmingCharacters(in: .whitespaces).isEmpty,
               let amount = Int(price), amount > 0 else { return false }
         switch kind {
-        case .ipa: return !version.isEmpty && bundleID.count >= 3 && authorized
+        case .ipa: return authorized
         case .certificate: return !issuer.isEmpty
         case .ai: return true
         }
@@ -520,19 +553,21 @@ private struct AdminUploadView: View {
     private func publish() async {
         guard let file = selectedFile else { return }
         working = true
+        progress = 0
         defer { working = false }
         let fields: [(String, String)] = [
             ("name", name.trimmingCharacters(in: .whitespacesAndNewlines)),
             ("price_vnd", price),
-            ("version", version),
-            ("bundle_id", bundleID),
             ("issuer", issuer),
             ("description", description),
             ("authorized", authorized ? "true" : "false")
         ]
         do {
             try await session.uploadFile(kind: kind.rawValue, file: file,
-                                         fields: fields, maxBytes: kind.maxBytes)
+                                         fields: fields, maxBytes: kind.maxBytes) { ratio in
+                progress = ratio
+                status = "Đang tải lên máy chủ: " + String(Int(ratio * 100)) + "%"
+            }
             status = "Đã tải tệp và cập nhật sản phẩm thành công."
             selectedFile = nil
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())

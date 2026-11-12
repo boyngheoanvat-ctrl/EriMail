@@ -207,7 +207,46 @@ jobs:
                             headers={"X-ERI-Admin-Key": "test-ci-admin-key-please-replace-1234567890"})
           assert ipa.status_code == 201, ipa.text
           assert "download_url" not in client.get("/api/v1/mods").text
-          print("Protected uploads and public catalogs: OK")
+          # Large files are transferred in small authenticated requests.
+          import plistlib
+          zip_data = io.BytesIO()
+          with zipfile.ZipFile(zip_data, "w") as package:
+              package.writestr("Payload/Example.app/Info.plist", plistlib.dumps({
+                  "CFBundleIdentifier": "com.example.app",
+                  "CFBundleShortVersionString": "6.4",
+              }))
+          content = zip_data.getvalue()
+          config = {
+              "kind": "ipa", "filename": "example.ipa",
+              "size_bytes": len(content), "name": "Chunked IPA",
+              "description": "Automatically inspected metadata",
+              "price_vnd": 22000, "authorized": True
+          }
+          headers = {"X-ERI-Admin-Key": "test-ci-admin-key-please-replace-1234567890"}
+          assert client.post("/api/v1/admin/upload-sessions", json=config).status_code == 403
+          began = client.post("/api/v1/admin/upload-sessions", json=config, headers=headers)
+          assert began.status_code == 201, began.text
+          session_id = began.json()["upload_id"]
+          url = "/api/v1/admin/upload-sessions/" + session_id
+          middle = len(content) // 2
+          wrong = client.put(url, content=content[:middle], headers={**headers, "X-ERI-Upload-Offset": "3"})
+          assert wrong.status_code == 409, wrong.text
+          first = client.put(url, content=content[:middle], headers={**headers, "X-ERI-Upload-Offset": "0"})
+          assert first.status_code == 200, first.text
+          assert first.json()["offset"] == middle
+          assert client.get(url, headers=headers).json()["offset"] == middle
+          second = client.put(url, content=content[middle:],
+                              headers={**headers, "X-ERI-Upload-Offset": str(middle)})
+          assert second.status_code == 200, second.text
+          done = client.post(url + "/complete", headers=headers)
+          assert done.status_code == 201, done.text
+          mods = client.get("/api/v1/mods").json()["items"]
+          item = next(x for x in mods if x["name"] == "Chunked IPA")
+          assert item["description"] == "Automatically inspected metadata"
+          assert item["version"] == "6.4"
+          assert item["bundle_id"] == "com.example.app"
+          assert "download_url" not in str(item)
+          print("Protected chunk uploads, automatic IPA metadata and public catalogs: OK")
           PY
   package-all:
     name: Bundle all three apps

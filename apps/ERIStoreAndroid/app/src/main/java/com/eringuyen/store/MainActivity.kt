@@ -162,7 +162,8 @@ class MainActivity : Activity() {
                             setTypeface(null, Typeface.BOLD)
                         })
                         val detail = if (selected == "mods") {
-                            "Phiên bản: " + item.optString("version")
+                            item.optString("description").takeIf { it.isNotBlank() }
+                                ?: ("Phiên bản: " + item.optString("version"))
                         } else item.optString("description")
                         card.addView(TextView(this).apply { text = detail })
                         card.addView(TextView(this).apply {

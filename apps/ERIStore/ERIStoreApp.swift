@@ -144,6 +144,7 @@ private struct OrderDetailView: View {
 private struct ModItem: Decodable, Identifiable {
     let id: Int
     let name: String
+    let description: String?
     let version: String
     let bundle_id: String
     let download_url: String?
@@ -173,6 +174,7 @@ private struct ModCatalog: View {
     private func modRow(_ item: ModItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(item.name).font(.headline)
+            if let detail = item.description, !detail.isEmpty { Text(detail).font(.subheadline) }
             Text("Phiên bản " + item.version)
             Text(item.bundle_id).font(.caption).foregroundStyle(.secondary)
             Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)

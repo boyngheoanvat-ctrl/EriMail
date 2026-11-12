@@ -9,6 +9,7 @@ import urllib.request
 import urllib.error
 import re
 import zipfile
+import plistlib
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
@@ -73,6 +74,8 @@ def init():
         );
         """)
         ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}
+        if "description" not in ipa_columns:
+            db.execute("ALTER TABLE ipa ADD COLUMN description TEXT NOT NULL DEFAULT ''")
         if "price_vnd" not in ipa_columns:
             db.execute("ALTER TABLE ipa ADD COLUMN price_vnd INTEGER NOT NULL DEFAULT 0")
         columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
@@ -115,7 +118,7 @@ def health():
 def ipa_catalog(q: str = ""):
     with connection() as db:
         rows = db.execute(
-            "SELECT id,name,version,bundle_id,price_vnd FROM ipa WHERE authorized=1 AND (name LIKE ? OR bundle_id LIKE ?) ORDER BY id DESC LIMIT 100",
+            "SELECT id,name,version,bundle_id,description,price_vnd FROM ipa WHERE authorized=1 AND (name LIKE ? OR bundle_id LIKE ?) ORDER BY id DESC LIMIT 100",
             (f"%{q[:100]}%", f"%{q[:100]}%"),
         ).fetchall()
     return {"items": [dict(x) for x in rows]}
@@ -147,7 +150,7 @@ def admin_ipa_catalog():
 @app.get("/api/v1/mods")
 def public_mod_catalog():
     with connection() as db:
-        rows = db.execute("SELECT id,name,version,bundle_id,price_vnd FROM ipa WHERE authorized=1 ORDER BY id DESC LIMIT 100").fetchall()
+        rows = db.execute("SELECT id,name,version,bundle_id,description,price_vnd FROM ipa WHERE authorized=1 ORDER BY id DESC LIMIT 100").fetchall()
     return {"items": [dict(x) for x in rows]}
 
 @app.post("/api/v1/admin/ipa", dependencies=[Depends(require_admin)], status_code=201)
@@ -592,3 +595,174 @@ async def upload_private_product(
         raise
     finally:
         await upload.close()
+
+
+# Resumable, authenticated chunk uploads; avoid a 200+ MB single HTTP request.
+# This protocol requires the same persistent filesystem across requests.
+ERI_CHUNK_BYTES = 4 * 1024 * 1024
+_eri_upload_lock = asyncio.Lock()
+
+class EriChunkStart(BaseModel):
+    kind: str = Field(pattern="^(ipa|certificate|ai)$")
+    filename: str = Field(min_length=1, max_length=180)
+    size_bytes: int = Field(gt=0)
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2000)
+    price_vnd: int = Field(gt=0, le=1000000000)
+    issuer: str = Field(default="", max_length=160)
+    authorized: bool = False
+
+def _eri_paths(upload_id: str):
+    if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
+        raise HTTPException(404, "Upload not found")
+    return (UPLOAD_DIR / ("." + upload_id + ".session.json"),
+            UPLOAD_DIR / ("." + upload_id + ".part"))
+
+def _eri_read_session(upload_id: str):
+    metadata_file, data_file = _eri_paths(upload_id)
+    try:
+        metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+        if metadata.get("upload_id") != upload_id:
+            raise ValueError("Session mismatch")
+    except (OSError, ValueError, TypeError):
+        raise HTTPException(404, "Upload session not found; server storage may have restarted")
+    actual = data_file.stat().st_size if data_file.exists() else -1
+    if actual < 0 or actual > metadata["size_bytes"]:
+        raise HTTPException(409, "Upload data missing or inconsistent")
+    if actual != metadata["offset"]:
+        metadata["offset"] = actual
+        _eri_save_session(upload_id, metadata)
+    return metadata
+
+def _eri_save_session(upload_id: str, metadata: dict):
+    metadata_file, _ = _eri_paths(upload_id)
+    staged = metadata_file.with_suffix(".writing")
+    staged.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+    os.chmod(staged, 0o600)
+    os.replace(staged, metadata_file)
+
+def _eri_ipa_properties(file: Path):
+    try:
+        with zipfile.ZipFile(file) as package:
+            candidates = [m for m in package.infolist()
+                          if re.fullmatch(r"Payload/[^/]+\.app/Info\.plist", m.filename)]
+            if not candidates or candidates[0].file_size > 1024 * 1024:
+                raise HTTPException(422, "IPA must contain a valid, small Info.plist")
+            payload = plistlib.loads(package.read(candidates[0]))
+            bundle_id = str(payload.get("CFBundleIdentifier", "")).strip()
+            version = str(payload.get("CFBundleShortVersionString")
+                          or payload.get("CFBundleVersion") or "").strip()
+            if not (3 <= len(bundle_id) <= 255) or not (1 <= len(version) <= 60):
+                raise HTTPException(422, "IPA Info.plist missing bundle identifier or version")
+            return version, bundle_id
+    except (zipfile.BadZipFile, ValueError, TypeError, plistlib.InvalidFileException):
+        raise HTTPException(422, "Invalid IPA archive or Info.plist")
+
+@app.post("/api/v1/admin/upload-sessions", dependencies=[Depends(require_admin)], status_code=201)
+async def eri_begin_chunk_upload(item: EriChunkStart):
+    filename = Path(item.filename).name
+    extension = Path(filename).suffix.lower()
+    if extension not in UPLOAD_SUFFIXES[item.kind]:
+        raise HTTPException(422, "Unsupported file extension")
+    if item.size_bytes > UPLOAD_LIMITS[item.kind]:
+        raise HTTPException(413, "File exceeds maximum size")
+    if item.kind == "ipa" and not item.authorized:
+        raise HTTPException(422, "Distribution authorization required")
+    if item.kind == "certificate" and not item.issuer.strip():
+        raise HTTPException(422, "Certificate issuer required")
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    async with _eri_upload_lock:
+        upload_id = secrets.token_hex(16)
+        metadata_file, data_file = _eri_paths(upload_id)
+        metadata = item.model_dump()
+        metadata.update(upload_id=upload_id, filename=filename, extension=extension, offset=0)
+        with data_file.open("xb"):
+            pass
+        os.chmod(data_file, 0o600)
+        _eri_save_session(upload_id, metadata)
+    return {"upload_id": upload_id, "offset": 0,
+            "size_bytes": item.size_bytes, "chunk_bytes": ERI_CHUNK_BYTES}
+
+@app.get("/api/v1/admin/upload-sessions/{upload_id}", dependencies=[Depends(require_admin)])
+async def eri_chunk_upload_status(upload_id: str):
+    async with _eri_upload_lock:
+        meta = _eri_read_session(upload_id)
+        return {"offset": meta["offset"], "size_bytes": meta["size_bytes"]}
+
+@app.put("/api/v1/admin/upload-sessions/{upload_id}", dependencies=[Depends(require_admin)])
+async def eri_chunk_upload(upload_id: str, request: Request,
+                           x_eri_upload_offset: int = Header(...)):
+    async with _eri_upload_lock:
+        meta = _eri_read_session(upload_id)
+        if x_eri_upload_offset != meta["offset"]:
+            raise HTTPException(409, detail={"offset": meta["offset"]})
+        written = 0
+        _, data_file = _eri_paths(upload_id)
+        with data_file.open("ab") as dest:
+            async for piece in request.stream():
+                written += len(piece)
+                if written > ERI_CHUNK_BYTES or meta["offset"] + written > meta["size_bytes"]:
+                    dest.truncate(meta["offset"])
+                    raise HTTPException(413, "Chunk too large")
+                dest.write(piece)
+            dest.flush()
+        if written == 0:
+            raise HTTPException(422, "Empty chunk")
+        meta["offset"] += written
+        _eri_save_session(upload_id, meta)
+        return {"offset": meta["offset"]}
+
+@app.post("/api/v1/admin/upload-sessions/{upload_id}/complete",
+          dependencies=[Depends(require_admin)], status_code=201)
+async def eri_finish_chunk_upload(upload_id: str):
+    async with _eri_upload_lock:
+        meta = _eri_read_session(upload_id)
+        if meta["offset"] != meta["size_bytes"]:
+            raise HTTPException(409, "File not fully transferred")
+        metadata_file, part = _eri_paths(upload_id)
+        digest = hashlib.sha256()
+        with part.open("rb") as src:
+            while data := src.read(1024 * 1024):
+                digest.update(data)
+        if meta["extension"] == ".ipa":
+            version, bundle_id = _eri_ipa_properties(part)
+        elif meta["extension"] == ".zip":
+            try:
+                with zipfile.ZipFile(part) as archive:
+                    _ = archive.infolist()
+            except zipfile.BadZipFile:
+                raise HTTPException(422, "Invalid ZIP file")
+            version, bundle_id = "", ""
+        else:
+            version, bundle_id = "", ""
+        final = UPLOAD_DIR / (upload_id + meta["extension"])
+        os.replace(part, final)
+        try:
+            with connection() as db:
+                if meta["kind"] == "ipa":
+                    row = db.execute(
+                        "INSERT INTO ipa(name,version,bundle_id,download_url,sha256,"
+                        "authorized,price_vnd,description) VALUES(?,?,?,?,?,1,?,?)",
+                        (meta["name"], version, bundle_id, "private:" + upload_id,
+                         digest.hexdigest(), meta["price_vnd"], meta["description"]))
+                elif meta["kind"] == "certificate":
+                    row = db.execute(
+                        "INSERT INTO certificates(name,issuer,description,price_vnd,active)"
+                        " VALUES(?,?,?,?,1)",
+                        (meta["name"], meta["issuer"], meta["description"], meta["price_vnd"]))
+                else:
+                    row = db.execute(
+                        "INSERT INTO products(name,description,price_vnd,active) VALUES(?,?,?,1)",
+                        (meta["name"], meta["description"], meta["price_vnd"]))
+                db.execute(
+                    "INSERT INTO private_product_uploads(id,kind,product_id,original_name,"
+                    "storage_name,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (upload_id, meta["kind"], row.lastrowid, meta["filename"],
+                     final.name, meta["size_bytes"], digest.hexdigest(),
+                     datetime.now(timezone.utc).isoformat()))
+                product_id = row.lastrowid
+        except Exception:
+            os.replace(final, part)
+            raise
+        metadata_file.unlink(missing_ok=True)
+    return {"id": product_id, "name": meta["name"], "uploaded": True}
