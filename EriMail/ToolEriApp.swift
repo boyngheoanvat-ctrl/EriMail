@@ -336,6 +336,7 @@ struct SignIPAView: View {
     @State private var message = "Chọn đủ tệp để ký IPA bằng máy chủ ERI của bạn."
     @State private var busy = false
     @State private var signedURL: URL?
+    @State private var showSignedShare = false
 
     private func choose(_ kind: ImportKind) {
         importing = kind
@@ -399,7 +400,7 @@ struct SignIPAView: View {
                     }.disabled(busy)
                     Text(message).font(.footnote).foregroundColor(.secondary)
                     if let signedURL {
-                        ShareLink(item: signedURL) { Label("Chia sẻ / Lưu IPA đã ký", systemImage: "square.and.arrow.up") }
+                        Button { showSignedShare = true } label: { Label("Chia sẻ / Lưu IPA đã ký", systemImage: "square.and.arrow.up") }
                     }
                 }
                 Section {
@@ -408,6 +409,9 @@ struct SignIPAView: View {
                 }
             }
             .navigationTitle("ERI NGUYỄN · Ký IPA")
+            .sheet(isPresented: $showSignedShare) {
+                if let signedURL { ShareSheet(items: [signedURL]) }
+            }
         }
         .fileImporter(isPresented: $showImporter,
                       allowedContentTypes: [UTType(filenameExtension: importing?.rawValue ?? "ipa") ?? .data, .data],
