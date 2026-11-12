@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import CryptoKit
+import CoreImage.CIFilterBuiltins
 import WebKit
 
 struct ContentView: View {
@@ -488,6 +489,7 @@ struct ERIOrder: Decodable, Identifiable {
     let bank_account: String?
     let bank_name: String?
     let transfer_note: String?
+    let payment_method: String?
 }
 
 struct ERIBuyButton: View {
@@ -514,6 +516,22 @@ struct ERIBuyButton: View {
                             if let note = order.transfer_note {
                                 Text("Nội dung: " + note)
                                 Button("Sao chép nội dung") { UIPasteboard.general.string = note }
+                            }
+                            if order.payment_method == "static_momo" {
+                                Text("Quét mã MoMo để thanh toán").font(.headline)
+                                if let qr = ERIMomoQRCode.makeImage() {
+                                    Image(uiImage: qr)
+                                        .interpolation(.none)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxWidth: 290, maxHeight: 290)
+                                        .frame(maxWidth: .infinity)
+                                }
+                                Text("Người nhận: NGUYEN MINH THIEN")
+                                Text("Số tài khoản được che trên ảnh gốc (đuôi 790).")
+                                    .font(.footnote).foregroundColor(.secondary)
+                                Text("QR cố định: hãy tự nhập đúng số tiền theo đơn. QR không tự điền số tiền hay mã đơn.")
+                                    .font(.footnote).foregroundColor(.secondary)
                             }
                             if let raw = order.qr_url, let url = URL(string: raw) {
                                 AsyncImage(url: url) { image in image.resizable().scaledToFit() }
@@ -574,5 +592,21 @@ extension ERIAPI {
         let (data, response) = try await URLSession.shared.data(from: base.appendingPathComponent("api/v1/orders/" + id))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         return try JSONDecoder().decode(ERIOrder.self, from: data)
+    }
+}
+
+enum ERIMomoQRCode {
+    // Exact payment QR payload decoded from the user-supplied MoMo/VietQR image.
+    // Static QR: no per-order amount or automatic payment verification.
+    private static let payload = "00020101021138540010A00000072701240006971025011008967347900208QRIBFTTA53037045802VN62450515MOMOW2W586762860622L0xzbAclKK6dzYgrgG2ZLA630494EF"
+    static func makeImage() -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(payload.utf8)
+        filter.correctionLevel = "H"
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 9, y: 9))
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
