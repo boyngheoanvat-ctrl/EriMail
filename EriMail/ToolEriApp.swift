@@ -352,15 +352,38 @@ struct EriInstallItem: Decodable, Identifiable {
     let manifestURL: URL
     let status: String
 }
+struct ERICertificate: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let issuer: String
+    let description: String
+    let price_vnd: Int
+}
+
 struct InstallToolsView: View {
     @State private var manifest = ""
     @State private var message = ""
+    @State private var certificates: [ERICertificate] = []
+    @State private var catalogStatus = "Đang chờ kết nối ERI Backend"
     var body: some View {
         NavigationView {
             Form {
-                Section("ESign / KSign · ERI NGUYỄN") {
-                    Text("Nhập manifest HTTPS của ứng dụng bạn có quyền cài đặt. iOS sẽ xử lý yêu cầu cài đặt.")
-                        .foregroundColor(.secondary)
+                Section("Chứng chỉ · ERI NGUYỄN") {
+                    Button("Làm mới danh mục chứng chỉ") { Task { await loadCertificates() } }
+                    Text(catalogStatus).font(.footnote).foregroundColor(.secondary)
+                    ForEach(certificates) { item in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(item.name).font(.headline)
+                            Text("Đơn vị phát hành: " + item.issuer).font(.caption)
+                            Text(item.description)
+                            Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
+                        }
+                    }
+                    Text("Chưa tích hợp đặt hàng, thanh toán hoặc cấp chứng chỉ. Chỉ đăng bán chứng chỉ có quyền phân phối; chứng chỉ của Khoindvn phải ghi đúng nguồn và có thỏa thuận bán lại.")
+                        .font(.footnote).foregroundColor(.secondary)
+                }
+                Section("Cài ESign / KSign") {
+                    Text("Nhập manifest HTTPS hợp lệ của ứng dụng được phép phân phối.")
                     TextField("https://.../manifest.plist", text: $manifest)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Yêu cầu cài đặt") {
@@ -376,8 +399,15 @@ struct InstallToolsView: View {
                     }
                     Text(message).font(.footnote)
                 }
-            }.navigationTitle("ERI NGUYỄN · ESign/KSign")
+            }.navigationTitle("ERI NGUYỄN · Chứng chỉ")
+            .task { await loadCertificates() }
         }
+    }
+    @MainActor private func loadCertificates() async {
+        do {
+            certificates = try await ERIAPI.load("/api/v1/certificates", as: ERICertificate.self)
+            catalogStatus = certificates.isEmpty ? "Chưa có chứng chỉ được đăng bán." : "Danh mục từ ERI Backend."
+        } catch { catalogStatus = error.localizedDescription }
     }
 }
 
