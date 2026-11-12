@@ -295,90 +295,49 @@ struct StoreIPAView: View {
 }
 
 struct SignIPAView: View {
-    @State private var showExternal = false
-    @State private var confirmExternal = false
-    private let links: [(String, String)] = [
-        ("Ký IPA trực tuyến", "https://sign.codevn.net"),
-        ("IPA Tool", "https://ipatool.codevn.net"),
-        ("Lịch sử phiên bản", "https://ipatool.codevn.net/historyver.html"),
-        ("Phân tích IPA", "https://ipatool.codevn.net/ipa-parser/"),
-        ("Chuyển DEB sang IPA", "https://ipatool.codevn.net/deb-to-ipa/"),
-        ("Tra cứu Bundle ID", "https://bundleid.codevn.net"),
-        ("iCodeVN", "https://i.codevn.net"),
-        ("Inject Dylib", "https://ipatool.codevn.net/inject-dylib/")
-    ]
+    @State private var ipaURL: URL?
+    @State private var pickIPA = false
     var body: some View {
         NavigationView {
             Form {
                 Section("Ký IPA · ERI NGUYỄN") {
-                    Text("Dịch vụ ký do CodeVN vận hành. ERI NGUYỄN chỉ cung cấp lối truy cập, không sở hữu máy chủ hoặc chứng chỉ của CodeVN.")
-                        .font(.footnote).foregroundColor(.secondary)
-                    Button("Mở công cụ ký IPA CodeVN") { confirmExternal = true }
-                    Text("Hỗ trợ trên trang nguồn: IPA, ESign, Feather, GBox, Scarlet; P12, mật khẩu, mobileprovision, Bundle ID và tên ứng dụng.")
-                        .font(.footnote)
+                    Button("Chọn IPA từ Tệp") { pickIPA = true }
+                    if let ipaURL { Text(ipaURL.lastPathComponent) }
+                    Text("Chưa có máy chủ ký IPA được cấu hình. Ký thật yêu cầu worker macOS, chứng chỉ P12 và provisioning profile hợp lệ. Không gửi khóa riêng đến máy chủ chưa được xác minh.")
+                        .foregroundColor(.secondary)
                 }
-                Section("Công cụ CodeVN liên quan") {
-                    ForEach(links, id: \.1) { link in
-                        Button(link.0) {
-                            guard let url = URL(string: link.1) else { return }
-                            UIApplication.shared.open(url)
-                        }
-                    }
-                }
-                Section("Bảo mật") {
-                    Text("Nếu mở công cụ ký trực tuyến, P12 và mật khẩu bạn chọn trên trang sẽ được gửi đến CodeVN. Chỉ tiếp tục nếu bạn tin tưởng nhà cung cấp. Không dùng chứng chỉ chứa khóa riêng quan trọng trên dịch vụ không kiểm soát.")
-                        .font(.footnote).foregroundColor(.secondary)
-                }
-            }
-            .navigationTitle("ERI NGUYỄN · Ký IPA")
-            .confirmationDialog("Sử dụng dịch vụ CodeVN?", isPresented: $confirmExternal, titleVisibility: .visible) {
-                Button("Tiếp tục đến CodeVN") { showExternal = true }
-                Button("Hủy", role: .cancel) {}
-            } message: {
-                Text("Bạn sẽ truy cập sign.codevn.net. File IPA, P12, mật khẩu và mobileprovision được xử lý bởi CodeVN nếu bạn gửi biểu mẫu ký.")
-            }
-            .sheet(isPresented: $showExternal) {
-                NavigationView {
-                    OfficialSigningWebView()
-                        .navigationTitle("ERI NGUYỄN · Ký IPA")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                Button("Đóng") { showExternal = false }
-                            }
-                        }
-                }
+            }.navigationTitle("ERI NGUYỄN · Ký IPA")
+            .fileImporter(isPresented: $pickIPA, allowedContentTypes: [.data, .archive]) { result in
+                if case .success(let url) = result { ipaURL = url }
             }
         }
     }
-}
-struct OfficialSigningWebView: UIViewRepresentable {
-    func makeUIView(context: Context) -> WKWebView {
-        let view = WKWebView()
-        view.load(URLRequest(url: URL(string: "https://sign.codevn.net")!))
-        return view
-    }
-    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 struct StoreOffersView: View {
-    @State private var query = ""
+    @State private var items: [ERIOffer] = []
+    @State private var status = "Đang chờ cấu hình API"
     var body: some View {
         NavigationView {
             Form {
-                Section("Tìm ưu đãi") {
-                    TextField("Tên ứng dụng hoặc trò chơi", text: $query)
-                    Button("Tìm chương trình ưu đãi") {
-                        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !q.isEmpty else { return }
-                        let url = URL(string: "https://www.google.com/search?q=" + (q + " App Store promo code discount official").addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!)!
-                        UIApplication.shared.open(url)
+                Section("Ưu đãi · ERI NGUYỄN") {
+                    Button("Làm mới") { Task { await load() } }
+                    Text(status).font(.footnote).foregroundColor(.secondary)
+                    ForEach(items) { item in
+                        VStack(alignment: .leading) {
+                            Text(item.title).font(.headline)
+                            Text(item.description)
+                            Text(item.source_url).font(.caption).textSelection(.enabled)
+                        }
                     }
-                    Text("Không có API công khai tổng hợp mã giảm giá thanh toán App Store. Chỉ sử dụng mã có nguồn phát hành xác thực; ứng dụng không tự tạo mã hoặc cam kết mã còn hiệu lực.")
-                        .font(.footnote).foregroundColor(.secondary)
                 }
-            }.navigationTitle("Ưu đãi App Store")
+            }.navigationTitle("ERI NGUYỄN · Ưu đãi")
+            .task { await load() }
         }
+    }
+    @MainActor private func load() async {
+        do { items = try await ERIAPI.load("/api/v1/offers", as: ERIOffer.self); status = "Dữ liệu từ ERI Backend" }
+        catch { status = error.localizedDescription }
     }
 }
 
@@ -394,54 +353,34 @@ struct EriInstallItem: Decodable, Identifiable {
     let status: String
 }
 struct InstallToolsView: View {
-    @State private var mode = 0
     @State private var manifest = ""
     @State private var message = ""
     var body: some View {
         NavigationView {
             Form {
-                Section("ESign / KSign") {
-                    Picker("Chế độ", selection: $mode) {
-                        Text("Danh sách Khoindvn").tag(0)
-                        Text("Kho riêng ERI").tag(1)
-                    }.pickerStyle(.segmented)
-                    if mode == 0 {
-                        Text("Nguồn: khoindvn.io.vn. Danh sách, liên kết và chứng chỉ thuộc nhà cung cấp Khoindvn, không phải ERI NGUYỄN.")
-                            .font(.footnote).foregroundColor(.secondary)
-                        NavigationLink("Xem toàn bộ ESign / KSign và nút cài") {
-                            VStack(spacing: 0) {
-                                Text("Nguồn bên ngoài: khoindvn.io.vn/install/")
-                                    .font(.caption).foregroundColor(.secondary)
-                                    .padding(8)
-                                OfficialInstallWebView()
-                            }.navigationTitle("ERI NGUYỄN · ESign/KSign")
+                Section("ESign / KSign · ERI NGUYỄN") {
+                    Text("Nhập manifest HTTPS của ứng dụng bạn có quyền cài đặt. iOS sẽ xử lý yêu cầu cài đặt.")
+                        .foregroundColor(.secondary)
+                    TextField("https://.../manifest.plist", text: $manifest)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Yêu cầu cài đặt") {
+                        guard let url = URL(string: manifest), url.scheme == "https",
+                              url.pathExtension.lowercased() == "plist",
+                              let encoded = manifest.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                              let installURL = URL(string: "itms-services://?action=download-manifest&url=" + encoded) else {
+                            message = "Cần manifest.plist HTTPS hợp lệ."; return
                         }
-                        Button("Mở trang nguồn trong Safari") {
-                            UIApplication.shared.open(URL(string: "https://khoindvn.io.vn/install/")!)
+                        UIApplication.shared.open(installURL) { ok in
+                            message = ok ? "Đã gửi yêu cầu đến iOS; chưa xác nhận cài đặt." : "iOS không mở được manifest."
                         }
-                    } else {
-                        Text("Kho riêng chưa có manifest được xác minh. Nhập liên kết HTTPS của gói bạn có quyền phân phối.")
-                            .font(.footnote).foregroundColor(.secondary)
-                        TextField("https://.../manifest.plist", text: $manifest)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        Button("Yêu cầu cài đặt") {
-                            guard let url = URL(string: manifest), url.scheme == "https",
-                                  url.pathExtension.lowercased() == "plist",
-                                  let encoded = manifest.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                                  let installURL = URL(string: "itms-services://?action=download-manifest&url=" + encoded) else {
-                                message = "Cần manifest.plist HTTPS hợp lệ."; return
-                            }
-                            UIApplication.shared.open(installURL) { success in
-                                message = success ? "Đã gửi yêu cầu cho iOS, chưa xác nhận cài thành công." : "Không mở được yêu cầu cài đặt."
-                            }
-                        }
-                        Text(message).font(.footnote)
                     }
+                    Text(message).font(.footnote)
                 }
-            }.navigationTitle("ERI NGUYỄN")
+            }.navigationTitle("ERI NGUYỄN · ESign/KSign")
         }
     }
 }
+
 struct OfficialInstallWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
@@ -469,42 +408,34 @@ struct F4IPAWebView: UIViewRepresentable {
 }
 
 struct AIPlusStoreView: View {
-    @State private var showStore = false
-    private let storeURL = URL(string: "https://sky-sky-sky.com/#bang-gia")!
+    @State private var items: [ERIProduct] = []
+    @State private var status = "Đang chờ cấu hình API"
     var body: some View {
         NavigationView {
             Form {
                 Section("AI Plus · ERI NGUYỄN") {
-                    Text("Khám phá các gói công cụ AI và bảng giá trên Sky World.")
-                        .font(.headline)
-                    Button("Xem bảng giá và các gói AI") { showStore = true }
-                    Button("Mở Sky World trong Safari") {
-                        UIApplication.shared.open(storeURL)
-                    }
+                    Button("Làm mới bảng giá") { Task { await load() } }
+                    Text(status).font(.footnote).foregroundColor(.secondary)
                 }
-                Section("Thông tin nhà cung cấp") {
-                    Text("Nguồn: sky-sky-sky.com (Sky World). Đây là cửa hàng bên thứ ba, không phải dịch vụ bán hàng do ERI NGUYỄN hoặc OpenAI vận hành.")
-                    Text("Sản phẩm, giá, đăng nhập, ví coin, thanh toán, giao hàng và hỗ trợ được quản lý bởi Sky World. Kiểm tra kỹ điều kiện và tính hợp lệ của gói trước khi mua.")
-                        .foregroundColor(.secondary)
-                }
-            }
-            .navigationTitle("ERI NGUYỄN · AI Plus")
-            .sheet(isPresented: $showStore) {
-                NavigationView {
-                    AIPlusStoreWebView()
-                        .navigationTitle("ERI NGUYỄN · AI Plus")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("Đóng") { showStore = false }
-                            }
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                Button("Safari") { UIApplication.shared.open(storeURL) }
-                            }
+                Section("Gói AI") {
+                    ForEach(items) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(item.name).font(.headline)
+                            Text(item.description)
+                            Text(item.price_vnd.formatted(.currency(code: "VND")))
+                                .fontWeight(.semibold)
                         }
+                    }
+                    Text("Chưa tích hợp thanh toán hoặc giao hàng. Không thu tiền khi chưa có hệ thống đơn hàng.")
+                        .font(.footnote).foregroundColor(.secondary)
                 }
-            }
+            }.navigationTitle("ERI NGUYỄN · AI Plus")
+            .task { await load() }
         }
+    }
+    @MainActor private func load() async {
+        do { items = try await ERIAPI.load("/api/v1/products", as: ERIProduct.self); status = "Bảng giá từ ERI Backend" }
+        catch { status = error.localizedDescription }
     }
 }
 
@@ -515,4 +446,32 @@ struct AIPlusStoreWebView: UIViewRepresentable {
         return view
     }
     func updateUIView(_ view: WKWebView, context: Context) {}
+}
+
+struct ERIList<T: Decodable>: Decodable { let items: [T] }
+struct ERIProduct: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String
+    let price_vnd: Int
+}
+struct ERIOffer: Decodable, Identifiable {
+    let id: Int
+    let title: String
+    let description: String
+    let source_url: String
+}
+enum ERIAPI {
+    static func load<T: Decodable>(_ path: String, as: T.Type) async throws -> [T] {
+        guard let base = Bundle.main.object(forInfoDictionaryKey: "ERI_API_BASE_URL") as? String,
+              let url = URL(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path),
+              url.scheme == "https" else {
+            throw NSError(domain: "ERI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Chưa cấu hình ERI_API_BASE_URL HTTPS trong Info.plist."])
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw NSError(domain: "ERI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Máy chủ ERI không phản hồi thành công."])
+        }
+        return try JSONDecoder().decode(ERIList<T>.self, from: data).items
+    }
 }
