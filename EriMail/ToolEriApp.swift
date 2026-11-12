@@ -1,3 +1,4 @@
+// Build trigger: TOOL ERI NGUYEN iOS IPA (source unchanged in behavior)
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
