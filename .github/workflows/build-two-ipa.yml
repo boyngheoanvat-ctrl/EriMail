@@ -1,4 +1,4 @@
-name: Build ERI ADMIN and ERI STORE unsigned IPAs
+name: Build ERI STORE APK and both iOS IPAs
 on:
   workflow_dispatch:
   push:
@@ -6,11 +6,54 @@ on:
     paths:
       - 'apps/ERIAdmin/**'
       - 'apps/ERIStore/**'
+      - 'apps/ERIStoreAndroid/**'
       - '.github/workflows/build-two-ipa.yml'
 permissions:
   contents: read
 jobs:
-  build:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Install Android API 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -path '*/bin/sdkmanager' -type f | sort -V | tail -1)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::Android SDK manager not found under $SDK_ROOT"
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+      - name: Build installable debug APK
+        working-directory: apps/ERIStoreAndroid
+        run: gradle --no-daemon --stacktrace --info :app:assembleDebug
+      - name: Prepare named APK file
+        run: cp apps/ERIStoreAndroid/app/build/outputs/apk/debug/app-debug.apk ERIStore.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERIStore-Android-APK
+          path: ERIStore.apk
+          if-no-files-found: error
+          retention-days: 14
+  ios:
     runs-on: macos-15
     timeout-minutes: 45
     strategy:
@@ -96,5 +139,34 @@ jobs:
         with:
           name: ${{ matrix.app }}-unsigned-IPA
           path: ${{ matrix.app }}-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+  package-all:
+    name: Bundle all three apps
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download APK and both IPAs
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify all three files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/ERIStore.apk
+          test -s dist/ERIStore-unsigned.ipa
+          test -s dist/ERIAdmin-unsigned.ipa
+          ls -lah dist
+      - name: Upload all three in one download
+        uses: actions/upload-artifact@v4
+        with:
+          name: ERI-ALL-3-APPS
+          path: |
+            dist/ERIStore.apk
+            dist/ERIStore-unsigned.ipa
+            dist/ERIAdmin-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
