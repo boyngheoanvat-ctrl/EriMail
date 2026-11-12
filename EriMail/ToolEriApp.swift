@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import CryptoKit
 
 struct ContentView: View {
     @State private var tab = 0
@@ -139,38 +140,72 @@ struct TempMessage: Decodable, Identifiable {
 }
 struct TempSender: Decodable { let address: String }
 
+struct IPACatalog: Decodable {
+    let schemaVersion: Int
+    let apps: [IPACatalogEntry]
+}
+struct IPACatalogEntry: Decodable, Identifiable {
+    let id: String
+    let appStoreId: String
+    let bundleId: String
+    let name: String
+    let version: String
+    let sizeBytes: Int64
+    let sha256: String
+    let downloadURL: URL
+    let authorizedForDistribution: Bool
+}
 struct StoreIPAView: View {
     @State private var link = ""
     @State private var appName = ""
     @State private var appID = ""
     @State private var message = ""
+    @State private var catalog: [IPACatalogEntry] = []
     @State private var imported: URL?
     @State private var pick = false
     @State private var share = false
     @State private var busy = false
+    private let catalogURL = URL(string: "https://raw.githubusercontent.com/boyngheoanvat-ctrl/EriMail/main/ipa-catalog/catalog.json")!
+    private var matches: [IPACatalogEntry] { catalog.filter { $0.appStoreId == appID && $0.authorizedForDistribution } }
     var body: some View {
         NavigationView {
             Form {
-                Section("Liên kết App Store") {
+                Section("Tìm App Store") {
                     TextField("https://apps.apple.com/.../id123456", text: $link).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Tra cứu ứng dụng") { Task { await lookup() } }.disabled(busy)
-                    if !appName.isEmpty { Text(appName).font(.headline); Text("App ID: " + appID) }
+                    Button("Tìm ứng dụng và kiểm tra kho") { Task { await lookup() } }.disabled(busy)
+                    if !appName.isEmpty {
+                        Text(appName).font(.headline)
+                        Text("App Store ID: " + appID)
+                    }
                 }
-                Section("IPA và cài đặt") {
-                    Text("Apple không cung cấp API công khai tải IPA từ một liên kết App Store. Không thể xuất IPA thật chỉ từ URL.")
+                Section("Kho IPA riêng") {
+                    if matches.isEmpty {
+                        Text(appID.isEmpty ? "Nhập link để kiểm tra kho." : "Chưa có IPA được phép phân phối trong kho cho ứng dụng này.")
+                            .foregroundColor(.secondary)
+                    }
+                    ForEach(matches) { entry in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(entry.name + " · " + entry.version).font(.headline)
+                            Text(entry.bundleId).font(.caption)
+                            Text(ByteCountFormatter.string(fromByteCount: entry.sizeBytes, countStyle: .file))
+                            Button("Tải IPA về máy") { Task { await download(entry) } }.disabled(busy)
+                        }
+                    }
+                    Button("Làm mới kho") { Task { await loadCatalog() } }.disabled(busy)
+                    Text("Kho chỉ cung cấp IPA được chủ sở hữu cho phép phân phối. Không tự trích xuất ứng dụng thương mại từ App Store.")
                         .font(.footnote).foregroundColor(.secondary)
-                    Button("Nhập IPA có sẵn từ Tệp") { pick = true }
+                }
+                Section("IPA đã tải hoặc nhập") {
+                    Button("Nhập IPA từ Tệp") { pick = true }
                     if let imported {
                         Text(imported.lastPathComponent)
-                        Button("Tải / lưu IPA về máy") { share = true }
-                        Button("Chia sẻ IPA sang ứng dụng ký") { share = true }
+                        Button("Lưu IPA / chia sẻ sang ứng dụng ký") { share = true }
                     }
-                    Text("Cài trực tiếp chỉ khả dụng với IPA đã ký hợp lệ và phương thức phân phối được iOS cho phép.")
-                        .font(.footnote).foregroundColor(.secondary)
                     Text(message).font(.footnote)
                 }
             }
-            .navigationTitle("Xuất IPA")
+            .navigationTitle("Kho IPA")
+            .task { await loadCatalog() }
             .fileImporter(isPresented: $pick, allowedContentTypes: [.data, .archive], allowsMultipleSelection: false) { result in
                 do {
                     guard let url = try result.get().first else { return }
@@ -185,21 +220,52 @@ struct StoreIPAView: View {
             .sheet(isPresented: $share) { if let imported { ShareSheet(items: [imported]) } }
         }
     }
-    @MainActor private func lookup() async {
+    @MainActor private func loadCatalog() async {
         busy = true; defer { busy = false }
-        let parts = link.components(separatedBy: "id")
-        guard let last = parts.last, let digits = last.split(whereSeparator: { !$0.isNumber }).first, let id = Int(digits) else {
-            message = "Link không chứa App Store ID hợp lệ"; return
-        }
         do {
-            let url = URL(string: "https://itunes.apple.com/lookup?id=\(id)&country=vn")!
+            var request = URLRequest(url: catalogURL)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+            let decoded = try JSONDecoder().decode(IPACatalog.self, from: data)
+            guard decoded.schemaVersion == 1 else { throw URLError(.cannotParseResponse) }
+            catalog = decoded.apps.filter { $0.downloadURL.scheme == "https" && $0.sha256.count == 64 && $0.authorizedForDistribution }
+            message = "Kho riêng: " + String(catalog.count) + " phiên bản IPA hợp lệ."
+        } catch { catalog = []; message = "Không tải được danh mục kho: " + error.localizedDescription }
+    }
+    @MainActor private func lookup() async {
+        guard let match = link.range(of: "id[0-9]+", options: .regularExpression),
+              let id = Int(link[match].dropFirst(2)) else { message = "Link App Store không hợp lệ"; return }
+        appID = String(id); appName = ""
+        busy = true
+        do {
+            let url = URL(string: "https://itunes.apple.com/lookup?id=\\(id)&country=vn")!
             let (data, _) = try await URLSession.shared.data(from: url)
             let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let apps = obj?["results"] as? [[String: Any]] ?? []
             appName = apps.first?["trackName"] as? String ?? ""
-            appID = String(id)
-            message = appName.isEmpty ? "Không tìm thấy ứng dụng" : "Đã tra cứu thông tin App Store."
+            message = appName.isEmpty ? "Không tìm thấy ứng dụng trên App Store." : "Đã tìm thấy. Kiểm tra danh sách IPA bên dưới."
         } catch { message = error.localizedDescription }
+        busy = false
+        await loadCatalog()
+    }
+    @MainActor private func download(_ entry: IPACatalogEntry) async {
+        busy = true; defer { busy = false }
+        do {
+            let (tmp, response) = try await URLSession.shared.download(from: entry.downloadURL)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+            let dst = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+            try FileManager.default.moveItem(at: tmp, to: dst)
+            let digest = SHA256.hash(data: try Data(contentsOf: dst)).map { String(format: "%02x", $0) }.joined()
+            guard digest.lowercased() == entry.sha256.lowercased() else {
+                try? FileManager.default.removeItem(at: dst)
+                message = "SHA-256 không khớp. Đã hủy tệp tải xuống."
+                return
+            }
+            imported = dst
+            message = "Đã tải và xác minh SHA-256. Chọn Lưu IPA để xuất vào Tệp."
+            share = true
+        } catch { message = "Tải IPA thất bại: " + error.localizedDescription }
     }
 }
 
