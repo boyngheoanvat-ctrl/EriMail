@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: eri-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ERI_ADMIN_KEY
+        generateValue: true
+      - key: ERI_DB_PATH
+        value: /tmp/eri.sqlite3
+      - key: ERI_PAYMENT_MODE
+        value: static_momo
