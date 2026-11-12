@@ -73,7 +73,7 @@ def init():
 init()
 
 def require_admin(x_eri_admin_key: str | None = Header(default=None)):
-    if not ADMIN_KEY or x_eri_admin_key != ADMIN_KEY:
+    if len(ADMIN_KEY) < 32 or not secrets.compare_digest(x_eri_admin_key or "", ADMIN_KEY):
         raise HTTPException(403, "Admin access denied")
 
 class IPA(BaseModel):
@@ -126,6 +126,18 @@ def capabilities():
     return {"ipa_catalog": True, "ai_products": True, "offers": False,
             "ipa_signing": False, "payments": False, "third_party_catalog_sync": False,
             "automatic_fulfillment": False, "install_manifest_catalog": False}
+
+@app.get("/api/v1/admin/ipa", dependencies=[Depends(require_admin)])
+def admin_ipa_catalog():
+    with connection() as db:
+        rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256,authorized FROM ipa ORDER BY id DESC LIMIT 200").fetchall()
+    return {"items": [dict(x) for x in rows]}
+
+@app.get("/api/v1/mods")
+def public_mod_catalog():
+    with connection() as db:
+        rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256 FROM ipa WHERE authorized=1 ORDER BY id DESC LIMIT 100").fetchall()
+    return {"items": [dict(x) for x in rows]}
 
 @app.post("/api/v1/admin/ipa", dependencies=[Depends(require_admin)], status_code=201)
 def add_ipa(item: IPA):
