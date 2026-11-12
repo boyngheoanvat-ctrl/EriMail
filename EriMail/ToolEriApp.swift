@@ -179,7 +179,7 @@ struct StoreIPAView: View {
                         Text("App Store ID: " + appID)
                     }
                 }
-                Section("Kho IPA ERI NGUYỄN") {
+                Section("Kho IPA riêng") {
                     if matches.isEmpty {
                         Text(appID.isEmpty ? "Nhập link để kiểm tra kho." : "Chưa có IPA được phép phân phối trong kho cho ứng dụng này.")
                             .foregroundColor(.secondary)
