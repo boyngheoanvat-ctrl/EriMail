@@ -5,15 +5,20 @@ import CryptoKit
 import CoreImage.CIFilterBuiltins
 import WebKit
 
+final class ERIIPASelection: ObservableObject {
+    @Published var ipaURL: URL?
+}
+
 struct ContentView: View {
+    @StateObject private var ipaSelection = ERIIPASelection()
     @State private var tab = 0
     @AppStorage("ERI_CUSTOM_API_BASE_URL") private var customAPI = ""
     @State private var showAPISettings = false
     var body: some View {
         TabView(selection: $tab) {
             EmailToolsView().tabItem { Label("Email", systemImage: "envelope") }.tag(0)
-            StoreIPAView().tabItem { Label("IPA", systemImage: "square.and.arrow.down") }.tag(1)
-            SignIPAView().tabItem { Label("Ký IPA", systemImage: "checkmark.shield") }.tag(2)
+            StoreIPAView(selection: ipaSelection, openSigner: { tab = 2 }).tabItem { Label("IPA", systemImage: "square.and.arrow.down") }.tag(1)
+            SignIPAView(selection: ipaSelection).tabItem { Label("Ký IPA", systemImage: "checkmark.shield") }.tag(2)
             StoreOffersView().tabItem { Label("Ưu đãi", systemImage: "tag") }.tag(3)
             InstallToolsView().tabItem { Label("ESign/KSign", systemImage: "iphone") }.tag(4)
             AIPlusStoreView().tabItem { Label("AI Plus", systemImage: "sparkles") }.tag(5)
@@ -176,6 +181,9 @@ struct IPACatalogEntry: Decodable, Identifiable {
     let authorizedForDistribution: Bool
 }
 struct StoreIPAView: View {
+    @ObservedObject var selection: ERIIPASelection
+    let openSigner: () -> Void
+    @State private var showIPAImporter = false
     @State private var link = ""
     @State private var directIPALink = ""
     @State private var appName = ""
@@ -215,6 +223,13 @@ struct StoreIPAView: View {
                     Text("Kho chỉ cung cấp IPA được chủ sở hữu cho phép phân phối. Không tự trích xuất ứng dụng thương mại từ App Store.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
+                Section("IPA của bạn") {
+                    Button { showIPAImporter = true } label: { Label("Nhập tệp IPA từ iPhone", systemImage: "doc.badge.plus") }
+                    if let file = selection.ipaURL {
+                        Text("Đã nhận: " + file.lastPathComponent).font(.footnote)
+                        Button { openSigner() } label: { Label("Chuyển sang Ký IPA", systemImage: "checkmark.shield") }
+                    }
+                }
                 Section("Tải IPA bằng link trực tiếp") {
                     TextField("https://example.com/app.ipa", text: $directIPALink)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -234,6 +249,27 @@ struct StoreIPAView: View {
             .navigationTitle("ERI NGUYỄN · IPA")
             .task { await loadCatalog() }
             .sheet(isPresented: $share) { if let imported { ShareSheet(items: [imported]) } }
+            .fileImporter(isPresented: $showIPAImporter, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
+                do {
+                    guard let url = try result.get().first else { return }
+                    guard url.pathExtension.lowercased() == "ipa" else { message = "Vui lòng chọn tệp .ipa"; return }
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
+                    try FileManager.default.copyItem(at: url, to: destination)
+                    let handle = try FileHandle(forReadingFrom: destination)
+                    let magic = try handle.read(upToCount: 4) ?? Data()
+                    try handle.close()
+                    guard magic.starts(with: [0x50, 0x4B]) else {
+                        try? FileManager.default.removeItem(at: destination)
+                        message = "Tệp không phải IPA/ZIP hợp lệ."
+                        return
+                    }
+                    selection.ipaURL = destination
+                    imported = destination
+                    message = "Đã nhập IPA thành công. Bấm Chuyển sang Ký IPA."
+                } catch { message = "Không nhập được IPA: " + error.localizedDescription }
+            }
         }
     }
     @MainActor private func loadCatalog() async {
@@ -288,6 +324,7 @@ struct StoreIPAView: View {
             let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
             try FileManager.default.moveItem(at: temp, to: destination)
             imported = destination
+            selection.ipaURL = destination
             message = "Đã tải IPA. Bạn có thể lưu vào ứng dụng Tệp."
             share = true
         } catch {
@@ -308,6 +345,7 @@ struct StoreIPAView: View {
                 return
             }
             imported = dst
+            selection.ipaURL = dst
             message = "Đã tải và xác minh SHA-256. Chọn Lưu IPA để xuất vào Tệp."
             share = true
         } catch { message = "Tải IPA thất bại: " + error.localizedDescription }
@@ -320,6 +358,7 @@ struct ERISigningResponse: Decodable {
 }
 
 struct SignIPAView: View {
+    @ObservedObject var selection: ERIIPASelection
     private enum ImportKind: String { case ipa, p12, mobileprovision }
     @State private var importing: ImportKind?
     @State private var showImporter = false
@@ -367,7 +406,8 @@ struct SignIPAView: View {
                     TextField("Dán link HTTPS tải IPA", text: $ipaLink)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .keyboardType(.URL)
-                    fileRow("Hoặc chọn file .ipa", kind: .ipa, url: ipaURL)
+                    fileRow("Hoặc chọn file .ipa", kind: .ipa, url: ipaURL ?? selection.ipaURL)
+                    if let shared = selection.ipaURL { Text("IPA đã nhập: " + shared.lastPathComponent).font(.caption).foregroundColor(.secondary) }
                 }
                 Section("Chứng chỉ ký") {
                     fileRow("Chọn file .p12", kind: .p12, url: p12URL)
@@ -432,7 +472,7 @@ struct SignIPAView: View {
                 let destination = folder.appendingPathComponent(UUID().uuidString + "." + expected)
                 try FileManager.default.copyItem(at: selected, to: destination)
                 switch kind {
-                case .ipa: ipaURL = destination
+                case .ipa: ipaURL = destination; selection.ipaURL = destination
                 case .p12: p12URL = destination
                 case .mobileprovision: profileURL = destination
                 }
@@ -471,12 +511,13 @@ struct SignIPAView: View {
                 let saved = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipa")
                 try FileManager.default.moveItem(at: downloaded, to: saved)
                 signingIPA = saved
-            } else if let ipaURL {
-                signingIPA = ipaURL
+            } else if let chosenIPA = ipaURL ?? selection.ipaURL {
+                signingIPA = chosenIPA
             } else {
                 throw NSError(domain: "ERI", code: 6, userInfo: [NSLocalizedDescriptionKey: "Dán link IPA hoặc chọn tệp IPA."])
             }
-            defer { if signingIPA != ipaURL { try? FileManager.default.removeItem(at: signingIPA) } }
+            let downloadedFromLink = !ipaLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            defer { if downloadedFromLink { try? FileManager.default.removeItem(at: signingIPA) } }
             let boundary = "ERI-" + UUID().uuidString
             let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".multipart")
             FileManager.default.createFile(atPath: temporary.path, contents: nil)
@@ -534,7 +575,7 @@ struct StoreOffersView: View {
         NavigationView {
             Form {
                 Section("Ưu đãi · ERI NGUYỄN") {
-                    Link("Xem ưu đãi GPT Plus/Pro tại BitTopup", destination: URL(string: "https://coupons.bittopup.com/vi/goods/gpt-plus-pro")!)
+                    Text("Danh mục riêng của ERI NGUYỄN").font(.subheadline)
                     Text("Ưu đãi bên thứ ba; giá và điều kiện áp dụng theo nhà cung cấp.").font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới") { Task { await load() } }
                     Text(status).font(.footnote).foregroundColor(.secondary)
@@ -585,8 +626,8 @@ struct InstallToolsView: View {
         NavigationView {
             Form {
                 Section("Chứng chỉ · ERI NGUYỄN") {
-                    Link("Tham khảo danh mục MuaCert", destination: URL(string: "https://muacert.com/")!)
-                    Text("Giá bán ERI đã cộng 30% trên giá nhập.")
+                    Text("Danh mục riêng của ERI NGUYỄN").font(.subheadline)
+                    Text("Giá hiển thị theo danh mục sản phẩm ERI.")
                         .font(.footnote).foregroundColor(.secondary)
                     Button("Làm mới danh mục chứng chỉ") { Task { await loadCertificates() } }
                     Text(catalogStatus).font(.footnote).foregroundColor(.secondary)
@@ -665,7 +706,7 @@ struct AIPlusStoreView: View {
         NavigationView {
             Form {
                 Section("AI Plus · ERI NGUYỄN") {
-                    Link("Tham khảo bảng giá Sky World", destination: URL(string: "https://sky-sky-sky.com/#bang-gia")!)
+                    Text("Danh mục riêng của ERI NGUYỄN").font(.subheadline)
                     Button("Làm mới bảng giá") { Task { await load() } }
                     Text(status).font(.footnote).foregroundColor(.secondary)
                 }
