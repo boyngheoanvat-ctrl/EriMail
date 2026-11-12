@@ -22,6 +22,9 @@ class MainActivity : Activity() {
     private lateinit var title: TextView
     private var category = "mods"
 
+    private fun eriMoney(value: Long): String =
+        java.text.NumberFormat.getIntegerInstance(java.util.Locale("vi", "VN")).format(value) + "đ"
+
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density + 0.5f).toInt()
 
@@ -168,7 +171,7 @@ class MainActivity : Activity() {
                         } else item.optString("description")
                         card.addView(TextView(this).apply { text = detail })
                         card.addView(TextView(this).apply {
-                            text = "%,d đ".format(java.util.Locale.US, price)
+                            text = eriMoney(price)
                             textSize = 17f
                         })
                         card.addView(Button(this).apply {
@@ -202,7 +205,7 @@ class MainActivity : Activity() {
                 val note = order.optString("transfer_note")
                 val details = "Mã đơn: " + order.optString("id") +
                     "\nSản phẩm: " + order.optString("product_name") +
-                    "\nSố tiền: " + "%,d đ".format(java.util.Locale.US, order.optLong("amount_vnd")) +
+                    "\nSố tiền: " + eriMoney(order.optLong("amount_vnd")) +
                     "\nNội dung chuyển: " + note + "\n\n" + instructions
                 val qrPath = order.optString("qr_url")
                 val qrBitmap = if (qrPath.isNotBlank()) {

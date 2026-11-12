@@ -1,5 +1,14 @@
 import SwiftUI
 
+private func eriMoney(_ amount: Int) -> String {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.locale = Locale(identifier: "vi_VN")
+    formatter.maximumFractionDigits = 0
+    return (formatter.string(from: NSNumber(value: amount)) ?? String(amount)) + "đ"
+}
+
+
 @main
 struct ERIStoreApp: App {
     var body: some Scene { WindowGroup { StoreHome().frame(maxWidth: .infinity, maxHeight: .infinity) } }
@@ -41,7 +50,7 @@ private struct StoreCatalog: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(item.name).font(.headline)
                         Text(item.description).font(.subheadline)
-                        Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
+                        Text(eriMoney(item.price_vnd)).fontWeight(.semibold)
                         Button(buying ? "Đang tạo đơn..." : "Mua ngay") { Task { await buy(item) } }
                             .buttonStyle(.borderedProminent).disabled(buying)
                     }.padding(.vertical, 5)
@@ -116,7 +125,7 @@ private struct OrderDetailView: View {
                 Section("Đơn hàng đã tạo") {
                     Text(order.product_name).font(.headline)
                     LabeledContent("Mã đơn", value: order.id)
-                    LabeledContent("Số tiền", value: order.amount_vnd.formatted(.currency(code: "VND")))
+                    LabeledContent("Số tiền", value: eriMoney(order.amount_vnd))
                     LabeledContent("Trạng thái", value: order.status)
                 }
                 Section("Thanh toán") {
@@ -203,7 +212,7 @@ private struct ModCatalog: View {
             if let detail = item.description, !detail.isEmpty { Text(detail).font(.subheadline) }
             Text("Phiên bản " + item.version)
             Text(item.bundle_id).font(.caption).foregroundStyle(.secondary)
-            Text(item.price_vnd.formatted(.currency(code: "VND"))).fontWeight(.semibold)
+            Text(eriMoney(item.price_vnd)).fontWeight(.semibold)
             Button(buying ? "Đang tạo đơn..." : "Mua ngay") {
                 Task { await buy(item) }
             }

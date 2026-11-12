@@ -1,4 +1,13 @@
 import SwiftUI
+
+private func eriMoney(_ amount: Int) -> String {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.locale = Locale(identifier: "vi_VN")
+    formatter.maximumFractionDigits = 0
+    return (formatter.string(from: NSNumber(value: amount)) ?? String(amount)) + "đ"
+}
+
 import Security
 import UniformTypeIdentifiers
 
@@ -196,7 +205,7 @@ private enum AdminError: LocalizedError {
         case .invalidKey: return "Khóa quản trị không đúng hoặc đã hết hiệu lực."
         case .http(let status):
             if status == 404 {
-                return "HTTP 404: Máy chủ chưa triển khai API upload từng phần. Hãy cập nhật backend Render."
+                return "HTTP 404: Máy chủ chưa có tính năng này. Hãy cập nhật backend trên Render."
             }
             if status == 413 {
                 return "HTTP 413: Dữ liệu tải lên vượt giới hạn của máy chủ."
@@ -321,7 +330,7 @@ private struct OrdersView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(order.product_name).font(.headline)
                     Text("Mã đơn: " + order.id).font(.caption)
-                    Text(order.amount_vnd.formatted(.currency(code: "VND")))
+                    Text(eriMoney(order.amount_vnd))
                     Text("Trạng thái: " + order.status)
                     if order.status == "pending" {
                         TextField("Mã giao dịch MoMo đã đối chiếu", text: Binding(
@@ -641,7 +650,7 @@ private struct AdminCatalogView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.name).font(.headline)
                     if !item.description.isEmpty { Text(item.description) }
-                    Text(item.price_vnd.formatted(.currency(code: "VND")))
+                    Text(eriMoney(item.price_vnd))
                     Button("Xóa sản phẩm", role: .destructive) { toDelete = item }
                         .disabled(busy)
                 }
