@@ -12,7 +12,7 @@ private struct AdminOrder: Decodable, Identifiable {
     let status: String
 }
 private struct AdminHome: View {
-    @AppStorage("eri_admin_api") private var api = ""
+    @AppStorage("eri_admin_api") private var api = "https://eri-api-dag8.onrender.com"
     @State private var key = ""
     @State private var orders: [AdminOrder] = []
     @State private var status = "Chưa kết nối"
