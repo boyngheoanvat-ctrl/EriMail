@@ -236,3 +236,7 @@ def admin_orders():
     with connection() as db:
         rows = db.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 200").fetchall()
     return {"items": [dict(x) for x in rows]}
+
+# Private signing API (requires a macOS worker and ERI_SIGNING_KEY).
+from signing_api import router as signing_router
+app.include_router(signing_router)
