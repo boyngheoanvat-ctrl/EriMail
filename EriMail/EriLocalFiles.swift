@@ -11,6 +11,9 @@ struct EriLocalFilesView: View {
     @State private var share = false
     @State private var remote = ""
     @State private var downloading = false
+    @State private var selectedTool = "ESign"
+    @State private var appStoreLink = ""
+    @State private var appStoreNotice = ""
 
     private var extensions: [String] {
         switch mode {
@@ -38,6 +41,46 @@ struct EriLocalFilesView: View {
                     }
                 }
             }
+            if mode == "ipa" {
+                Section("Nhập liên kết App Store") {
+                    TextField("https://apps.apple.com/vn/app/.../id6757736102", text: $appStoreLink)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button("Kiểm tra liên kết") {
+                        let link = appStoreLink.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let url = URL(string: link),
+                           url.scheme == "https",
+                           ["apps.apple.com", "itunes.apple.com"].contains(url.host?.lowercased() ?? ""),
+                           url.path.range(of: "/id[0-9]+", options: .regularExpression) != nil {
+                            appStoreNotice = "Đã nhận liên kết App Store. Apple không cung cấp IPA trực tiếp qua liên kết này; để xuất IPA, cần nhập tệp IPA có quyền sử dụng hoặc URL tải .ipa trực tiếp."
+                        } else {
+                            appStoreNotice = "Liên kết App Store không hợp lệ."
+                        }
+                    }
+                    Text(appStoreNotice).font(.footnote).foregroundColor(.secondary)
+                }
+            }
+            if mode == "tools" {
+                Section("Chọn công cụ") {
+                    Picker("Công cụ", selection: $selectedTool) {
+                        ForEach(["ESign", "KSign", "Feather", "GBox", "Scarlet"], id: \.self) { Text($0) }
+                    }
+                    Text("Chọn tệp IPA của " + selectedTool + " để xuất hoặc tải IPA từ URL HTTPS trực tiếp.")
+                    Button {
+                        share = true
+                    } label: {
+                        Label("Xuất IPA " + selectedTool, systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(file == nil)
+                    Button {
+                        message = "Chưa có IPA được ký bằng chứng chỉ hợp lệ. Không thể cài trực tiếp bằng chứng chỉ free không xác minh được."
+                    } label: {
+                        Label("Cài trực tiếp", systemImage: "iphone")
+                    }
+                    .disabled(file == nil)
+                }
+            }
             if mode == "ipa" || mode == "tools" {
                 Section("Tải IPA trực tiếp vào Eri Mail") {
                     TextField("https://example.com/app.ipa", text: $remote)
@@ -61,6 +104,9 @@ struct EriLocalFilesView: View {
                 }
             }
             if mode == "certificates" {
+                Section("Chứng chỉ miễn phí và chứng chỉ riêng") {
+                    Text("Nếu không nhập chứng chỉ, ứng dụng không tự tạo hoặc lấy chứng chỉ Apple dùng chung. Chứng chỉ miễn phí chỉ sử dụng được khi còn hiệu lực và phù hợp thiết bị.")
+                }
                 Section("Bảo mật") {
                     Text("Tệp chứng chỉ chỉ được sao chép vào vùng tạm của ứng dụng. Không tải khóa riêng hoặc mật khẩu lên dịch vụ ngoài. Chưa hỗ trợ ký bằng chứng chỉ ngay trên máy.")
                         .font(.footnote).foregroundColor(.secondary)
