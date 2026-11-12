@@ -618,7 +618,7 @@ struct InstallToolsView: View {
                             ERIBuyButton(kind: "certificate", productID: item.id)
                         }
                     }
-                    Text("Chọn sản phẩm, xem giá và quét QR MoMo để chuyển khoản. Đơn chờ ERI xác nhận sau khi kiểm tra giao dịch. Danh mục cần được thêm vào backend ERI.")
+                    Text("Chọn sản phẩm, xem giá và thanh toán qua payOS của ERI. Đơn chỉ xác nhận sau khi hệ thống đối soát giao dịch.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
                 Section("Cài ESign / KSign") {
@@ -690,7 +690,7 @@ struct AIPlusStoreView: View {
                             ERIBuyButton(kind: "ai", productID: item.id)
                         }
                     }
-                    Text("Xem giá, chọn Mua ngay và quét QR MoMo. ERI kiểm tra chuyển khoản trước khi xác nhận đơn. Chỉ đặt hàng khi máy chủ ERI đã được triển khai và có sản phẩm hợp lệ.")
+                    Text("Xem giá, chọn Mua ngay và thanh toán qua payOS ERI. Chỉ nhận đơn khi máy chủ và kênh thanh toán đã được cấu hình.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
             }.navigationTitle("ERI NGUYỄN · AI Plus")
@@ -747,6 +747,7 @@ struct ERIOrder: Decodable, Identifiable {
     let bank_name: String?
     let transfer_note: String?
     let payment_method: String?
+    let checkout_url: String?
 }
 
 struct ERIBuyButton: View {
@@ -757,7 +758,7 @@ struct ERIBuyButton: View {
     @State private var busy = false
     @State private var showOrder = false
     var body: some View {
-        Button(busy ? "Đang tạo đơn..." : "Mua ngay · QR MoMo") {
+        Button(busy ? "Đang tạo đơn..." : "Mua ngay · payOS") {
             Task { await create() }
         }.disabled(busy)
         .sheet(isPresented: $showOrder) {
@@ -773,6 +774,10 @@ struct ERIBuyButton: View {
                             if let note = order.transfer_note {
                                 Text("Nội dung: " + note)
                                 Button("Sao chép nội dung") { UIPasteboard.general.string = note }
+                            }
+                            if order.payment_method == "payos", let raw = order.checkout_url, let checkout = URL(string: raw), checkout.scheme == "https", checkout.host == "pay.payos.vn" {
+                                Link(destination: checkout) { Label("Mở payOS để quét QR thanh toán", systemImage: "qrcode") }
+                                Text("Chỉ thanh toán qua link payOS của đơn hàng ERI. Trạng thái sẽ cập nhật sau khi hệ thống xác minh giao dịch.").font(.footnote).foregroundColor(.secondary)
                             }
                             if order.payment_method == "static_momo" {
                                 Text("Quét mã MoMo để thanh toán").font(.headline)
