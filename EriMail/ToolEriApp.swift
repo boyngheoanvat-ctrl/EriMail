@@ -7,6 +7,8 @@ import WebKit
 
 struct ContentView: View {
     @State private var tab = 0
+    @AppStorage("ERI_CUSTOM_API_BASE_URL") private var customAPI = ""
+    @State private var showAPISettings = false
     var body: some View {
         TabView(selection: $tab) {
             EmailToolsView().tabItem { Label("Email", systemImage: "envelope") }.tag(0)
@@ -17,6 +19,21 @@ struct ContentView: View {
             AIPlusStoreView().tabItem { Label("AI Plus", systemImage: "sparkles") }.tag(5)
         }
         .accentColor(.cyan)
+        .toolbar { Button("Máy chủ") { showAPISettings = true } }
+        .sheet(isPresented: $showAPISettings) {
+            NavigationView {
+                Form {
+                    Section("Máy chủ ERI HTTPS") {
+                        TextField("https://api.example.com", text: $customAPI)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Text("Chỉ nhập địa chỉ backend ERI đã triển khai và tin cậy. Không nhập API key quản trị.")
+                            .font(.footnote).foregroundColor(.secondary)
+                    }
+                }
+                .navigationTitle("Cấu hình cửa hàng")
+                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Xong") { showAPISettings = false } } }
+            }
+        }
     }
 }
 
@@ -447,7 +464,7 @@ struct InstallToolsView: View {
                             ERIBuyButton(kind: "certificate", productID: item.id)
                         }
                     }
-                    Text("Chưa tích hợp đặt hàng, thanh toán hoặc cấp chứng chỉ. Chỉ đăng bán chứng chỉ có quyền phân phối; chứng chỉ của Khoindvn phải ghi đúng nguồn và có thỏa thuận bán lại.")
+                    Text("Đặt hàng bằng QR MoMo; người bán xác nhận và giao chứng chỉ thủ công. Danh mục cần được thêm vào backend ERI.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
                 Section("Cài ESign / KSign") {
@@ -563,11 +580,16 @@ struct ERIOffer: Decodable, Identifiable {
     let source_url: String
 }
 enum ERIAPI {
+    static func configuredBase() -> String? {
+        let custom = UserDefaults.standard.string(forKey: "ERI_CUSTOM_API_BASE_URL")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !custom.isEmpty { return custom }
+        return Bundle.main.object(forInfoDictionaryKey: "ERI_API_BASE_URL") as? String
+    }
     static func load<T: Decodable>(_ path: String, as: T.Type) async throws -> [T] {
-        guard let base = Bundle.main.object(forInfoDictionaryKey: "ERI_API_BASE_URL") as? String,
+        guard let base = configuredBase(),
               let url = URL(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + path),
               url.scheme == "https" else {
-            throw NSError(domain: "ERI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Chưa cấu hình ERI_API_BASE_URL HTTPS trong Info.plist."])
+            throw NSError(domain: "ERI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Chưa có máy chủ ERI HTTPS. Mở Cấu hình cửa hàng để nhập URL backend."])
         }
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -667,9 +689,9 @@ struct ERIBuyButton: View {
 
 extension ERIAPI {
     static func baseURL() throws -> URL {
-        guard let base = Bundle.main.object(forInfoDictionaryKey: "ERI_API_BASE_URL") as? String,
+        guard let base = configuredBase(),
               let url = URL(string: base), url.scheme == "https" else {
-            throw NSError(domain: "ERI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Chưa cấu hình ERI_API_BASE_URL HTTPS."])
+            throw NSError(domain: "ERI", code: 1, userInfo: [NSLocalizedDescriptionKey: "Chưa có máy chủ ERI HTTPS. Hãy cấu hình URL backend."])
         }
         return url
     }
