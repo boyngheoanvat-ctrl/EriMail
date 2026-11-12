@@ -47,6 +47,21 @@ jobs:
 
           test -f build-source/EriMail.xcodeproj/project.pbxproj
           test -f build-source/build_ipa.sh
+      - name: Set app display name
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('build-source/EriMail.xcodeproj/project.pbxproj')
+          s=p.read_text()
+          import re
+          s,n=re.subn(r'(INFOPLIST_KEY_CFBundleDisplayName\\s*=\\s*)[^;]+;',r'\\1"TOOL ERI NGUYỄN";',s)
+          if n==0:
+              s=s.replace('buildSettings = {', 'buildSettings = {\n                INFOPLIST_KEY_CFBundleDisplayName = "TOOL ERI NGUYỄN";')
+          p.write_text(s)
+          print('Configured app display name: TOOL ERI NGUYỄN')
+          PY
       - name: Build unsigned IPA
         run: |
           cd build-source
