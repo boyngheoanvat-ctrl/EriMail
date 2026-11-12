@@ -6,6 +6,7 @@ on:
     paths:
       - 'EriMail-main.zip'
       - '.github/workflows/build-ipa.yml'
+      - 'EriMail/EriLocalFiles.swift'
 permissions:
   contents: read
 concurrency:
@@ -26,6 +27,24 @@ jobs:
           test -f extracted/EriMail-main/gmail_fake_eri_mod_ios_cloud_build.zip
           unzip -oq extracted/EriMail-main/gmail_fake_eri_mod_ios_cloud_build.zip -d build-source
           cp extracted/EriMail-main/EriMail/ContentView.swift build-source/EriMail/ContentView.swift
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build-source/EriMail/ContentView.swift")
+          code = p.read_text()
+          replacements = {
+              "IPAExportView()": 'EriLocalFilesView(mode: "ipa")',
+              "SigningToolsView()": 'EriLocalFilesView(mode: "tools")',
+              "CertificatesView()": 'EriLocalFilesView(mode: "certificates")',
+              "InjectDylibView()": 'EriLocalFilesView(mode: "inject")',
+          }
+          for old, new in replacements.items():
+              if old not in code:
+                  raise RuntimeError("Missing view: " + old)
+              code = code.replace(old, new, 1)
+          code += "\\n" + Path("EriMail/EriLocalFiles.swift").read_text()
+          p.write_text(code)
+          PY
+
           test -f build-source/EriMail.xcodeproj/project.pbxproj
           test -f build-source/build_ipa.sh
       - name: Build unsigned IPA
