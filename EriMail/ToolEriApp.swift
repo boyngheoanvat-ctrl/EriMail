@@ -268,18 +268,54 @@ struct StoreIPAView: View {
 struct SignIPAView: View {
     @State private var ipaURL: URL?
     @State private var pickIPA = false
+    @State private var message = "Chọn tệp .ipa từ ứng dụng Tệp để chuẩn bị ký."
+    private var ipaType: UTType { UTType(filenameExtension: "ipa") ?? UTType(importedAs: "com.apple.itunes.ipa") }
+
     var body: some View {
         NavigationView {
             Form {
-                Section("Ký IPA · ERI NGUYỄN") {
-                    Button("Chọn IPA từ Tệp") { pickIPA = true }
-                    if let ipaURL { Text(ipaURL.lastPathComponent) }
-                    Text("Chưa có máy chủ ký IPA được cấu hình. Ký thật yêu cầu worker macOS, chứng chỉ P12 và provisioning profile hợp lệ. Không gửi khóa riêng đến máy chủ chưa được xác minh.")
-                        .foregroundColor(.secondary)
+                Section("Nhập IPA · ERI NGUYỄN") {
+                    Button {
+                        pickIPA = true
+                    } label: {
+                        Label("Chọn file IPA (.ipa)", systemImage: "doc.badge.plus")
+                    }
+                    if let ipaURL {
+                        Label("Đã nhập: " + ipaURL.lastPathComponent, systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text(ByteCountFormatter.string(fromByteCount: (try? ipaURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0, countStyle: .file))
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                    Text(message).font(.footnote).foregroundColor(.secondary)
                 }
-            }.navigationTitle("ERI NGUYỄN · Ký IPA")
-            .fileImporter(isPresented: $pickIPA, allowedContentTypes: [.data, .archive]) { result in
-                if case .success(let url) = result { ipaURL = url }
+                Section("Ký IPA") {
+                    Text("Đã hỗ trợ nhập IPA từ Tệp. Chức năng ký thật vẫn cần worker ký macOS và chứng chỉ hợp lệ; ứng dụng không giả lập kết quả ký.")
+                        .font(.footnote).foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("ERI NGUYỄN · Ký IPA")
+        }
+        .fileImporter(isPresented: $pickIPA, allowedContentTypes: [ipaType, .data, .archive, .item], allowsMultipleSelection: false) { result in
+            do {
+                guard let selected = try result.get().first else {
+                    message = "Bạn chưa chọn tệp."
+                    return
+                }
+                guard selected.pathExtension.lowercased() == "ipa" else {
+                    message = "Chỉ hỗ trợ tệp có đuôi .ipa."
+                    return
+                }
+                let scoped = selected.startAccessingSecurityScopedResource()
+                defer { if scoped { selected.stopAccessingSecurityScopedResource() } }
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("ImportedIPA", isDirectory: true)
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let destination = folder.appendingPathComponent(UUID().uuidString + ".ipa")
+                try FileManager.default.copyItem(at: selected, to: destination)
+                ipaURL = destination
+                message = "Đã nhập IPA vào bộ nhớ ứng dụng. Sẵn sàng cho bước ký khi dịch vụ ký được cấu hình."
+            } catch {
+                message = "Không nhập được IPA: " + error.localizedDescription
             }
         }
     }
