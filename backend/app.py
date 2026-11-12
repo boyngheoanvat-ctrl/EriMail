@@ -152,6 +152,7 @@ def add_certificate(item: CertificateProduct):
             (item.name,item.issuer,item.description,item.price_vnd,int(item.active)))
     return {"id": cur.lastrowid}
 
+PAYMENT_MODE = os.getenv("ERI_PAYMENT_MODE", "static_momo").strip()
 BANK_BIN = os.getenv("ERI_BANK_BIN", "").strip()
 BANK_ACCOUNT = os.getenv("ERI_BANK_ACCOUNT", "").strip()
 BANK_NAME = os.getenv("ERI_BANK_NAME", "").strip()
@@ -164,7 +165,11 @@ def public_order(row):
     data = dict(row)
     data.pop("product_id", None)
     data.pop("created_at", None)
-    if data["status"] == "pending" and BANK_BIN and BANK_ACCOUNT:
+    if data["status"] == "pending" and PAYMENT_MODE == "static_momo":
+        data["payment_method"] = "static_momo"
+        data["payment_instructions"] = "Quét QR MoMo cố định trong ứng dụng. Nhập đúng số tiền và ghi mã đơn nếu ứng dụng ngân hàng hỗ trợ. Người bán xác nhận thủ công."
+        data["transfer_note"] = "ERI " + data["id"]
+    elif data["status"] == "pending" and BANK_BIN and BANK_ACCOUNT:
         from urllib.parse import quote
         note = "ERI " + data["id"]
         data["transfer_note"] = note
@@ -177,7 +182,7 @@ def public_order(row):
 
 @app.post("/api/v1/orders", status_code=201)
 def create_order(item: NewOrder):
-    if not BANK_BIN or not BANK_ACCOUNT or not BANK_NAME:
+    if PAYMENT_MODE != "static_momo" and (not BANK_BIN or not BANK_ACCOUNT or not BANK_NAME):
         raise HTTPException(503, "Bank payment is not configured")
     table = "products" if item.kind == "ai" else "certificates"
     with connection() as db:
