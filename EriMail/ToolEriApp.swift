@@ -271,52 +271,70 @@ struct StoreIPAView: View {
 }
 
 struct SignIPAView: View {
-    @State private var ipa: URL?
-    @State private var p12: URL?
-    @State private var provision: URL?
-    @State private var password = ""
-    @State private var picking: String?
-    @State private var status = ""
+    @State private var showExternal = false
+    @State private var confirmExternal = false
+    private let links: [(String, String)] = [
+        ("Ký IPA trực tuyến", "https://sign.codevn.net"),
+        ("IPA Tool", "https://ipatool.codevn.net"),
+        ("Lịch sử phiên bản", "https://ipatool.codevn.net/historyver.html"),
+        ("Phân tích IPA", "https://ipatool.codevn.net/ipa-parser/"),
+        ("Chuyển DEB sang IPA", "https://ipatool.codevn.net/deb-to-ipa/"),
+        ("Tra cứu Bundle ID", "https://bundleid.codevn.net"),
+        ("iCodeVN", "https://i.codevn.net"),
+        ("Inject Dylib", "https://ipatool.codevn.net/inject-dylib/")
+    ]
     var body: some View {
         NavigationView {
             Form {
-                Section("Tệp ký IPA") {
-                    Button("Nhập IPA: " + (ipa?.lastPathComponent ?? "Chưa chọn")) { picking = "ipa" }
-                    Button("Nhập P12: " + (p12?.lastPathComponent ?? "Chưa chọn")) { picking = "p12" }
-                    Button("Nhập mobileprovision: " + (provision?.lastPathComponent ?? "Chưa chọn")) { picking = "mobileprovision" }
-                    SecureField("Mật khẩu P12", text: $password)
+                Section("Ký IPA · ERI NGUYỄN") {
+                    Text("Dịch vụ ký do CodeVN vận hành. ERI NGUYỄN chỉ cung cấp lối truy cập, không sở hữu máy chủ hoặc chứng chỉ của CodeVN.")
+                        .font(.footnote).foregroundColor(.secondary)
+                    Button("Mở công cụ ký IPA CodeVN") { confirmExternal = true }
+                    Text("Hỗ trợ trên trang nguồn: IPA, ESign, Feather, GBox, Scarlet; P12, mật khẩu, mobileprovision, Bundle ID và tên ứng dụng.")
+                        .font(.footnote)
                 }
-                Section("Ký ứng dụng") {
-                    Button("Kiểm tra tệp đầu vào") {
-                        if ipa == nil || p12 == nil || provision == nil || password.isEmpty {
-                            status = "Cần đủ IPA, P12, mobileprovision và mật khẩu."
-                        } else {
-                            status = "Đã nhập đủ tệp. Chưa có bộ ký IPA thực tế trong ứng dụng; chưa tạo IPA đã ký."
+                Section("Công cụ CodeVN liên quan") {
+                    ForEach(links, id: \.1) { link in
+                        Button(link.0) {
+                            guard let url = URL(string: link.1) else { return }
+                            UIApplication.shared.open(url)
                         }
                     }
-                    Text(status).font(.footnote)
-                    Text("Chứng chỉ và mật khẩu chỉ lưu trong phiên làm việc. Ký IPA yêu cầu xử lý Mach-O, entitlements, provisioning và chữ ký mã hợp lệ; nhập tệp không đồng nghĩa đã ký.")
+                }
+                Section("Bảo mật") {
+                    Text("Nếu mở công cụ ký trực tuyến, P12 và mật khẩu bạn chọn trên trang sẽ được gửi đến CodeVN. Chỉ tiếp tục nếu bạn tin tưởng nhà cung cấp. Không dùng chứng chỉ chứa khóa riêng quan trọng trên dịch vụ không kiểm soát.")
                         .font(.footnote).foregroundColor(.secondary)
                 }
-            }.navigationTitle("Ký IPA")
-            .fileImporter(isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }), allowedContentTypes: [.data, .archive], allowsMultipleSelection: false) { result in
-                let kind = picking ?? ""
-                picking = nil
-                do {
-                    guard let url = try result.get().first else { return }
-                    guard url.pathExtension.lowercased() == kind else { status = "Cần tệp ." + kind; return }
-                    let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    let dst = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + kind)
-                    try FileManager.default.copyItem(at: url, to: dst)
-                    if kind == "ipa" { ipa = dst }
-                    if kind == "p12" { p12 = dst }
-                    if kind == "mobileprovision" { provision = dst }
-                    status = "Đã nhập ." + kind
-                } catch { status = error.localizedDescription }
+            }
+            .navigationTitle("ERI NGUYỄN · Ký IPA")
+            .confirmationDialog("Sử dụng dịch vụ CodeVN?", isPresented: $confirmExternal, titleVisibility: .visible) {
+                Button("Tiếp tục đến CodeVN") { showExternal = true }
+                Button("Hủy", role: .cancel) {}
+            } message: {
+                Text("Bạn sẽ truy cập sign.codevn.net. File IPA, P12, mật khẩu và mobileprovision được xử lý bởi CodeVN nếu bạn gửi biểu mẫu ký.")
+            }
+            .sheet(isPresented: $showExternal) {
+                NavigationView {
+                    OfficialSigningWebView()
+                        .navigationTitle("ERI NGUYỄN · Ký IPA")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Đóng") { showExternal = false }
+                            }
+                        }
+                }
             }
         }
     }
+}
+struct OfficialSigningWebView: UIViewRepresentable {
+    func makeUIView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.load(URLRequest(url: URL(string: "https://sign.codevn.net")!))
+        return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {}
 }
 
 struct StoreOffersView: View {
