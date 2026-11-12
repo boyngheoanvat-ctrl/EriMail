@@ -93,6 +93,9 @@ private final class BuyerSession: ObservableObject {
                 BuyerToken.write("")
                 throw PurchaseError.server("Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.")
             }
+            if code == 404 && (path == "/api/v1/auth/register" || path == "/api/v1/auth/login") {
+                throw PurchaseError.server("Máy chủ chưa cập nhật chức năng tài khoản. Admin cần triển khai backend mới trên Render.")
+            }
             if code == 409 { throw PurchaseError.server("Tên đăng nhập đã được sử dụng") }
             let detail = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
             let message = detail?["detail"] as? String ?? "Máy chủ trả về HTTP " + String(code)
@@ -211,6 +214,9 @@ private struct BuyerAuthView: View {
         waiting = true
         defer { waiting = false }
         do {
+            if registerMode && password.count < 10 {
+                throw PurchaseError.server("Mật khẩu phải có ít nhất 10 ký tự.")
+            }
             try await session.authenticate(register: registerMode, username: username,
                                            password: password, name: name, contact: contact)
             dismiss()

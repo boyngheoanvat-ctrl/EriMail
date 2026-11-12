@@ -111,20 +111,46 @@ private final class AdminSession: ObservableObject {
             "authorized": values["authorized"] == "true"
         ]
         let body = try JSONSerialization.data(withJSONObject: payload)
-        let startData = try await send("/api/v1/admin/upload-sessions", method: "POST", data: body)
-        let session = try JSONDecoder().decode(UploadBegin.self, from: startData)
-        guard session.size_bytes == size, session.chunk_bytes > 0,
-              session.chunk_bytes <= 4 * 1024 * 1024 else { throw URLError(.badServerResponse) }
+        let fileInfo = try FileManager.default.attributesOfItem(atPath: file.path)
+        let modified = (fileInfo[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let checkpointSeed = kind + "|" + file.path + "|" + String(size) + "|" +
+            String(modified) + "|" + (values["name"] ?? "") + "|" + String(price)
+        let checkpointKey = "eri.upload.resume." +
+            checkpointSeed.data(using: .utf8)!.base64EncodedString()
+        var session: UploadBegin?
+        if let savedID = UserDefaults.standard.string(forKey: checkpointKey),
+           savedID.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil {
+            let endpoint = "/api/v1/admin/upload-sessions/" + savedID
+            if let data = try? await send(endpoint),
+               let server = try? JSONDecoder().decode(UploadPosition.self, from: data),
+               server.offset >= 0 && server.offset <= size {
+                session = UploadBegin(upload_id: savedID,
+                                      size_bytes: size,
+                                      chunk_bytes: 4 * 1024 * 1024,
+                                      offset: server.offset)
+            } else {
+                UserDefaults.standard.removeObject(forKey: checkpointKey)
+            }
+        }
+        if session == nil {
+            let startData = try await send("/api/v1/admin/upload-sessions", method: "POST", data: body)
+            session = try JSONDecoder().decode(UploadBegin.self, from: startData)
+            if let started = session {
+                UserDefaults.standard.set(started.upload_id, forKey: checkpointKey)
+            }
+        }
+        guard let active = session, active.size_bytes == size, active.chunk_bytes > 0,
+              active.chunk_bytes <= 4 * 1024 * 1024 else { throw URLError(.badServerResponse) }
 
         let reader = try FileHandle(forReadingFrom: file)
         defer { try? reader.close() }
-        var offset = session.offset
-        let path = "/api/v1/admin/upload-sessions/" + session.upload_id
+        var offset = active.offset
+        let path = "/api/v1/admin/upload-sessions/" + active.upload_id
         onProgress(Double(offset) / Double(size))
         while offset < size {
             try Task.checkCancellation()
             try reader.seek(toOffset: UInt64(offset))
-            let count = min(session.chunk_bytes, size - offset)
+            let count = min(active.chunk_bytes, size - offset)
             guard let chunk = try reader.read(upToCount: count), chunk.count == count else {
                 throw URLError(.cannotOpenFile)
             }
@@ -165,6 +191,7 @@ private final class AdminSession: ObservableObject {
             if !sent { throw lastError }
         }
         _ = try await send(path + "/complete", method: "POST", data: Data())
+        UserDefaults.standard.removeObject(forKey: checkpointKey)
         onProgress(1.0)
     }
 
@@ -599,7 +626,7 @@ private struct AdminUploadView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 if working {
                     ProgressView(value: progress)
-                    Text("Đã tải " + Int(progress * 100).description + "%")
+                    Text("Đã gửi " + Int(progress * 100).description + "% · Khi mất mạng, bấm lại để tiếp tục")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Button(working ? "Đang tải " + Int(progress * 100).description + "%" : "Cập nhật lên máy chủ") {
@@ -689,7 +716,7 @@ private struct AdminUploadView: View {
             selectedFile = nil
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         } catch {
-            status = "Cập nhật thất bại: " + error.localizedDescription
+            status = "Tạm ngắt upload: " + error.localizedDescription + ". Giữ tệp đã chọn và bấm lại để tiếp tục."
         }
     }
 }
