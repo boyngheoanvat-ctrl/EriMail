@@ -6,6 +6,7 @@ struct ERIStoreApp: App {
 }
 
 private struct StoreHome: View {
+    @State private var showSettings = false
     var body: some View {
         TabView {
             StoreCatalog(title: "AI Plus", endpoint: "products")
@@ -14,6 +15,58 @@ private struct StoreHome: View {
                 .tabItem { Label("Chứng chỉ", systemImage: "checkmark.seal") }
             ModCatalog()
                 .tabItem { Label("Mod Game", systemImage: "gamecontroller") }
+        }
+        .sheet(isPresented: $showSettings) { ServerSettingsView() }
+        .environment(\.openERISettings, { showSettings = true })
+    }
+}
+private struct OpenERISettingsKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+private extension EnvironmentValues {
+    var openERISettings: () -> Void {
+        get { self[OpenERISettingsKey.self] }
+        set { self[OpenERISettingsKey.self] = newValue }
+    }
+}
+private struct ServerSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("eri_store_api") private var api = ""
+    @State private var draft = ""
+    @State private var message = ""
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Máy chủ ERI") {
+                    TextField("https://your-api.example.com", text: $draft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button("Lưu địa chỉ máy chủ") {
+                        let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                        guard let url = URLComponents(string: value),
+                              url.scheme == "https", url.host != nil,
+                              url.user == nil, url.password == nil,
+                              url.path.isEmpty, url.query == nil, url.fragment == nil else {
+                            message = "Nhập URL HTTPS của máy chủ, không kèm đường dẫn."
+                            return
+                        }
+                        api = value
+                        message = "Đã lưu. Quay lại tab và nhấn Làm mới."
+                    }
+                    if !message.isEmpty { Text(message).font(.footnote) }
+                }
+                Section {
+                    Text("Ứng dụng khách chỉ sử dụng API công khai. Không nhập khóa quản trị hoặc mật khẩu MoMo tại đây.")
+                        .font(.footnote).foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Cấu hình")
+            .toolbar { ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Xong") { dismiss() }
+            }}
+            .onAppear { draft = api }
         }
     }
 }
@@ -25,6 +78,7 @@ private struct StoreItem: Decodable, Identifiable {
 }
 private struct StoreResponse: Decodable { let items: [StoreItem] }
 private struct StoreCatalog: View {
+    @Environment(\.openERISettings) private var openSettings
     let title: String
     let endpoint: String
     @AppStorage("eri_store_api") private var api = ""
@@ -43,7 +97,10 @@ private struct StoreCatalog: View {
                     }.padding(.vertical, 5)
                 }
             }.navigationTitle(title)
-                .toolbar { Button("Làm mới") { Task { await load() } } }
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) { Button { openSettings() } label: { Image(systemName: "gearshape") } }
+                    ToolbarItem(placement: .navigationBarTrailing) { Button("Làm mới") { Task { await load() } } }
+                }
                 .task { await load() }
         }
     }
@@ -69,6 +126,7 @@ private struct ModItem: Decodable, Identifiable {
 }
 private struct ModResponse: Decodable { let items: [ModItem] }
 private struct ModCatalog: View {
+    @Environment(\.openERISettings) private var openSettings
     @AppStorage("eri_store_api") private var api = ""
     @State private var items: [ModItem] = []
     @State private var status = "Chưa kết nối máy chủ"
