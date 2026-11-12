@@ -44,7 +44,7 @@ jobs:
               f"name: {app}",
               "options:",
               "  deploymentTarget:",
-              "    iOS: '15.0'",
+              "    iOS: '16.0'",
               "targets:",
               f"  {app}:",
               "    type: application",
