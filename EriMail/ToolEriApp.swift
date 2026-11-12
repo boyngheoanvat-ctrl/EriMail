@@ -266,56 +266,114 @@ struct StoreIPAView: View {
 }
 
 struct SignIPAView: View {
+    private enum ImportKind: String { case ipa, p12, mobileprovision }
+    @State private var importing: ImportKind?
+    @State private var showImporter = false
     @State private var ipaURL: URL?
-    @State private var pickIPA = false
-    @State private var message = "Chọn tệp .ipa từ ứng dụng Tệp để chuẩn bị ký."
-    private var ipaType: UTType { UTType(filenameExtension: "ipa") ?? UTType(importedAs: "com.apple.itunes.ipa") }
+    @State private var p12URL: URL?
+    @State private var profileURL: URL?
+    @State private var p12Password = ""
+    @State private var removeEmbeddedProfile = false
+    @State private var newBundleID = ""
+    @State private var newBundleName = ""
+    @State private var message = "Chọn IPA, chứng chỉ P12 và provisioning profile để chuẩn bị ký."
+    @State private var showSigningInfo = false
+
+    private func choose(_ kind: ImportKind) {
+        importing = kind
+        showImporter = true
+    }
+
+    private func fileRow(_ title: String, kind: ImportKind, url: URL?) -> some View {
+        Button { choose(kind) } label: {
+            HStack {
+                Image(systemName: "doc.badge.plus")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                    if let url {
+                        Text(url.lastPathComponent)
+                            .font(.caption).foregroundColor(.secondary).lineLimit(2)
+                    }
+                }
+                Spacer()
+                Text("Chọn").font(.subheadline)
+            }
+        }
+    }
 
     var body: some View {
         NavigationView {
             Form {
-                Section("Nhập IPA · ERI NGUYỄN") {
+                Section("Tệp ứng dụng") {
+                    fileRow("Chọn file .ipa", kind: .ipa, url: ipaURL)
+                }
+                Section("Chứng chỉ ký") {
+                    fileRow("Chọn file .p12", kind: .p12, url: p12URL)
+                    SecureField("Nhập mật khẩu .p12", text: $p12Password)
+                        .textContentType(.password)
+                    fileRow("Chọn file .mobileprovision", kind: .mobileprovision, url: profileURL)
+                }
+                Section("Tùy chọn") {
+                    Toggle("Xóa embedded.mobileprovision cũ", isOn: $removeEmbeddedProfile)
+                    TextField("Bundle identifier mới (không bắt buộc)", text: $newBundleID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Tên ứng dụng mới (không bắt buộc)", text: $newBundleName)
+                }
+                Section {
                     Button {
-                        pickIPA = true
+                        if ipaURL == nil { message = "Bạn cần chọn file .ipa."; return }
+                        if p12URL == nil { message = "Bạn cần chọn file .p12."; return }
+                        if p12Password.isEmpty { message = "Bạn cần nhập mật khẩu chứng chỉ .p12."; return }
+                        if profileURL == nil { message = "Bạn cần chọn file .mobileprovision."; return }
+                        message = "Đã đủ tệp đầu vào. Chưa thể ký: dịch vụ ký IPA thực tế chưa được cấu hình."
+                        showSigningInfo = true
                     } label: {
-                        Label("Chọn file IPA (.ipa)", systemImage: "doc.badge.plus")
-                    }
-                    if let ipaURL {
-                        Label("Đã nhập: " + ipaURL.lastPathComponent, systemImage: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text(ByteCountFormatter.string(fromByteCount: (try? ipaURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0, countStyle: .file))
-                            .font(.caption).foregroundColor(.secondary)
+                        HStack {
+                            Spacer()
+                            Label("Ký IPA", systemImage: "signature")
+                                .font(.headline)
+                            Spacer()
+                        }
                     }
                     Text(message).font(.footnote).foregroundColor(.secondary)
                 }
-                Section("Ký IPA") {
-                    Text("Đã hỗ trợ nhập IPA từ Tệp. Chức năng ký thật vẫn cần worker ký macOS và chứng chỉ hợp lệ; ứng dụng không giả lập kết quả ký.")
-                        .font(.footnote).foregroundColor(.secondary)
+                Section {
+                    Text("Tệp P12 và mật khẩu chỉ được giữ trên thiết bị trong giao diện này, không tải lên máy chủ. Chưa có bộ ký IPA hoạt động; không có file IPA đã ký để tải về.")
+                        .font(.caption).foregroundColor(.secondary)
                 }
             }
             .navigationTitle("ERI NGUYỄN · Ký IPA")
+            .alert("Chưa cấu hình dịch vụ ký", isPresented: $showSigningInfo) {
+                Button("Đã hiểu", role: .cancel) {}
+            } message: {
+                Text("Đã nhập đủ IPA, P12 và mobileprovision. Cần triển khai dịch vụ ký an toàn mới có thể tạo IPA đã ký.")
+            }
         }
-        .fileImporter(isPresented: $pickIPA, allowedContentTypes: [ipaType, .data, .archive, .item], allowsMultipleSelection: false) { result in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.item, .data, .archive], allowsMultipleSelection: false) { result in
+            guard let kind = importing else { return }
             do {
-                guard let selected = try result.get().first else {
-                    message = "Bạn chưa chọn tệp."
-                    return
-                }
-                guard selected.pathExtension.lowercased() == "ipa" else {
-                    message = "Chỉ hỗ trợ tệp có đuôi .ipa."
+                guard let selected = try result.get().first else { return }
+                let expected = kind.rawValue
+                guard selected.pathExtension.lowercased() == expected else {
+                    message = "Hãy chọn tệp ." + expected
                     return
                 }
                 let scoped = selected.startAccessingSecurityScopedResource()
                 defer { if scoped { selected.stopAccessingSecurityScopedResource() } }
                 let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("ImportedIPA", isDirectory: true)
+                    .appendingPathComponent("SigningInputs", isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let destination = folder.appendingPathComponent(UUID().uuidString + ".ipa")
+                let destination = folder.appendingPathComponent(UUID().uuidString + "." + expected)
                 try FileManager.default.copyItem(at: selected, to: destination)
-                ipaURL = destination
-                message = "Đã nhập IPA vào bộ nhớ ứng dụng. Sẵn sàng cho bước ký khi dịch vụ ký được cấu hình."
+                switch kind {
+                case .ipa: ipaURL = destination
+                case .p12: p12URL = destination
+                case .mobileprovision: profileURL = destination
+                }
+                message = "Đã nhập " + selected.lastPathComponent
             } catch {
-                message = "Không nhập được IPA: " + error.localizedDescription
+                message = "Lỗi nhập tệp: " + error.localizedDescription
             }
         }
     }
