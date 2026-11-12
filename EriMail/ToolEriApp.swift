@@ -282,6 +282,11 @@ struct StoreIPAView: View {
     }
 }
 
+struct ERISigningResponse: Decodable {
+    let download_url: String
+    let message: String?
+}
+
 struct SignIPAView: View {
     private enum ImportKind: String { case ipa, p12, mobileprovision }
     @State private var importing: ImportKind?
@@ -293,8 +298,9 @@ struct SignIPAView: View {
     @State private var removeEmbeddedProfile = false
     @State private var newBundleID = ""
     @State private var newBundleName = ""
-    @State private var message = "Chọn IPA, chứng chỉ P12 và provisioning profile để chuẩn bị ký."
-    @State private var showSigningInfo = false
+    @State private var message = "Chọn đủ tệp để ký IPA bằng máy chủ ERI của bạn."
+    @State private var busy = false
+    @State private var signedURL: URL?
 
     private func choose(_ kind: ImportKind) {
         importing = kind
@@ -308,8 +314,8 @@ struct SignIPAView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                     if let url {
-                        Text(url.lastPathComponent)
-                            .font(.caption).foregroundColor(.secondary).lineLimit(2)
+                        Text(url.lastPathComponent).font(.caption)
+                            .foregroundColor(.secondary).lineLimit(2)
                     }
                 }
                 Spacer()
@@ -322,52 +328,46 @@ struct SignIPAView: View {
         NavigationView {
             Form {
                 Section("Tệp ứng dụng") {
-                    fileRow("Chọn file .ipa từ ứng dụng Tệp", kind: .ipa, url: ipaURL)
+                    fileRow("Chọn file .ipa", kind: .ipa, url: ipaURL)
                 }
                 Section("Chứng chỉ ký") {
                     fileRow("Chọn file .p12", kind: .p12, url: p12URL)
-                    SecureField("Nhập mật khẩu .p12", text: $p12Password)
-                        .textContentType(.password)
+                    SecureField("Mật khẩu .p12", text: $p12Password)
                     fileRow("Chọn file .mobileprovision", kind: .mobileprovision, url: profileURL)
                 }
                 Section("Tùy chọn") {
                     Toggle("Xóa embedded.mobileprovision cũ", isOn: $removeEmbeddedProfile)
-                    TextField("Bundle identifier mới (không bắt buộc)", text: $newBundleID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("Tên ứng dụng mới (không bắt buộc)", text: $newBundleName)
+                    TextField("Bundle ID mới (tùy chọn)", text: $newBundleID)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Tên ứng dụng mới (tùy chọn)", text: $newBundleName)
                 }
                 Section {
                     Button {
-                        if ipaURL == nil { message = "Bạn cần chọn file .ipa."; return }
-                        if p12URL == nil { message = "Bạn cần chọn file .p12."; return }
-                        if p12Password.isEmpty { message = "Bạn cần nhập mật khẩu chứng chỉ .p12."; return }
-                        if profileURL == nil { message = "Bạn cần chọn file .mobileprovision."; return }
-                        message = "Đã đủ tệp đầu vào. Chưa thể ký: dịch vụ ký IPA thực tế chưa được cấu hình."
-                        showSigningInfo = true
+                        Task { await sign() }
                     } label: {
                         HStack {
                             Spacer()
-                            Label("Ký IPA", systemImage: "signature")
+                            if busy { ProgressView() }
+                            Label(busy ? "Đang gửi tệp..." : "Ký IPA", systemImage: "signature")
                                 .font(.headline)
                             Spacer()
                         }
-                    }
+                    }.disabled(busy)
                     Text(message).font(.footnote).foregroundColor(.secondary)
+                    if let signedURL {
+                        Link("Tải IPA đã ký", destination: signedURL)
+                    }
                 }
                 Section {
-                    Text("Tệp P12 và mật khẩu chỉ được giữ trên thiết bị trong giao diện này, không tải lên máy chủ. Chưa có bộ ký IPA hoạt động; không có file IPA đã ký để tải về.")
+                    Text("Chỉ gửi P12, mật khẩu và provisioning profile đến backend ERI HTTPS do bạn kiểm soát. Không dùng máy chủ bên thứ ba. Máy chủ cần triển khai POST /api/v1/sign với phản hồi download_url.")
                         .font(.caption).foregroundColor(.secondary)
                 }
             }
             .navigationTitle("ERI NGUYỄN · Ký IPA")
-            .alert("Chưa cấu hình dịch vụ ký", isPresented: $showSigningInfo) {
-                Button("Đã hiểu", role: .cancel) {}
-            } message: {
-                Text("Đã nhập đủ IPA, P12 và mobileprovision. Cần triển khai dịch vụ ký an toàn mới có thể tạo IPA đã ký.")
-            }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [UTType(filenameExtension: importing?.rawValue ?? "ipa") ?? .data, .data], allowsMultipleSelection: false) { result in
+        .fileImporter(isPresented: $showImporter,
+                      allowedContentTypes: [UTType(filenameExtension: importing?.rawValue ?? "ipa") ?? .data, .data],
+                      allowsMultipleSelection: false) { result in
             guard let kind = importing else { return }
             do {
                 guard let selected = try result.get().first else { return }
@@ -378,8 +378,8 @@ struct SignIPAView: View {
                 }
                 let scoped = selected.startAccessingSecurityScopedResource()
                 defer { if scoped { selected.stopAccessingSecurityScopedResource() } }
-                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("SigningInputs", isDirectory: true)
+                let folder = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("ERI-SigningInputs", isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 let destination = folder.appendingPathComponent(UUID().uuidString + "." + expected)
                 try FileManager.default.copyItem(at: selected, to: destination)
@@ -388,10 +388,76 @@ struct SignIPAView: View {
                 case .p12: p12URL = destination
                 case .mobileprovision: profileURL = destination
                 }
+                signedURL = nil
                 message = "Đã nhập " + selected.lastPathComponent
             } catch {
                 message = "Lỗi nhập tệp: " + error.localizedDescription
             }
+        }
+    }
+
+    @MainActor private func sign() async {
+        guard let ipaURL, let p12URL, let profileURL, !p12Password.isEmpty else {
+            message = "Cần chọn IPA, P12, mobileprovision và nhập mật khẩu P12."
+            return
+        }
+        guard let base = ERIAPI.configuredBase(),
+              let url = URL(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/api/v1/sign"),
+              url.scheme == "https" else {
+            message = "Chưa cấu hình backend ERI HTTPS trong Cấu hình cửa hàng."
+            return
+        }
+        busy = true
+        signedURL = nil
+        defer { busy = false }
+        do {
+            let boundary = "ERI-" + UUID().uuidString
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".multipart")
+            FileManager.default.createFile(atPath: temporary.path, contents: nil)
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            let writer = try FileHandle(forWritingTo: temporary)
+            defer { try? writer.close() }
+            func write(_ string: String) throws {
+                try writer.write(contentsOf: Data(string.utf8))
+            }
+            func field(_ name: String, _ value: String) throws {
+                try write("--\\(boundary)\r\nContent-Disposition: form-data; name=\\(name)\r\n\r\n\\(value)\r\n")
+            }
+            func attachment(_ name: String, _ file: URL, _ mime: String) throws {
+                try write("--\\(boundary)\r\nContent-Disposition: form-data; name=\\(name); filename=\\(file.lastPathComponent)\r\nContent-Type: \\(mime)\r\n\r\n")
+                let source = try FileHandle(forReadingFrom: file)
+                defer { try? source.close() }
+                while let chunk = try source.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+                    try writer.write(contentsOf: chunk)
+                }
+                try write("\r\n")
+            }
+            try field("password", p12Password)
+            try field("identifier", newBundleID)
+            try field("name", newBundleName)
+            try field("remove_embedded", removeEmbeddedProfile ? "true" : "false")
+            try attachment("ipa", ipaURL, "application/octet-stream")
+            try attachment("p12", p12URL, "application/x-pkcs12")
+            try attachment("mobileprovision", profileURL, "application/octet-stream")
+            try write("--\\(boundary)--\r\n")
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("multipart/form-data; boundary=\\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 600
+            let (data, response) = try await URLSession.shared.upload(for: request, fromFile: temporary)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                throw NSError(domain: "ERI", code: code, userInfo: [NSLocalizedDescriptionKey: "Backend ký IPA chưa sẵn sàng (HTTP \\(code))."])
+            }
+            let result = try JSONDecoder().decode(ERISigningResponse.self, from: data)
+            guard let signed = URL(string: result.download_url), signed.scheme == "https" else {
+                throw NSError(domain: "ERI", code: 3, userInfo: [NSLocalizedDescriptionKey: "Backend trả về liên kết IPA không hợp lệ."])
+            }
+            signedURL = signed
+            message = result.message ?? "Đã ký IPA thành công."
+            p12Password = ""
+        } catch {
+            message = "Không thể ký IPA: " + error.localizedDescription
         }
     }
 }
