@@ -54,6 +54,8 @@ private struct Order: Decodable, Identifiable {
     let buyer_name: String?
     let buyer_contact: String?
     let delivery_filename: String?
+    let certificate_udid: String?
+    let certificate_udid_source: String?
 }
 @MainActor
 private final class AdminSession: ObservableObject {
@@ -358,6 +360,13 @@ private struct AdminHome: View {
                         Label("Danh sách và xóa tài khoản", systemImage: "person.crop.circle.badge.xmark")
                     }
                 }
+                Section("Thiết bị đăng ký Chứng chỉ") {
+                    NavigationLink {
+                        CertificateUDIDListView().environmentObject(session)
+                    } label: {
+                        Label("UDID khách đã gửi", systemImage: "iphone")
+                    }
+                }
                 Section("Lịch sử khách đã đặt mua") {
                     NavigationLink {
                         OrdersView(kind: "all").environmentObject(session)
@@ -630,6 +639,85 @@ private struct CustomerPurgeConfirmationView: View {
     }
 }
 
+
+private struct CertificateUDIDRecord: Decodable, Identifiable {
+    let order_id: String
+    let udid: String
+    let source: String
+    let submitted_at: String
+    let product_name: String
+    let amount_vnd: Int
+    let order_status: String
+    let buyer_username: String?
+    let buyer_name: String?
+    let buyer_contact: String?
+    var id: String { order_id }
+}
+
+private struct CertificateUDIDListView: View {
+    @EnvironmentObject private var session: AdminSession
+    @State private var records: [CertificateUDIDRecord] = []
+    @State private var notice = ""
+
+    var body: some View {
+        List {
+            Section {
+                Text("UDID gắn với đơn Chứng chỉ của khách đã đăng nhập.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if !notice.isEmpty {
+                Text(notice).foregroundStyle(.secondary)
+            }
+            if records.isEmpty {
+                Text("Chưa có UDID thiết bị nào được gửi.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(records) { item in
+                CertificateUDIDRow(item: item)
+            }
+        }
+        .navigationTitle("UDID khách mua")
+        .toolbar {
+            Button("Làm mới") { Task { await reload() } }
+        }
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        do {
+            let data = try await session.send("/api/v1/admin/certificate-udids")
+            records = try JSONDecoder().decode(Envelope<CertificateUDIDRecord>.self, from: data).items
+            notice = ""
+        } catch {
+            notice = "Không tải được UDID: " + error.localizedDescription
+        }
+    }
+}
+
+private struct CertificateUDIDRow: View {
+    let item: CertificateUDIDRecord
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(item.product_name).font(.headline)
+            Text("Khách: " + (item.buyer_name ?? "Không có tên") +
+                 " (@" + (item.buyer_username ?? "đã xóa") + ")")
+            if let contact = item.buyer_contact {
+                Text("Liên hệ: " + contact).textSelection(.enabled)
+            }
+            Text("Mã đơn: " + item.order_id).textSelection(.enabled)
+            Text("UDID: " + item.udid).font(.subheadline).fontWeight(.semibold)
+                .textSelection(.enabled)
+            Text(item.source == "apple_profile"
+                 ? "Hồ sơ Apple: chữ ký đã xác minh"
+                 : "Khách tự nhập: chưa xác minh")
+                .font(.footnote).foregroundStyle(.secondary)
+            Text("Thời gian: " + item.submitted_at)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
 private struct OrdersView: View {
     @EnvironmentObject private var session: AdminSession
     let kind: String
@@ -692,6 +780,14 @@ private struct OrdersView: View {
                             .textSelection(.enabled)
                     }
                     Text("Mã đơn: " + order.id).textSelection(.enabled)
+                    if order.kind == "certificate", let udid = order.certificate_udid {
+                        Text("UDID thiết bị: " + udid)
+                            .fontWeight(.semibold).textSelection(.enabled)
+                        Text(order.certificate_udid_source == "apple_profile"
+                             ? "Từ hồ sơ Apple đã xác minh chữ ký"
+                             : "Khách tự nhập — chưa xác minh")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if let created = order.created_at {
                         Text("Đặt lúc: " + created).font(.caption).foregroundStyle(.secondary)
                     }

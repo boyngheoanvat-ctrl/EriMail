@@ -146,6 +146,68 @@ jobs:
           })
           assert another.status_code == 201, another.text
           other_auth={"Authorization":"Bearer "+another.json()["token"]}
+          # Certificate UDID collection is opt-in, order-scoped and admin-only.
+          import plistlib, subprocess
+          from urllib.parse import urlparse
+          from pathlib import Path
+          ca = Path("apple_iphone_device_ca.pem")
+          assert ca.exists()
+          assert subprocess.run(["openssl","x509","-in",str(ca),"-noout"],
+                                capture_output=True).returncode == 0
+          certificate_id=order_id
+          scan_root="/api/v1/me/certificate-orders/"+certificate_id+"/udid-sessions"
+          assert client.post(scan_root,json={}).status_code == 401
+          assert client.post(scan_root,headers=other_auth,json={}).status_code == 404
+          new_scan=client.post(scan_root,headers=auth,json={})
+          assert new_scan.status_code == 201,new_scan.text
+          token=new_scan.json()["scan_token"]
+          profile_path=urlparse(new_scan.json()["profile_url"]).path
+          profile=client.get(profile_path)
+          assert profile.status_code == 200,profile.text
+          p=plistlib.loads(profile.content)
+          assert p["PayloadType"] == "Profile Service"
+          assert p["PayloadContent"]["DeviceAttributes"] == ["UDID"]
+          assert p["PayloadContent"]["Challenge"] == token
+          assert p["PayloadContent"]["URL"].startswith("https://eri-api-dag8.onrender.com/")
+          qr=client.get(urlparse(new_scan.json()["qr_url"]).path)
+          assert qr.status_code == 200 and b"<svg" in qr.content
+          status_path=scan_root+"/"+token
+          assert client.get(status_path,headers=other_auth).status_code == 404
+          assert client.get(status_path,headers=auth).json()["complete"] is False
+          spoof=client.post("/api/v1/cert-udid/callback/"+token,
+                           headers={"Content-Type":"application/pkcs7-mime"},
+                           content=b"Unsigned XML is not an Apple CMS signature")
+          assert spoof.status_code == 422,spoof.text
+          assert client.get(status_path,headers=auth).json()["complete"] is False
+          manual_path="/api/v1/me/certificate-orders/"+certificate_id+"/udid"
+          manual_value="00008020-001830D911A2002E"
+          assert client.put(manual_path,headers=other_auth,
+                            json={"udid":manual_value,"consent":True}).status_code == 404
+          assert client.put(manual_path,headers=auth,
+                            json={"udid":manual_value,"consent":False}).status_code == 422
+          assert client.put(manual_path,headers=auth,
+                            json={"udid":"INVALID-UDID","consent":True}).status_code == 422
+          accepted=client.put(manual_path,headers=auth,
+                              json={"udid":manual_value,"consent":True})
+          assert accepted.status_code == 200,accepted.text
+          assert accepted.json()["source"]=="self_reported"
+          fetched=client.get("/api/v1/orders/"+certificate_id,headers=auth).json()
+          assert fetched["device_udid"]==manual_value
+          assert fetched["device_udid_source"]=="self_reported"
+          private_admin=client.get("/api/v1/admin/certificate-udids")
+          assert private_admin.status_code == 403
+          admin_data=client.get("/api/v1/admin/certificate-udids",headers=h)
+          assert admin_data.status_code == 200,admin_data.text
+          assert any(x["order_id"]==certificate_id and x["udid"]==manual_value
+                     for x in admin_data.json()["items"])
+          assert client.delete(manual_path,headers=other_auth).status_code == 404
+          assert client.delete(manual_path,headers=auth).status_code == 200
+          assert "device_udid" not in client.get("/api/v1/orders/"+certificate_id,headers=auth).json()
+          # Resubmit to verify full account purge removes UDID data too.
+          assert client.put(manual_path,headers=auth,
+                            json={"udid":manual_value,"consent":True}).status_code == 200
+          print("UDID profile challenge, QR, scoped manual fallback, signed CMS rejection and admin permissions: OK")
+
           assert client.get("/api/v1/orders/"+order_id,headers=other_auth).status_code == 404
 
           paid=client.post("/api/v1/admin/orders/"+order_id+"/status",
@@ -235,6 +297,10 @@ jobs:
           assert client.get("/api/v1/admin/customers",headers=h).json()["items"][0]["username"] == "differentbuyer"
           with connection() as db:
               assert db.execute("SELECT COUNT(*) FROM customers WHERE id=?",(first_id,)).fetchone()[0] == 0
+              assert db.execute("SELECT COUNT(*) FROM cert_order_udids WHERE customer_id=?",
+                                (first_id,)).fetchone()[0] == 0
+              assert db.execute("SELECT COUNT(*) FROM cert_udid_sessions WHERE customer_id=?",
+                                (first_id,)).fetchone()[0] == 0
               assert db.execute("SELECT COUNT(*) FROM customer_sessions WHERE customer_id=?",
                                 (first_id,)).fetchone()[0] == 0
               assert db.execute("SELECT COUNT(*) FROM orders WHERE customer_id=?",
@@ -273,6 +339,9 @@ jobs:
       - run: |
           set -euo pipefail
           node --check web/eri-store/app.js
+          node --check web/eri-store/udid.js
+          test -s backend/udid_routes.py
+          test -s backend/apple_iphone_device_ca.pem
           python3 -m json.tool web/eri-store/manifest.webmanifest >/dev/null
           test -s web/eri-store/index.html
           test -s web/eri-store/styles.css

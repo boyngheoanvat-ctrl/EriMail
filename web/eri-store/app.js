@@ -145,6 +145,7 @@ async function loadCatalog(){
     const data=await request("/api/v1/"+KINDS[state.category].endpoint);
     if(!Array.isArray(data.items))throw new Error("Danh mục chưa đúng định dạng.");
     state.items=data.items;
+    $("certificate-udid").classList.toggle("hidden",state.category!=="certificate");
     grid.replaceChildren();
     $("catalog-message").textContent=data.items.length?data.items.length+" sản phẩm đang hiển thị":"";
     if(!data.items.length){grid.append(element("div","empty","Danh mục hiện chưa có sản phẩm. Vui lòng quay lại sau."));return}
@@ -353,6 +354,10 @@ function showOrder(order){
     const statuses={paid:"Đã nhận tiền, đang chờ giao",fulfilled:"Đã giao hàng",cancelled:"Đơn đã hủy"};
     root.append(element("p",null,statuses[order.status]||"Trạng thái: "+order.status));
   }
+  if(order.kind==="certificate"){
+    if(order.device_udid)root.append(element("p","small","UDID: "+order.device_udid));
+    root.append(button("▣ Lấy UDID cho đơn này","btn outline",()=>startUdidForOrder(order)));
+  }
   if(order.status==="fulfilled"&&order.delivery?.download_path){
     root.append(element("p",null,"Tệp của bạn đã sẵn sàng: "+order.delivery.filename));
     root.append(button("⇩ Tải file đã giao","btn primary",()=>downloadDelivery(order)));
@@ -375,6 +380,9 @@ async function loadOrders(){
       const entry=element("article","order");
       entry.append(element("h3",null,order.product_name));
       entry.append(element("p",null,"Mã đơn: "+order.id));
+      if(order.kind==="certificate"&&order.device_udid){
+        entry.append(element("p","small","UDID đã gửi: "+order.device_udid));
+      }
       const names={pending:"Chờ xác nhận tiền",paid:"Đã nhận tiền — chờ giao",fulfilled:"Đã giao hàng",cancelled:"Đã hủy"};
       entry.append(element("p",null,money(order.amount_vnd)+" · "+(names[order.status]||order.status)));
       entry.append(button("Xem chi tiết","btn outline",async()=>{

@@ -3,3 +3,21 @@
 .remember-row{display:flex;align-items:center;gap:10px;margin:15px 0 3px;font-size:14px;font-weight:650;cursor:pointer}
 .remember-row input[type=checkbox]{width:19px;height:19px;margin:0;accent-color:var(--purple);flex-shrink:0}
 .profile .btn{margin-top:8px}
+
+/* UDID registration requires explicit iPhone user approval and belongs to a certificate order. */
+.udid-panel{display:flex;gap:16px;align-items:flex-start;border:1px solid #dcd9ff;background:linear-gradient(110deg,#f0efff,#fff);padding:19px;border-radius:18px;margin:3px 0 19px}
+.udid-panel-mark{flex-shrink:0;display:grid;place-items:center;width:46px;height:46px;background:#6659ee;color:#fff;border-radius:15px;font-size:25px}
+.udid-panel-content{flex:1;min-width:0}
+.udid-panel-content h3{font-size:19px;margin:0 0 8px;line-height:1.3}
+.udid-panel-content p{font-size:13px;color:#616f89;margin:5px 0 12px;line-height:1.6}
+.udid-panel-content .btn{margin-top:4px}
+.udid-steps p{font-size:14px;line-height:1.65}
+.udid-steps .btn{margin-bottom:7px}
+.udid-qr{display:block;width:min(100%,250px);height:auto;max-height:260px;object-fit:contain;background:white;border-radius:12px;border:1px solid #e2e0f7;padding:9px;margin:13px auto}
+.udid-order-choice{padding:15px 0;border-bottom:1px solid var(--border)}
+.udid-order-choice:last-child{border-bottom:0}
+.udid-order-choice p{margin:6px 0}
+.udid-manual{margin-top:20px;padding:12px;border-radius:12px;border:1px solid var(--border)}
+.udid-manual summary{cursor:pointer;font-weight:700;color:var(--purple)}
+.udid-manual-input{width:100%;padding:12px 13px;margin:12px 0;border:1px solid #dce0ea;border-radius:10px;font-size:16px}
+@media(max-width:470px){.udid-panel{padding:15px;gap:11px}.udid-panel-mark{width:36px;height:36px;font-size:19px}.udid-panel-content h3{font-size:17px}}

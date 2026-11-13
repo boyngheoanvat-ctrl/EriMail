@@ -222,8 +222,11 @@ def customer_order_history(customer=Depends(require_customer)):
     with connection() as db:
         rows = db.execute(
             "SELECT o.*,d.original_name AS delivery_filename,"
-            "d.size_bytes AS delivery_size_bytes FROM orders o "
+            "d.size_bytes AS delivery_size_bytes,"
+            "u.udid AS certificate_udid,u.source AS certificate_udid_source "
+            "FROM orders o "
             "LEFT JOIN order_deliveries d ON d.order_id=o.id "
+            "LEFT JOIN cert_order_udids u ON u.order_id=o.id "
             "WHERE o.customer_id=? ORDER BY o.created_at DESC LIMIT 200",
             (customer["id"],)).fetchall()
     return {"items": [public_order(x) for x in rows]}
@@ -382,6 +385,11 @@ def public_order(row):
     data = dict(row)
     filename = data.pop("delivery_filename", None)
     size = data.pop("delivery_size_bytes", None)
+    device_udid = data.pop("certificate_udid", None)
+    device_source = data.pop("certificate_udid_source", None)
+    if data.get("kind") == "certificate" and device_udid:
+        data["device_udid"] = device_udid
+        data["device_udid_source"] = device_source
     if filename and data.get("status") == "fulfilled":
         data["delivery"] = {
             "filename": filename, "size_bytes": size,
@@ -452,8 +460,11 @@ def order_status(order_id: str, customer=Depends(require_customer)):
     with connection() as db:
         row = db.execute(
             "SELECT o.*,d.original_name AS delivery_filename,"
-            "d.size_bytes AS delivery_size_bytes FROM orders o "
+            "d.size_bytes AS delivery_size_bytes,"
+            "u.udid AS certificate_udid,u.source AS certificate_udid_source "
+            "FROM orders o "
             "LEFT JOIN order_deliveries d ON d.order_id=o.id "
+            "LEFT JOIN cert_order_udids u ON u.order_id=o.id "
             "WHERE o.id=? AND o.customer_id=?",
             (order_id, customer["id"])).fetchone()
     if row is None:
@@ -559,9 +570,11 @@ def admin_orders():
     with connection() as db:
         rows = db.execute(
             "SELECT o.*, c.username AS buyer_username, c.display_name AS buyer_name, "
-            "c.contact AS buyer_contact, d.original_name AS delivery_filename "
+            "c.contact AS buyer_contact, d.original_name AS delivery_filename,"
+            "u.udid AS certificate_udid,u.source AS certificate_udid_source "
             "FROM orders o LEFT JOIN customers c ON c.id=o.customer_id "
             "LEFT JOIN order_deliveries d ON d.order_id=o.id "
+            "LEFT JOIN cert_order_udids u ON u.order_id=o.id "
             "ORDER BY o.created_at DESC LIMIT 300"
         ).fetchall()
     return {"items": [dict(x) for x in rows]}
@@ -1222,6 +1235,9 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
                 "JOIN orders o ON o.id=d.order_id WHERE o.customer_id=?",
                 (customer_id,)
             ).fetchall()]
+            # Delete UDID submissions and unexpired scan links for this customer.
+            db.execute("DELETE FROM cert_order_udids WHERE customer_id=?", (customer_id,))
+            db.execute("DELETE FROM cert_udid_sessions WHERE customer_id=?", (customer_id,))
             # Rows are removed, not anonymized or retained. This includes
             # pending, paid, fulfilled and cancelled orders.
             db.execute(
@@ -1254,3 +1270,8 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
         "deleted": True, "deleted_orders": len(order_ids),
         "deleted_delivery_files": files_removed
     }
+
+# Consent-based Apple profile scan for certificate orders only.
+# The module performs a migration that only creates new tables.
+from udid_routes import install_udid_routes
+install_udid_routes(app, connection, require_customer, require_admin)
