@@ -112,6 +112,57 @@
   <div class="products-toolbar"><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><span class="products-toolbar-label"><svg class="icon" aria-hidden="true"><use href="#ic-circleCheck"></use></svg> Danh mục cập nhật từ máy chủ</span></div>
   <div id="products" class="products"></div>
 </section>
+<section id="ipa-tools" class="section" aria-labelledby="ipa-tools-heading">
+  <div class="heading">
+    <div><span class="overline">TIỆN ÍCH iOS · IPA</span><h2 id="ipa-tools-heading">Công cụ IPA<span class="heading-dot">.</span></h2>
+      <p class="section-lead">Kiểm tra IPA và ký ứng dụng bằng chứng chỉ của chính bạn. Dùng kết nối HTTPS của ERI.</p>
+    </div>
+  </div>
+  <div class="tabs ipa-tools-tabs" role="tablist" aria-label="Chọn công cụ IPA">
+    <button type="button" class="tab selected" role="tab" aria-selected="true" data-ipa-tool="decrypt">Decrypt IPA</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-ipa-tool="sign">Ký IPA trực tiếp</button>
+  </div>
+  <div id="ipa-decrypt-panel" class="ipa-tool-panel" role="tabpanel">
+    <h3>Decrypt IPA · Kiểm tra mã hóa</h3>
+    <p>Kiểm tra xem IPA có mã hóa FairPlay hoặc lớp ZIP đặt mật khẩu. Chỉ có thể gỡ mã hóa ZIP khi bạn biết mật khẩu. Mã hóa FairPlay trên ứng dụng cần bản IPA đã được giải mã hợp pháp từ thiết bị được cấp quyền.</p>
+    <form id="ipa-decrypt-form" enctype="multipart/form-data" autocomplete="off">
+      <label class="field">Chọn IPA để kiểm tra
+        <input type="file" name="ipa" accept=".ipa" required>
+      </label>
+      <label class="field">Mật khẩu ZIP (chỉ nhập nếu tệp ZIP có mật khẩu)
+        <input type="password" name="password" autocomplete="off" maxlength="256" placeholder="Không phải mật khẩu Apple ID">
+      </label>
+      <div class="ipa-tool-actions">
+        <button id="ipa-inspect-btn" class="btn outline" type="button">Kiểm tra mã hóa</button>
+        <button class="btn primary" type="submit">Giải mã ZIP IPA</button>
+      </div>
+    </form>
+    <div id="ipa-decrypt-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
+  </div>
+  <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
+    <h3>Ký IPA trực tiếp trên website</h3>
+    <p>Chọn IPA, chứng chỉ P12, hồ sơ mobileprovision và nhập mật khẩu P12. Tệp ký chỉ cài được trên các thiết bị mà chứng chỉ và hồ sơ của bạn cho phép.</p>
+    <form id="ipa-sign-form" enctype="multipart/form-data" autocomplete="off">
+      <label class="field">Tệp ứng dụng .ipa
+        <input type="file" name="ipa" accept=".ipa" required>
+      </label>
+      <label class="field">Chứng chỉ .p12
+        <input type="file" name="p12" accept=".p12" required>
+      </label>
+      <label class="field">Hồ sơ .mobileprovision
+        <input type="file" name="mobileprovision" accept=".mobileprovision" required>
+      </label>
+      <label class="field">Mật khẩu của P12
+        <input type="password" name="password" maxlength="512" required autocomplete="off">
+      </label>
+      <div class="ipa-tool-actions">
+        <button class="btn primary" type="submit">Ký IPA và lấy file</button>
+      </div>
+    </form>
+    <div id="ipa-sign-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
+    <p class="small">Mật khẩu và chứng chỉ chỉ được gửi khi bạn bấm ký; máy chủ xử lý tạm thời rồi xóa tệp đầu vào. Không sử dụng chứng chỉ hoặc IPA mà bạn không có quyền sử dụng.</p>
+  </div>
+</section>
 <section id="orders-view" class="section hidden" aria-labelledby="orders-heading">
   <div class="heading"><div><span class="overline">ĐƠN MUA CỦA BẠN</span><h2 id="orders-heading">Lịch sử đơn hàng<span class="heading-dot">.</span></h2></div>
     <button id="refresh-orders" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#ic-refresh"></use></svg> Làm mới</button>
