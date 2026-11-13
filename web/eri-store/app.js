@@ -6,7 +6,29 @@ const KINDS={
   certificate:{endpoint:"certificates",title:"Chứng chỉ",icon:"✓",type:"certificate"}
 };
 const $=id=>document.getElementById(id);
-const state={category:"mod",view:"store",items:[],token:localStorage.getItem("eri_store_buyer_token")||"",buyer:null,pending:null};
+const TOKEN_KEY="eri_store_buyer_token";
+const state={
+  category:"mod",view:"store",items:[],
+  token:sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||"",
+  remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null
+};
+function saveAccountOnDevice(remember){
+  if(!state.token)return false;
+  try{
+    if(remember){
+      localStorage.setItem(TOKEN_KEY,state.token);
+      sessionStorage.removeItem(TOKEN_KEY);
+    }else{
+      sessionStorage.setItem(TOKEN_KEY,state.token);
+      localStorage.removeItem(TOKEN_KEY);
+    }
+    state.remembered=remember;
+    return true;
+  }catch{
+    showBanner("Không thể lưu phiên đăng nhập trên thiết bị này. Hãy kiểm tra chế độ riêng tư của trình duyệt.");
+    return false;
+  }
+}
 const money=n=>new Intl.NumberFormat("vi-VN",{maximumFractionDigits:0}).format(Number(n)||0)+"đ";
 const element=(tag,cls,content)=>{
   const node=document.createElement(tag);
@@ -117,7 +139,7 @@ async function restoreSession(){
 }
 function signOut(clear=true){
   const oldToken=state.token;
-  state.token="";state.buyer=null;localStorage.removeItem("eri_store_buyer_token");updateHeader();
+  state.token="";state.buyer=null;state.remembered=false;localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);updateHeader();
   if(clear&&oldToken){
     fetch(API+"/api/v1/auth/logout",{method:"POST",headers:{Authorization:"Bearer "+oldToken}}).catch(()=>{});
   }
@@ -140,6 +162,12 @@ function authModal(register=false){
     if(name==="password"&&register)input.minLength=10;
     label.append(input);form.append(label);inputs[name]=input;
   }
+  const rememberLabel=element("label","remember-row");
+  const rememberBox=element("input");
+  rememberBox.type="checkbox";rememberBox.checked=state.remembered;
+  rememberLabel.append(rememberBox,element("span",null,"Lưu tài khoản trên thiết bị này"));
+  form.append(rememberLabel);
+  form.append(element("p","small","Giữ đăng nhập khi mở lại ERI STORE. Không lưu mật khẩu."));
   const failure=element("p","form-error");failure.setAttribute("role","alert");
   const actions=element("div","dialog-actions");
   const submit=element("button","btn primary",register?"Tạo tài khoản":"Đăng nhập");submit.type="submit";
@@ -153,7 +181,7 @@ function authModal(register=false){
       const result=await request("/api/v1/auth/"+(register?"register":"login"),{method:"POST",data:body});
       if(!result.token||!result.customer)throw new Error("Phản hồi đăng nhập chưa đúng định dạng.");
       state.token=result.token;state.buyer=result.customer;
-      localStorage.setItem("eri_store_buyer_token",result.token);updateHeader();showBanner("");
+      saveAccountOnDevice(rememberBox.checked);updateHeader();
       closeDialog();if(state.view==="account")showProfile();
       if(state.pending){const previous=state.pending;state.pending=null;await buy(previous.id,previous.kind)}
     }catch(err){failure.textContent=errorMessage(err)}finally{submit.disabled=false}
@@ -289,6 +317,15 @@ function showProfile(){
   root.append(element("h3",null,state.buyer.display_name));
   root.append(element("p",null,"Tên đăng nhập: @"+state.buyer.username));
   root.append(element("p",null,"Liên hệ giao hàng: "+state.buyer.contact));
+  const savedInfo=element("p","small",state.remembered
+    ?"Tài khoản đã được lưu trên thiết bị này. Không lưu mật khẩu."
+    :"Tài khoản chưa được lưu. Bạn sẽ cần đăng nhập lại sau khi đóng trình duyệt.");
+  root.append(savedInfo);
+  root.append(button(state.remembered?"Bỏ lưu tài khoản":"Lưu tài khoản","btn outline",()=>{
+    const wasRemembered=state.remembered;
+    if(saveAccountOnDevice(!wasRemembered)){showBanner("");showProfile()}
+  }));
+  root.append(" ");
   root.append(button("Xem đơn của tôi","btn primary",()=>setView("orders")));
   root.append(" ");
   root.append(button("Đăng xuất","btn danger",()=>signOut()));
