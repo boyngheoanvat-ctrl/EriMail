@@ -160,6 +160,12 @@ def backend_health_probe():
         with urllib.request.urlopen(req, timeout=20) as response:
             data = json.loads(response.read(2048))
             print("ERI backend readiness:", response.status, data.get("status"), data.get("service"), flush=True)
+        if KEY_FN.startswith("https://"):
+            req_key = urllib.request.Request(KEY_FN + "/health",
+                headers={"X-ERI-INTERNAL-SECRET": INTERNAL}, method="GET")
+            with urllib.request.urlopen(req_key, timeout=20) as response:
+                key_data = json.loads(response.read(2048))
+                print("ERI device key backend readiness:", response.status, key_data.get("status"), flush=True)
         req2 = urllib.request.Request(FN + "/admin/list?app_id=vn.eri.store",
             headers={"X-ERI-INTERNAL-SECRET": INTERNAL}, method="GET")
         with urllib.request.urlopen(req2, timeout=20) as response:
