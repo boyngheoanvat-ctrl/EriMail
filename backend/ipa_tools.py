@@ -7,6 +7,7 @@ Temporary inputs are deleted after each request; completed downloads expire.
 import importlib.util
 import json
 import os
+import posixpath
 import plistlib
 import re
 import secrets
@@ -18,10 +19,10 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Response
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -30,7 +31,9 @@ MAX_CERT = 10 * 1024 * 1024
 MAX_EXPANDED = 2 * 1024 * 1024 * 1024
 TICKET_TTL = 15 * 60
 PENDING_LIMIT = 3
+PUBLIC_HTTPS = "https://eri-api-dag8.onrender.com"
 _tickets = {}
+_signed_tickets = {}
 _lock = threading.Lock()
 _work_slots = threading.BoundedSemaphore(value=1)
 
@@ -58,9 +61,22 @@ def _validate_ipa(archive: zipfile.ZipFile):
         name = info.filename
         path = Path(name)
         if (path.is_absolute() or ".." in path.parts or
-                "\\" in name or "\x00" in name or
-                ((info.external_attr >> 16) & 0o170000) == 0o120000):
-            raise HTTPException(422, "IPA có đường dẫn hoặc liên kết không an toàn")
+                "\\" in name or "\x00" in name or not name.startswith("Payload/")):
+            raise HTTPException(422, "IPA có đường dẫn không an toàn")
+        # Apple frameworks commonly use symlinks (e.g. Versions/Current -> A).
+        # Accept only links whose resolved destination stays inside Payload/.
+        if ((info.external_attr >> 16) & 0o170000) == 0o120000:
+            if info.file_size > 2048:
+                raise HTTPException(422, "Liên kết IPA quá dài")
+            raw = archive.read(info)
+            try:
+                target = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(422, "Liên kết IPA không hợp lệ")
+            resolved = posixpath.normpath(posixpath.join(posixpath.dirname(name), target))
+            if (not target or posixpath.isabs(target) or "\\x00" in target
+                    or not resolved.startswith("Payload/")):
+                raise HTTPException(422, "IPA chứa liên kết ra ngoài ứng dụng")
         total += info.file_size
         if total > MAX_EXPANDED:
             raise HTTPException(413, "IPA giải nén vượt 2 GiB")
@@ -186,6 +202,64 @@ def _register_output(file: Path):
         _tickets[token] = (str(dest), now + TICKET_TTL)
     return {"download_path": "/api/v1/tools/ipa/download/" + token,
             "expires_in_seconds": TICKET_TTL}
+
+
+def _purge_signed_locked():
+    now = time.time()
+    for token, (path, expiry, _) in list(_signed_tickets.items()):
+        if expiry <= now:
+            _signed_tickets.pop(token, None)
+            Path(path).unlink(missing_ok=True)
+
+
+def _manifest_details(output: Path):
+    try:
+        with zipfile.ZipFile(output) as archive:
+            app = _validate_ipa(archive)
+            name = "Payload/" + app + "/Info.plist"
+            info = archive.getinfo(name)
+            if info.file_size > 2 * 1024 * 1024:
+                raise HTTPException(422, "Info.plist quá lớn")
+            metadata = plistlib.loads(archive.read(name))
+    except (KeyError, ValueError, plistlib.InvalidFileException, zipfile.BadZipFile):
+        raise HTTPException(422, "Không đọc được thông tin IPA đã ký")
+    bundle = str(metadata.get("CFBundleIdentifier", ""))
+    version = str(metadata.get("CFBundleVersion") or metadata.get("CFBundleShortVersionString") or "1.0")
+    title = str(metadata.get("CFBundleDisplayName") or metadata.get("CFBundleName") or app[:-4])
+    if not re.fullmatch(r"[A-Za-z0-9.-]{3,255}", bundle) or len(version) > 80 or len(title) > 160:
+        raise HTTPException(422, "Thông tin Bundle ID hoặc phiên bản không hợp lệ")
+    return {"bundle_id": bundle, "version": version, "title": title}
+
+
+def _register_signed_output(file: Path, metadata: dict):
+    with _lock:
+        _purge_signed_locked()
+        if len(_signed_tickets) + len(_tickets) >= PENDING_LIMIT:
+            raise HTTPException(503, "Máy chủ đang giữ nhiều IPA chờ tải, thử lại sau.")
+        token = secrets.token_urlsafe(32)
+        dest = Path(tempfile.gettempdir()) / ("eri-signed-" + token + ".ipa")
+        os.replace(file, dest)
+        os.chmod(dest, 0o600)
+        _signed_tickets[token] = (str(dest), time.time() + TICKET_TTL, metadata)
+    base_path = "/api/v1/tools/ipa/install/" + token
+    manifest_url = PUBLIC_HTTPS + base_path + "/manifest.plist"
+    return {
+        "download_path": base_path + "/app.ipa",
+        "manifest_path": base_path + "/manifest.plist",
+        "install_url": "itms-services://?action=download-manifest&url=" + quote(manifest_url, safe=""),
+        "expires_in_seconds": TICKET_TTL,
+    }
+
+
+def _resolve_signed(token: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,64}", token):
+        raise HTTPException(404, "Không tìm thấy IPA đã ký")
+    with _lock:
+        _purge_signed_locked()
+        item = _signed_tickets.get(token)
+    if item is None or not Path(item[0]).is_file():
+        raise HTTPException(410, "IPA đã ký đã hết hạn hoặc máy chủ khởi động lại. Vui lòng ký lại.")
+    return item
 
 
 def _appstore_reference(link: str) -> tuple[int, str]:
@@ -346,15 +420,53 @@ def register_ipa_tools(app, require_customer):
                     raise HTTPException(422, "Bộ ký không tạo ra IPA hợp lệ")
                 with zipfile.ZipFile(output) as verified:
                     _validate_ipa(verified)
-                response = _register_output(output)
+                details = _manifest_details(output)
+                if details["bundle_id"] != str(signed.bundle_id):
+                    raise HTTPException(422, "Bundle ID trong IPA ký không khớp")
+                response = _register_signed_output(output, details)
                 return {
                     **response,
-                    "message": "Đã ký IPA. Tải tệp về trước khi liên kết hết hạn.",
-                    "bundle_id": str(signed.bundle_id)[:255],
-                    "app_name": str(signed.app_name)[:160],
+                    "message": "IPA đã được ký. Có thể tải về hoặc bấm Cài lên iPhone bằng Safari.",
+                    "bundle_id": details["bundle_id"],
+                    "app_name": details["title"],
+                    "app_version": details["version"],
                 }
         finally:
             _work_slots.release()
+
+    @router.get("/api/v1/tools/ipa/install/{token}/manifest.plist")
+    def install_manifest(token: str):
+        _, _, metadata = _resolve_signed(token)
+        ipa_url = PUBLIC_HTTPS + "/api/v1/tools/ipa/install/" + token + "/app.ipa"
+        manifest = {
+            "items": [{
+                "assets": [{"kind": "software-package", "url": ipa_url}],
+                "metadata": {
+                    "bundle-identifier": metadata["bundle_id"],
+                    "bundle-version": metadata["version"],
+                    "kind": "software",
+                    "title": metadata["title"],
+                },
+            }],
+        }
+        return Response(
+            content=plistlib.dumps(manifest, fmt=plistlib.FMT_XML),
+            media_type="text/xml",
+            headers={"Cache-Control": "private, no-store",
+                     "X-Content-Type-Options": "nosniff"},
+        )
+
+    @router.get("/api/v1/tools/ipa/install/{token}/app.ipa")
+    def install_ipa(token: str):
+        path, _, _ = _resolve_signed(token)
+        # iOS can perform several download or range requests. Do not consume
+        # this ticket on the first request, unlike one-time browser downloads.
+        return FileResponse(
+            path, filename="ERI-signed.ipa",
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "private, no-store",
+                     "X-Content-Type-Options": "nosniff"},
+        )
 
     @router.get("/api/v1/tools/ipa/download/{token}")
     def download(token: str):
