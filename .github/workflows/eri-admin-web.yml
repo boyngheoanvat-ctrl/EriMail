@@ -25,6 +25,7 @@ jobs:
           set -euo pipefail
           mkdir -p build-project/Sources
           cp apps/ERIAdmin/ERIAdminApp.swift build-project/Sources/App.swift
+          cp apps/ERIAdmin/ERILicenseAdminView.swift build-project/Sources/ERILicenseAdminView.swift
           cat > build-project/project.yml <<'EOF'
           name: ERIAdmin
           options:
@@ -55,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           xcrun swiftc -frontend -parse build-project/Sources/App.swift
+          xcrun swiftc -frontend -parse build-project/Sources/ERILicenseAdminView.swift
           cd build-project
           xcodebuild -project ERIAdmin.xcodeproj -scheme ERIAdmin -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' \
