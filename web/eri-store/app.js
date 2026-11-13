@@ -8,7 +8,8 @@ const KINDS={
 const $=id=>document.getElementById(id);
 const TOKEN_KEY="eri_store_buyer_token";
 const state={
-  category:"mod",modTab:"paid",modPlatform:"ipa",view:"store",items:[],
+  category:(["mod","ai","certificate","decrypt","sign"].includes(sessionStorage.getItem("eri.store.category"))?
+    sessionStorage.getItem("eri.store.category"):"mod"),modTab:"paid",modPlatform:"ipa",view:"store",items:[],
   token:sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||"",
   remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null,registrationMinName:2
 };
@@ -535,6 +536,7 @@ document.addEventListener("DOMContentLoaded",()=>{
   $("refresh-orders").addEventListener("click",loadOrders);
   document.querySelectorAll("[data-kind]").forEach(tab=>tab.addEventListener("click",()=>{
     state.category=tab.dataset.kind;
+    try { sessionStorage.setItem("eri.store.category", state.category); } catch {}
     document.querySelectorAll("[data-kind]").forEach(b=>{const active=b===tab;b.classList.toggle("selected",active);b.setAttribute("aria-selected",String(active))});
     loadCatalog();
   }));
@@ -547,6 +549,11 @@ document.addEventListener("DOMContentLoaded",()=>{
       tab.setAttribute("aria-selected",String(active));
     });
   }
+  document.querySelectorAll("[data-kind]").forEach(tab=>{
+    const active=tab.dataset.kind===state.category;
+    tab.classList.toggle("selected",active);
+    tab.setAttribute("aria-selected",String(active));
+  });
   updateHeader();loadCatalog();restoreSession();syncRegistrationLimits();
   if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js").catch(()=>{});
 });
