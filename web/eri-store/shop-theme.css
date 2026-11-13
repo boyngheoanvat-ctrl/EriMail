@@ -162,6 +162,7 @@ body.shop-v2{
   background:#fffdfd;border:1px solid #ffffffa8;border-radius:99px;
   color:#454167;padding:5px 10px;font-size:10px;font-weight:900;letter-spacing:.035em}
 .shop-v2 .product-chip.is-free{color:#087c5e;background:#e1fff0;border-color:#aaf4d0}
+.shop-v2 .product-chip.platform-chip{left:auto;right:13px;color:#4c45a5;background:#f2efff}
 .shop-v2 .product-body{padding:20px}
 .shop-v2 .product h3{font-size:18px;line-height:1.35;color:#22213d;margin-bottom:9px}
 .shop-v2 .product-desc{font-size:13px;line-height:1.58;color:#7b8296}
