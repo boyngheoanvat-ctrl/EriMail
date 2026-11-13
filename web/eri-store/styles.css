@@ -21,3 +21,10 @@
 .udid-manual summary{cursor:pointer;font-weight:700;color:var(--purple)}
 .udid-manual-input{width:100%;padding:12px 13px;margin:12px 0;border:1px solid #dce0ea;border-radius:10px;font-size:16px}
 @media(max-width:470px){.udid-panel{padding:15px;gap:11px}.udid-panel-mark{width:36px;height:36px;font-size:19px}.udid-panel-content h3{font-size:17px}}
+
+/* Mod Game categories: FREE and MUA */
+.mod-subtabs{display:flex;gap:9px;align-items:center;padding:2px 0 16px}
+.mod-subtab{border:1px solid #dcd9f5;border-radius:12px;padding:11px 18px;background:#fff;color:var(--purple);font-weight:800;min-width:114px}
+.mod-subtab.selected{color:#fff;background:var(--purple);border-color:var(--purple)}
+.mod-subtab:focus-visible{outline:3px solid #b6a7ff;outline-offset:2px}
+.product-footer .price{flex-shrink:0}

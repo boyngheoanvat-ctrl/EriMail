@@ -1,7 +1,7 @@
 // ERI STORE private download streaming (native Safari downloads, no large JS Blob).
 // Each capability nonce lives only in this service worker memory and is never
 // a customer bearer token. No private file or auth token is cached.
-const VERSION="eri-store-v9";
+const VERSION="eri-store-v10";
 const STATIC=["/","/index.html","/styles.css","/app.js","/udid.js","/icon.svg","/manifest.webmanifest"];
 const DOWNLOAD_PREFIX="/_eri_download/";
 const API="https://eri-api-dag8.onrender.com";
