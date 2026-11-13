@@ -1238,8 +1238,16 @@ private enum ImportedFile {
     static func copy(_ source: URL, maxBytes: Int) throws -> URL {
         let access = source.startAccessingSecurityScopedResource()
         defer { if access { source.stopAccessingSecurityScopedResource() } }
-        let folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("eri-import-" + UUID().uuidString, isDirectory: true)
+        // Retain selected files across app suspension instead of purgeable tmp.
+        let root = FileManager.default.urls(for: .applicationSupportDirectory,
+                                             in: .userDomainMask)[0]
+            .appendingPathComponent("ERIImportedFiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        var excludedRoot = root
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? excludedRoot.setResourceValues(values)
+        let folder = root.appendingPathComponent("eri-import-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let destination = folder.appendingPathComponent(source.lastPathComponent)
         var coordinationError: NSError?
@@ -1261,6 +1269,9 @@ private enum ImportedFile {
                     try output.write(contentsOf: chunk)
                 }
                 guard total > 0 else { throw URLError(.zeroByteResource) }
+                try FileManager.default.setAttributes([
+                    .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+                ], ofItemAtPath: destination.path)
             } catch {
                 copyingError = error
             }
@@ -1388,6 +1399,10 @@ private struct AdminUploadView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                         if !backgroundUploader.active {
                             Button("Tiếp tục upload") { backgroundUploader.retry() }
+                            Button("Bỏ phiên tải đã mất và chọn lại") {
+                                backgroundUploader.discardExpiredUpload()
+                            }
+                            .foregroundStyle(.red)
                         }
                     } else if !uploadPhase.isEmpty {
                         Text(uploadPhase).font(.footnote).foregroundStyle(.secondary)
@@ -1411,6 +1426,14 @@ private struct AdminUploadView: View {
             }
         }
         .navigationTitle(kind.title)
+        .onAppear { restoreDraft() }
+        .onChange(of: name) { _ in saveDraft() }
+        .onChange(of: description) { _ in saveDraft() }
+        .onChange(of: price) { _ in saveDraft() }
+        .onChange(of: issuer) { _ in saveDraft() }
+        .onChange(of: modIsFree) { _ in saveDraft() }
+        .onChange(of: authorized) { _ in saveDraft() }
+        .onDisappear { saveDraft() }
         .sheet(isPresented: $showImporter) {
             ERIDocumentPicker(
                 onPick: { file in
@@ -1439,6 +1462,7 @@ private struct AdminUploadView: View {
                     try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
                 }
                 selectedFile = copied
+                saveDraft()
                 if name.isEmpty {
                     name = file.deletingPathExtension().lastPathComponent
                 }
@@ -1447,6 +1471,35 @@ private struct AdminUploadView: View {
                 status = "Không thể đọc tệp đã chọn: " + error.localizedDescription
             }
             importing = false
+        }
+    }
+
+    private var draftKey: String { "eri.admin.upload.draft." + kind.rawValue }
+
+    private func saveDraft() {
+        let file = selectedFile
+        let savedFile = (file != nil && FileManager.default.fileExists(atPath: file!.path))
+            ? file!.path : ""
+        UserDefaults.standard.set([
+            "name": name, "description": description, "price": price,
+            "issuer": issuer, "modIsFree": modIsFree, "authorized": authorized,
+            "filePath": savedFile
+        ], forKey: draftKey)
+    }
+
+    private func restoreDraft() {
+        guard let draft = UserDefaults.standard.dictionary(forKey: draftKey) else { return }
+        if name.isEmpty { name = draft["name"] as? String ?? "" }
+        if description.isEmpty { description = draft["description"] as? String ?? "" }
+        if price.isEmpty { price = draft["price"] as? String ?? "" }
+        if issuer.isEmpty { issuer = draft["issuer"] as? String ?? "" }
+        modIsFree = draft["modIsFree"] as? Bool ?? modIsFree
+        authorized = draft["authorized"] as? Bool ?? authorized
+        if selectedFile == nil,
+           let path = draft["filePath"] as? String, !path.isEmpty,
+           FileManager.default.fileExists(atPath: path) {
+            selectedFile = URL(fileURLWithPath: path)
+            status = "Đã khôi phục file và thông tin đã nhập trước đó."
         }
     }
 
@@ -1500,9 +1553,11 @@ private struct AdminUploadView: View {
             }
             uploadPhase = "Đang chuẩn bị file để iOS tải trong nền..."
             try await backgroundUploader.start(source: file, uploadID: uploadID,
-                                               size: size, chunkBytes: chunkBytes)
+                                               size: size, chunkBytes: chunkBytes,
+                                               metadata: data)
             status = "Đã giao cho iOS tự tải nền. Bạn có thể rời ứng dụng hoặc khóa màn hình."
             selectedFile = nil
+            saveDraft()
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         } catch {
             status = "Không thể bắt đầu tải nền: " + error.localizedDescription +
