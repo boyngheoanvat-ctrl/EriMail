@@ -1,0 +1,33 @@
+name: ERI Key Admin Native IPA
+on:
+  push:
+    branches:
+      - eri-key-admin-ios
+    paths:
+      - 'ios/ERIKeyAdmin/**'
+      - '.github/workflows/build-eri-key-admin.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned arm64 iOS application
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build/Payload/ERIKeyAdmin.app
+          cp ios/ERIKeyAdmin/Info.plist build/Payload/ERIKeyAdmin.app/Info.plist
+          xcrun swiftc -sdk "$SDK" -target arm64-apple-ios16.0 -parse-as-library -O \
+            -framework SwiftUI -framework UIKit -framework Security \
+            ios/ERIKeyAdmin/ERIKeyAdminApp.swift -o build/Payload/ERIKeyAdmin.app/ERIKeyAdmin
+          printf 'APPL????' > build/Payload/ERIKeyAdmin.app/PkgInfo
+          lipo -info build/Payload/ERIKeyAdmin.app/ERIKeyAdmin
+          cd build
+          /usr/bin/zip -q -r ERIKeyAdmin-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERIKeyAdmin-unsigned-IPA
+          path: build/ERIKeyAdmin-unsigned.ipa
+          retention-days: 30
