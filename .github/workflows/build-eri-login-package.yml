@@ -1,0 +1,90 @@
+name: ERI LOGIN Full Injector Package
+on:
+  push:
+    branches: [eri-login-dylib-injector]
+    paths:
+      - "tools/LOGIN.py"
+      - "tools/README_ERI_LOGIN.txt"
+      - ".github/workflows/build-eri-login-package.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check Python patcher and binary structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile tools/LOGIN.py
+          python - <<'PY'
+          import importlib.util, struct, tempfile
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location("eri", "tools/LOGIN.py")
+          m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+          blob=bytearray(1024)
+          struct.pack_into("<8I",blob,0,0xfeedfacf,0x100000c,0,2,1,152,0,0)
+          struct.pack_into("<II",blob,32,0x19,152)
+          struct.pack_into("<I",blob,32+64,1)
+          struct.pack_into("<Q",blob,32+72+40,100)
+          struct.pack_into("<I",blob,32+72+48,512)
+          patched=m.inject_binary(bytes(blob))
+          assert m.INSTALL_NAME in m.macho(patched,m.MH_EXECUTE)["deps"]
+          with tempfile.TemporaryDirectory() as temp:
+              f=Path(temp)/"AndroidManifest.xml"
+              f.write_text('<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="vn.eri.test"><application><activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity></application></manifest>',encoding="utf-8")
+              m.modify_manifest(f)
+              text=f.read_text(encoding="utf-8")
+              assert 'ERILoginActivity' in text and 'eri.target' in text
+          print("ERI LOGIN code injection checks: OK")
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: ERILogin-native-dylib-arm64
+          repository: boyngheoanvat-ctrl/EriMail
+          run-id: 43459706980
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/ios
+      - uses: actions/download-artifact@v4
+        with:
+          name: ERI-Android-Login-DEX
+          repository: boyngheoanvat-ctrl/EriMail
+          run-id: 43461932810
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/android
+      - name: Assemble and validate production components
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l build/ios build/android
+          test -s build/ios/ERILogin.dylib
+          test -s build/android/ERIAndroidGate.dex
+          mkdir -p build/package
+          cp tools/LOGIN.py build/package/LOGIN.py
+          cp tools/README_ERI_LOGIN.txt build/package/README.txt
+          cp build/ios/ERILogin.dylib build/package/ERILogin.dylib
+          cp build/android/ERIAndroidGate.dex build/package/ERIAndroidGate.dex
+          python - <<'PY'
+          from pathlib import Path
+          import struct,hashlib
+          d=Path("build/package/ERILogin.dylib").read_bytes()
+          a=Path("build/package/ERIAndroidGate.dex").read_bytes()
+          assert struct.unpack_from("<I",d)[0]==0xfeedfacf
+          assert a[:3]==b"dex"
+          for f in sorted(Path("build/package").iterdir()):
+              print(f.name, f.stat().st_size, hashlib.sha256(f.read_bytes()).hexdigest())
+          PY
+          cd build/package
+          zip -9 -q -r ../ERI_LOGIN_Production_Injector.zip LOGIN.py ERILogin.dylib ERIAndroidGate.dex README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERI_LOGIN_PRODUCTION_INJECTOR
+          path: build/ERI_LOGIN_Production_Injector.zip
+          retention-days: 30
