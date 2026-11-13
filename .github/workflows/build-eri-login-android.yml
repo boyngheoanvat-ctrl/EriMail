@@ -43,7 +43,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           b=Path('build/ERIAndroidGate.dex').read_bytes()
-          assert b[:4]==b'dex\\n', 'Missing DEX magic'
+          assert b[:3]==b'dex', 'Missing DEX magic'
           print('ERI Android Gate DEX',len(b),'bytes')
           PY
       - uses: actions/upload-artifact@v4
