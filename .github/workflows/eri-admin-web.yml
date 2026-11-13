@@ -87,6 +87,9 @@ jobs:
           python-version: '3.12'
       - run: python -m py_compile backend/app.py
       - run: pip install -r backend/requirements.txt httpx
+      - name: Test FREE IPA APK downloads and lost-file handling
+        working-directory: backend
+        run: python3 test_mod_downloads.py
       - name: Test Mod Game original price and AI/Certificate 30% markup
         working-directory: backend
         env:
