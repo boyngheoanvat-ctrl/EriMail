@@ -123,7 +123,7 @@
    <div id="ipa-decrypt-panel" class="ipa-tool-panel" role="tabpanel">
     <h3>Decrypt IPA · Nhập link App Store</h3>
     <p>Dán link App Store để tìm tên ứng dụng, phiên bản và Bundle ID. <strong>Apple không cung cấp IPA đã giải mã qua link App Store.</strong> Nếu bạn có tệp IPA được phép sử dụng, có thể kiểm tra mã hóa hoặc gỡ mật khẩu ZIP ở phần bên dưới.</p>
-    <form id="ipa-appstore-form" autocomplete="off">
+    <form id="ipa-appstore-form" autocomplete="on">
       <label class="field">Link ứng dụng trên App Store
         <input type="url" name="appstore_url" required inputmode="url" spellcheck="false"
           placeholder="https://apps.apple.com/vn/app/football-league-2026/id6447961802?l=vi"
@@ -132,24 +132,10 @@
       <div class="ipa-tool-actions"><button class="btn primary" type="submit">Tra cứu ứng dụng</button></div>
     </form>
     <div id="ipa-appstore-result" class="ipa-tool-result" role="status" aria-live="polite"></div>
-    <h3 class="ipa-file-heading">Kiểm tra tệp IPA có sẵn</h3>
-    <p>Bạn có thể chọn file IPA của mình để phân tích mã hóa, hoặc gỡ mật khẩu ZIP nếu có. Không giải mã FairPlay bằng mật khẩu ZIP.</p>
-    <form id="ipa-decrypt-form" enctype="multipart/form-data" autocomplete="off">
-      <label class="field">Chọn IPA để kiểm tra
-        <input type="file" name="ipa" accept=".ipa" required>
-      </label>
-      <label class="field">Mật khẩu ZIP (chỉ nhập nếu tệp ZIP có mật khẩu)
-        <input type="password" name="password" autocomplete="off" maxlength="256" placeholder="Không phải mật khẩu Apple ID">
-      </label>
-      <div class="ipa-tool-actions">
-        <button id="ipa-inspect-btn" class="btn outline" type="button">Kiểm tra mã hóa</button>
-        <button class="btn primary" type="submit">Giải mã ZIP IPA</button>
-      </div>
-    </form>
-    <div id="ipa-decrypt-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
+    <p class="small">Nếu tệp IPA không có sẵn trên máy chủ, không thể tạo tệp tải hoặc cài trực tiếp từ đường dẫn App Store.</p>
   </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
-    <h3>Ký IPA trực tiếp trên website</h3>
+    <h3>Ký IPA và cài đặt trực tiếp</h3>
     <p>Chọn IPA, chứng chỉ P12, hồ sơ mobileprovision và nhập mật khẩu P12. Tệp ký chỉ cài được trên các thiết bị mà chứng chỉ và hồ sơ của bạn cho phép.</p>
     <form id="ipa-sign-form" enctype="multipart/form-data" autocomplete="off">
       <label class="field">Tệp ứng dụng .ipa
@@ -165,7 +151,7 @@
         <input type="password" name="password" maxlength="512" required autocomplete="off">
       </label>
       <div class="ipa-tool-actions">
-        <button class="btn primary" type="submit">Ký IPA và lấy file</button>
+        <button class="btn primary" type="submit">Ký IPA và cài đặt</button>
       </div>
     </form>
     <div id="ipa-sign-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
