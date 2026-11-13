@@ -81,7 +81,7 @@
   <div class="feature-card"><span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#ic-package"></use></svg></span><div><b>Theo dõi đơn</b><small>Kiểm tra trạng thái giao file</small></div></div>
 </div>
 <section id="store" class="section" aria-labelledby="products-heading">
-  <div class="heading">
+  <div id="catalog-heading" class="heading">
     <div><span class="overline">SHOP MOD · KHÁM PHÁ</span><h2 id="products-heading">Danh mục sản phẩm<span class="heading-dot">.</span></h2>
       <p class="section-lead">Chọn danh mục bạn cần và xem thông tin sản phẩm ngay bên dưới.</p>
     </div>
@@ -91,6 +91,8 @@
     <button class="tab selected" type="button" role="tab" aria-selected="true" data-kind="mod"><svg class="icon" aria-hidden="true"><use href="#ic-gamepad"></use></svg> <span>Mod Game</span></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-kind="ai"><svg class="icon" aria-hidden="true"><use href="#ic-sparkles"></use></svg> <span>AI Plus</span></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-kind="certificate"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg> <span>Chứng chỉ iOS</span></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-kind="decrypt"> <span>Decrypt IPA</span></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-kind="sign"> <span>Ký IPA trực tiếp</span></button>
   </div>
   <div id="mod-subtabs" class="mod-subtabs" role="tablist" aria-label="Mod Game miễn phí hoặc trả phí">
     <button class="mod-subtab" type="button" role="tab" data-mod-mode="free" aria-selected="false"><svg class="icon" aria-hidden="true"><use href="#ic-download"></use></svg> FREE</button>
@@ -109,22 +111,29 @@
       <button type="button" class="btn primary" id="start-udid"><svg class="icon" aria-hidden="true"><use href="#ic-phone"></use></svg> Lấy UDID thiết bị <svg class="icon" aria-hidden="true"><use href="#ic-arrow"></use></svg></button>
     </div>
   </div>
-  <div class="products-toolbar"><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><span class="products-toolbar-label"><svg class="icon" aria-hidden="true"><use href="#ic-circleCheck"></use></svg> Danh mục cập nhật từ máy chủ</span></div>
+  <div id="products-toolbar" class="products-toolbar"><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><span class="products-toolbar-label"><svg class="icon" aria-hidden="true"><use href="#ic-circleCheck"></use></svg> Danh mục cập nhật từ máy chủ</span></div>
   <div id="products" class="products"></div>
 </section>
-<section id="ipa-tools" class="section" aria-labelledby="ipa-tools-heading">
+<section id="ipa-tools" class="section hidden" aria-labelledby="ipa-tools-heading">
   <div class="heading">
     <div><span class="overline">TIỆN ÍCH iOS · IPA</span><h2 id="ipa-tools-heading">Công cụ IPA<span class="heading-dot">.</span></h2>
       <p class="section-lead">Kiểm tra IPA và ký ứng dụng bằng chứng chỉ của chính bạn. Dùng kết nối HTTPS của ERI.</p>
     </div>
   </div>
-  <div class="tabs ipa-tools-tabs" role="tablist" aria-label="Chọn công cụ IPA">
-    <button type="button" class="tab selected" role="tab" aria-selected="true" data-ipa-tool="decrypt">Decrypt IPA</button>
-    <button type="button" class="tab" role="tab" aria-selected="false" data-ipa-tool="sign">Ký IPA trực tiếp</button>
-  </div>
-  <div id="ipa-decrypt-panel" class="ipa-tool-panel" role="tabpanel">
-    <h3>Decrypt IPA · Kiểm tra mã hóa</h3>
-    <p>Kiểm tra xem IPA có mã hóa FairPlay hoặc lớp ZIP đặt mật khẩu. Chỉ có thể gỡ mã hóa ZIP khi bạn biết mật khẩu. Mã hóa FairPlay trên ứng dụng cần bản IPA đã được giải mã hợp pháp từ thiết bị được cấp quyền.</p>
+   <div id="ipa-decrypt-panel" class="ipa-tool-panel" role="tabpanel">
+    <h3>Decrypt IPA · Nhập link App Store</h3>
+    <p>Dán link App Store để tìm tên ứng dụng, phiên bản và Bundle ID. <strong>Apple không cung cấp IPA đã giải mã qua link App Store.</strong> Nếu bạn có tệp IPA được phép sử dụng, có thể kiểm tra mã hóa hoặc gỡ mật khẩu ZIP ở phần bên dưới.</p>
+    <form id="ipa-appstore-form" autocomplete="off">
+      <label class="field">Link ứng dụng trên App Store
+        <input type="url" name="appstore_url" required inputmode="url" spellcheck="false"
+          placeholder="https://apps.apple.com/vn/app/football-league-2026/id6447961802?l=vi"
+          maxlength="500">
+      </label>
+      <div class="ipa-tool-actions"><button class="btn primary" type="submit">Tra cứu ứng dụng</button></div>
+    </form>
+    <div id="ipa-appstore-result" class="ipa-tool-result" role="status" aria-live="polite"></div>
+    <h3 class="ipa-file-heading">Kiểm tra tệp IPA có sẵn</h3>
+    <p>Bạn có thể chọn file IPA của mình để phân tích mã hóa, hoặc gỡ mật khẩu ZIP nếu có. Không giải mã FairPlay bằng mật khẩu ZIP.</p>
     <form id="ipa-decrypt-form" enctype="multipart/form-data" autocomplete="off">
       <label class="field">Chọn IPA để kiểm tra
         <input type="file" name="ipa" accept=".ipa" required>
