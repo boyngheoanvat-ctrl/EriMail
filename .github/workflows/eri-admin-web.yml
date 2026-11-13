@@ -393,6 +393,13 @@ jobs:
           test -s web/eri-store/icon.svg
           test -s web/eri-store/service-worker.js
           node --check web/eri-store/service-worker.js
+          # Regression: Admin must retain FREE/BÁN segment in upload and catalog.
+          test "$(grep -c 'Text("FREE").tag(true)' apps/ERIAdmin/ERIAdminApp.swift)" -eq 2
+          test "$(grep -c 'Text("BÁN").tag(false)' apps/ERIAdmin/ERIAdminApp.swift)" -eq 2
+          grep -q 'modIsFree' apps/ERIAdmin/ERIAdminApp.swift
+          grep -q 'visibleProducts' apps/ERIAdmin/ERIAdminApp.swift
+          grep -q 'ensureFreeModSupported' apps/ERIAdmin/ERIAdminApp.swift
+          grep -q 'serverDetail(_ body: Data)' apps/ERIAdmin/ERIAdminApp.swift
           test -s web/eri-store/shop-theme.css
           grep -q 'SHOP MOD BY ERI NGUYỄN' web/eri-store/index.html
           grep -q 'id="mod-subtabs"' web/eri-store/index.html
