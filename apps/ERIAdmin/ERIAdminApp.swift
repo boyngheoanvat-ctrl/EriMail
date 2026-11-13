@@ -1254,10 +1254,10 @@ private struct AdminUploadView: View {
                 if working {
                     ProgressView(value: progress)
                     Text("Đã gửi " + String(format: "%.1f", progress * 100) + "% · Khi mất mạng, bấm lại để tiếp tục")
+                        .font(.footnote).foregroundStyle(.secondary)
                     if !uploadPhase.isEmpty {
                         Text(uploadPhase).font(.footnote).foregroundStyle(.secondary)
                     }
-                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Button(working ? "Đang tải " + String(format: "%.1f", progress * 100) + "%" : "Cập nhật lên máy chủ") {
                     Task { await publish() }
