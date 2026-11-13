@@ -96,20 +96,64 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    const buttons = document.querySelectorAll("[data-ipa-tool]");
-    const panels = {
-      decrypt: $("ipa-decrypt-panel"),
-      sign: $("ipa-sign-panel")
-    };
-    buttons.forEach(button => button.addEventListener("click", () => {
-      const selection = button.dataset.ipaTool === "sign" ? "sign" : "decrypt";
-      buttons.forEach(item => {
-        const selected = item === button;
-        item.classList.toggle("selected", selected);
-        item.setAttribute("aria-selected", String(selected));
+    // The two tools are first-level store tabs, controlled by app.js.
+    const appStoreForm = $("ipa-appstore-form");
+    const appStoreResult = $("ipa-appstore-result");
+    if (appStoreForm && appStoreResult) {
+      appStoreForm.addEventListener("submit", async ev => {
+        ev.preventDefault();
+        const link = String(appStoreForm.elements.namedItem("appstore_url")?.value || "").trim();
+        let parsed;
+        try { parsed = new URL(link); } catch { parsed = null; }
+        if (!parsed || parsed.protocol !== "https:" || parsed.hostname !== "apps.apple.com") {
+          display(appStoreResult, "Chỉ chấp nhận link HTTPS của apps.apple.com.", "error");
+          return;
+        }
+        const action = appStoreForm.querySelector('button[type="submit"]');
+        action.disabled = true;
+        display(appStoreResult, "Đang tra cứu thông tin ứng dụng trên App Store...");
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20000);
+        try {
+          const reply = await fetch(API + "/api/v1/tools/ipa/appstore?url=" + encodeURIComponent(link),
+                                    {cache:"no-store",signal:controller.signal});
+          let data;
+          try { data = await reply.json(); } catch { data = {}; }
+          if (!reply.ok) {
+            display(appStoreResult, errorText(data), "error");
+            return;
+          }
+          const name = String(data.name || "Ứng dụng");
+          const developer = String(data.developer || "Không rõ nhà phát triển");
+          const bundle = String(data.bundle_id || "Không rõ");
+          const version = String(data.version || "Không rõ");
+          display(appStoreResult, name + " · " + developer +
+            "\nBundle ID: " + bundle + " · Phiên bản: " + version +
+            "\n" + (data.message || "Link App Store không phải tệp IPA có thể tải về."), "success");
+          if (typeof data.app_store_url === "string") {
+            try {
+              const destination = new URL(data.app_store_url);
+              if (destination.protocol === "https:" && destination.hostname === "apps.apple.com") {
+                const open = document.createElement("a");
+                open.className = "btn outline";
+                open.href = destination.href;
+                open.rel = "noopener noreferrer";
+                open.target = "_blank";
+                open.textContent = "Mở ứng dụng trên App Store";
+                appStoreResult.append(document.createElement("p"), open);
+              }
+            } catch { /* Ignore an invalid URL rather than linking to an untrusted host. */ }
+          }
+        } catch (error) {
+          display(appStoreResult, error.name === "AbortError"
+            ? "App Store phản hồi quá lâu. Hãy thử lại."
+            : "Không tra cứu được App Store. Kiểm tra kết nối mạng.", "error");
+        } finally {
+          clearTimeout(timeout);
+          action.disabled = false;
+        }
       });
-      for (const [key, panel] of Object.entries(panels)) panel?.classList.toggle("hidden", selection !== key);
-    }));
+    }
     const decryptForm = $("ipa-decrypt-form");
     const signForm = $("ipa-sign-form");
     const decryptStatus = $("ipa-decrypt-status");
