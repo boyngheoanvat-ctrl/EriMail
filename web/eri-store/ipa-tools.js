@@ -43,7 +43,7 @@
     const info = document.createElement("p");
     info.className = "small";
     info.textContent = isSigned
-      ? "Mở bằng Safari trên iPhone. iOS chỉ cài khi chứng chỉ và provisioning profile hợp lệ cho thiết bị. Liên kết HTTPS có hiệu lực 15 phút, đừng đóng trang trước khi hoàn tất."
+      ? "Mở bằng Safari trên iPhone. iOS chỉ cài khi chứng chỉ và provisioning profile hợp lệ cho thiết bị. Liên kết HTTPS có hiệu lực 60 phút, đừng đóng trang trước khi hoàn tất."
       : "Liên kết tải một lần, hết hạn sau 15 phút. Tệp không được lưu trên tài khoản cửa hàng.";
     target.append(info);
   }
