@@ -1,0 +1,32 @@
+name: Guard ERI Shop Source
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ERIAdmin/**'
+      - 'apps/ERIStore/**'
+      - '.github/workflows/check-shop-separation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-shop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure ERI ADMIN remains a shop management app
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/ERIAdmin/ERIAdminApp.swift
+          test -s apps/ERIStore/ERIStoreApp.swift
+          test ! -e apps/ERIAdmin/ERILicenseAdminView.swift
+          if grep -Eqi 'ERILicenseAdminView|eri-login-api\.onrender\.com' apps/ERIAdmin/ERIAdminApp.swift; then
+            echo 'Game login UI must remain outside ERI ADMIN.'
+            exit 1
+          fi
+          test "$(grep -c 'Text("FREE").tag(true)' apps/ERIAdmin/ERIAdminApp.swift)" -eq 2
+          test "$(grep -c 'Text("BÁN").tag(false)' apps/ERIAdmin/ERIAdminApp.swift)" -eq 2
+          grep -q 'id="mod-subtabs"' web/eri-store/index.html
+          grep -q 'SHOP MOD BY ERI NGUYỄN' web/eri-store/index.html
+          echo 'ERI Shop source separation: OK'
