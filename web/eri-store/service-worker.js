@@ -1,7 +1,7 @@
 // SHOP MOD BY ERI NGUYỄN private download streaming (native Safari downloads, no large JS Blob).
 // Each capability nonce lives only in this service worker memory and is never
 // a customer bearer token. No private file or auth token is cached.
-const VERSION="eri-store-v10";
+const VERSION="eri-store-v11";
 const STATIC=["/","/index.html","/styles.css","/shop-theme.css","/app.js","/udid.js","/icon.svg","/manifest.webmanifest"];
 const DOWNLOAD_PREFIX="/_eri_download/";
 const API="https://eri-api-dag8.onrender.com";
@@ -48,7 +48,7 @@ function safeDisposition(filename){
 }
 function downloadMime(filename){
   const ext=(filename.split(".").pop()||"").toLowerCase();
-  const formats={ipa:"application/x-itunes-ipa",zip:"application/zip",
+  const formats={ipa:"application/x-itunes-ipa",apk:"application/vnd.android.package-archive",zip:"application/zip",
     pdf:"application/pdf",p12:"application/x-pkcs12",
     png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",
     txt:"text/plain",json:"application/json"};
