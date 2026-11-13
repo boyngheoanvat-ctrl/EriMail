@@ -74,6 +74,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(blob)
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_OPTIONS(self):
         self.send(200, b"")
 
@@ -137,7 +142,21 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, {"error":"JSON không hợp lệ"})
         self.forward(path, "POST", body)
 
+def backend_health_probe():
+    if not FN or len(INTERNAL) < 32:
+        print("ERI backend readiness: missing config", flush=True)
+        return
+    try:
+        req = urllib.request.Request(FN + "/health",
+            headers={"X-ERI-INTERNAL-SECRET": INTERNAL}, method="GET")
+        with urllib.request.urlopen(req, timeout=20) as response:
+            data = json.loads(response.read(2048))
+            print("ERI backend readiness:", response.status, data.get("status"), data.get("service"), flush=True)
+    except Exception as exc:
+        print("ERI backend readiness failed:", type(exc).__name__, str(exc), flush=True)
+
 if __name__ == "__main__":
+    backend_health_probe()
     port = int(os.environ.get("PORT", "10000"))
     print("ERI Login listening on 0.0.0.0:"+str(port), flush=True)
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
