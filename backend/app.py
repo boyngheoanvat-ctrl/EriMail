@@ -1228,8 +1228,8 @@ def admin_delete_catalog_product(kind: str, product_id: int):
 
 # Authenticated delivery files, visible only to the buyer whose order is fulfilled.
 # WARNING: /tmp is temporary on Render Free; use durable storage in production.
-DELIVERY_MAX_BYTES = 300 * 1024 * 1024
-DELIVERY_SUFFIXES = {".ipa",".zip",".pdf",".txt",".mobileprovision",".p12",".cer",
+DELIVERY_MAX_BYTES = 512 * 1024 * 1024
+DELIVERY_SUFFIXES = {".ipa",".apk",".zip",".pdf",".txt",".mobileprovision",".p12",".cer",
                      ".png",".jpg",".jpeg",".json",".plist",".md",".csv"}
 
 class DeliveryBegin(BaseModel):
