@@ -16,6 +16,13 @@ def main():
     password = sys.stdin.readline().rstrip("\r\n")
     if not password:
         raise SystemExit(3)
+    # The signing worker, not the FastAPI API, owns the memory limit.
+    # On Render Free this keeps a very large IPA from killing the API itself.
+    if os.name == "posix":
+        import resource
+        limit_mb = max(256, min(int(os.getenv("ERI_SIGN_WORKER_MEMORY_MB", "448")), 1024))
+        ceiling = limit_mb * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
     import ipasign
     signed = ipasign.Key(str(certificate), str(provision), password).sign(
         str(source), str(output))
