@@ -17,6 +17,28 @@
   let busy = false;
   let polling = false;
 
+  function showProgress(bytes, total, stage) {
+    const panel = $("ipa-sign-progress");
+    const bar = $("ipa-sign-progress-bar");
+    const percent = $("ipa-sign-progress-percent");
+    const heading = $("ipa-sign-progress-label");
+    const note = $("ipa-sign-progress-stage");
+    if (!panel || !bar || !percent || !heading || !note) return;
+    const value = Math.max(0, Math.min(100, Math.floor(100 * bytes / Math.max(total, 1))));
+    panel.classList.remove("hidden");
+    bar.value = value;
+    percent.textContent = value + "%";
+    heading.textContent = stage === "signing" ? "Đã tải đủ IPA — đang ký trên máy chủ" :
+      stage === "complete" ? "Đã ký IPA thành công" :
+      "Đang tải IPA lên máy chủ";
+    note.textContent = stage === "signing"
+      ? "100% là tiến độ gửi file, không phải tiến độ ký. Máy chủ đang xử lý chữ ký."
+      : stage === "complete"
+        ? "Chọn Cài trực tiếp lên iPhone hoặc Tải IPA đã ký bên dưới."
+        : "Đã nhận " + fmt(bytes) + " / " + fmt(total) +
+          " — chỉ cập nhật sau khi máy chủ xác nhận dữ liệu.";
+  }
+
   function status(message, severity = "info") {
     const el = $("ipa-sign-status");
     if (!el) return;
@@ -120,20 +142,24 @@
         const job = await api("/api/v1/tools/ipa/sign-jobs/" + jobId);
         if (job.state === "completed") {
           clear();
-          status("Đã ký IPA thành công. Chọn cài đặt hoặc tải tệp.", "success");
+          showProgress(job.size_bytes, job.size_bytes, "complete");
+          status("Ký IPA thành công! Bấm Cài trực tiếp lên iPhone để iOS hỏi xác nhận cài đặt, hoặc tải IPA đã ký.", "success");
           resultLinks(job.result);
           return;
         }
         if (job.state === "failed") {
           status(job.error || "Ký IPA thất bại.", "error");
+          $("ipa-sign-progress")?.classList.add("hidden");
           clear();
           return;
         }
         if (job.state === "uploading") {
+          showProgress(job.uploaded_bytes, job.size_bytes, "uploading");
           status("Tệp đã gửi " + fmt(job.uploaded_bytes) + "/" + fmt(job.size_bytes) +
             ". Chọn lại IPA nếu đã thoát trang để tiếp tục.");
           return;
         }
+        showProgress(job.size_bytes, job.size_bytes, "signing");
         status("Máy chủ đang ký IPA. Bạn có thể thoát trang và mở lại để xem kết quả...");
         await new Promise(done => setTimeout(done, 3000));
       }
@@ -152,13 +178,18 @@
       const profile = form.elements.namedItem("mobileprovision")?.files?.[0];
       const password = form.elements.namedItem("password")?.value;
       if (!file || !p12 || !profile || !password) throw new Error("Chọn đủ IPA, P12, mobileprovision và mật khẩu.");
+      showProgress(0, file.size, "uploading");
       const ready = getSaved();
       let job;
       if (ready && ready.name === file.name && ready.size === file.size) {
         try {
           job = await api("/api/v1/tools/ipa/sign-jobs/" + ready.id);
           if (job.state === "failed") job = null;
-          if (job?.state === "completed") { clear(); status("Tác vụ đã ký xong.", "success"); resultLinks(job.result); return; }
+          if (job?.state === "completed") {
+            clear(); showProgress(job.size_bytes, job.size_bytes, "complete");
+            status("Tác vụ đã ký xong. Chọn cài trực tiếp hoặc tải IPA.", "success");
+            resultLinks(job.result); return;
+          }
           if (job?.state === "processing") { await watch(ready.id); return; }
         } catch (e) {
           if (/không còn|404|410|tải lại/.test(e.message.toLowerCase())) job = null;
@@ -194,9 +225,11 @@
         }
         received.add(i);
         const uploaded = Math.min(file.size,received.size * job.chunk_bytes);
+        showProgress(uploaded, file.size, "uploading");
         status("Đã lưu lên máy chủ " + fmt(uploaded) + " / " + fmt(file.size) +
           " (phần " + (i+1) + "/" + chunks + "). Có thể tiếp tục nếu mạng ngắt.");
       }
+      showProgress(file.size, file.size, "signing");
       status("Đã tải đủ IPA. Đang gửi chứng chỉ để bắt đầu ký...");
       const args = new FormData();
       args.append("p12",p12);
