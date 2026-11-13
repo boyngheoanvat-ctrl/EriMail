@@ -35,6 +35,8 @@ PENDING_LIMIT = 3
 PUBLIC_HTTPS = "https://eri-api-dag8.onrender.com"
 _tickets = {}
 _signed_tickets = {}
+SIGNED_FOLDER = Path(os.getenv("ERI_SIGNED_IPA_DIR",
+                            str(Path(tempfile.gettempdir()) / "eri-signed-ipa")))
 _lock = threading.Lock()
 _work_slots = threading.BoundedSemaphore(value=1)
 
@@ -206,11 +208,22 @@ def _register_output(file: Path):
 
 
 def _purge_signed_locked():
+    # Keep metadata on disk so a process restart doesn't invalidate all OTA
+    # install links when the filesystem itself is still present.
+    SIGNED_FOLDER.mkdir(parents=True, exist_ok=True, mode=0o700)
     now = time.time()
-    for token, (path, expiry, _) in list(_signed_tickets.items()):
+    for path in SIGNED_FOLDER.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("expires", 0) > now:
+                continue
+            Path(data["path"]).unlink(missing_ok=True)
+        except (OSError, KeyError, ValueError, TypeError):
+            pass
+        path.unlink(missing_ok=True)
+    for token, (_, expiry, _) in list(_signed_tickets.items()):
         if expiry <= now:
             _signed_tickets.pop(token, None)
-            Path(path).unlink(missing_ok=True)
 
 
 def _manifest_details(output: Path):
@@ -235,13 +248,19 @@ def _manifest_details(output: Path):
 def _register_signed_output(file: Path, metadata: dict):
     with _lock:
         _purge_signed_locked()
-        if len(_signed_tickets) + len(_tickets) >= PENDING_LIMIT:
+        if len(list(SIGNED_FOLDER.glob("*.json"))) + len(_tickets) >= PENDING_LIMIT:
             raise HTTPException(503, "Máy chủ đang giữ nhiều IPA chờ tải, thử lại sau.")
         token = secrets.token_urlsafe(32)
-        dest = Path(tempfile.gettempdir()) / ("eri-signed-" + token + ".ipa")
+        dest = SIGNED_FOLDER / (token + ".ipa")
         os.replace(file, dest)
         os.chmod(dest, 0o600)
-        _signed_tickets[token] = (str(dest), time.time() + SIGNED_TICKET_TTL, metadata)
+        expiry = time.time() + SIGNED_TICKET_TTL
+        registry = {"path": str(dest), "expires": expiry, "metadata": metadata}
+        staged = SIGNED_FOLDER / ("." + token + ".writing")
+        staged.write_text(json.dumps(registry, ensure_ascii=False), encoding="utf-8")
+        os.chmod(staged, 0o600)
+        os.replace(staged, SIGNED_FOLDER / (token + ".json"))
+        _signed_tickets[token] = (str(dest), expiry, metadata)
     base_path = "/api/v1/tools/ipa/install/" + token
     manifest_url = PUBLIC_HTTPS + base_path + "/manifest.plist"
     return {
@@ -258,8 +277,17 @@ def _resolve_signed(token: str):
     with _lock:
         _purge_signed_locked()
         item = _signed_tickets.get(token)
-    if item is None or not Path(item[0]).is_file():
-        raise HTTPException(410, "IPA đã ký đã hết hạn hoặc máy chủ khởi động lại. Vui lòng ký lại.")
+        if item is None:
+            registry = SIGNED_FOLDER / (token + ".json")
+            try:
+                data = json.loads(registry.read_text(encoding="utf-8"))
+                item = (data["path"], data["expires"], data["metadata"])
+            except (OSError, KeyError, ValueError, TypeError):
+                item = None
+            if item:
+                _signed_tickets[token] = item
+    if item is None or time.time() >= item[1] or not Path(item[0]).is_file():
+        raise HTTPException(410, "IPA đã ký đã hết hạn hoặc máy chủ mất tệp. Vui lòng ký lại.")
     return item
 
 
