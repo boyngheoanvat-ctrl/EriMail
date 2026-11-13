@@ -61,7 +61,7 @@ def _validate_ipa(archive: zipfile.ZipFile):
         name = info.filename
         path = Path(name)
         if (path.is_absolute() or ".." in path.parts or
-                "\\" in name or "\x00" in name or not name.startswith("Payload/")):
+                "\\" in name or "\x00" in name):
             raise HTTPException(422, "IPA có đường dẫn không an toàn")
         # Apple frameworks commonly use symlinks (e.g. Versions/Current -> A).
         # Accept only links whose resolved destination stays inside Payload/.
