@@ -393,6 +393,10 @@ jobs:
           test -s web/eri-store/icon.svg
           test -s web/eri-store/service-worker.js
           node --check web/eri-store/service-worker.js
+          test -s web/eri-store/shop-theme.css
+          grep -q 'SHOP MOD BY ERI NGUYỄN' web/eri-store/index.html
+          grep -q 'id="mod-subtabs"' web/eri-store/index.html
+          grep -q 'function shopIcon' web/eri-store/app.js
 
   live-smoke:
     name: Check deployed ERI STORE and API
@@ -443,7 +447,7 @@ jobs:
           assert "POST" in allow.get("access-control-allow-methods", ""), allow
           assert "authorization" in allow.get("access-control-allow-headers", "").lower(), allow
           _, _, home = fetch(site + "/")
-          assert b"ERI STORE" in home
+          assert b"ERI STORE" in home or "SHOP MOD BY ERI NGUYỄN".encode("utf-8") in home
           _, _, manifest = fetch(site + "/manifest.webmanifest")
           assert json.loads(manifest)["display"] == "standalone"
           print("Live website, API auth routes, and browser CORS preflight: OK")

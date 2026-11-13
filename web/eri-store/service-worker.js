@@ -1,8 +1,8 @@
-// ERI STORE private download streaming (native Safari downloads, no large JS Blob).
+// SHOP MOD BY ERI NGUYỄN private download streaming (native Safari downloads, no large JS Blob).
 // Each capability nonce lives only in this service worker memory and is never
 // a customer bearer token. No private file or auth token is cached.
-const VERSION="eri-store-v9";
-const STATIC=["/","/index.html","/styles.css","/app.js","/udid.js","/icon.svg","/manifest.webmanifest"];
+const VERSION="eri-store-v10";
+const STATIC=["/","/index.html","/styles.css","/shop-theme.css","/app.js","/udid.js","/icon.svg","/manifest.webmanifest"];
 const DOWNLOAD_PREFIX="/_eri_download/";
 const API="https://eri-api-dag8.onrender.com";
 const MAX_PREPARE_AGE_MS=10*60*1000;
@@ -57,7 +57,7 @@ function downloadMime(filename){
 async function streamPrivateFile(event,nonce){
   cleanExpiredGrants();
   const grant=grants.get(nonce);
-  if(!grant)return new Response("Liên kết tải đã hết hạn. Quay lại ERI STORE và bấm Tải file lần nữa.",{
+  if(!grant)return new Response("Liên kết tải đã hết hạn. Quay lại SHOP MOD BY ERI NGUYỄN và bấm Tải file lần nữa.",{
     status:410,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}
   });
   const headers={"Authorization":"Bearer "+grant.token};

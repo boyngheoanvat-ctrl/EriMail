@@ -122,10 +122,10 @@ function udidAddSafariHelp(container,url){
   const standalone=udidStandalone();
   if(ios){
     container.append(element("p",null,standalone?
-      "Bạn đang mở ERI STORE như ứng dụng trên Màn hình chính. Để tải hồ sơ iOS, hãy dùng Safari trực tiếp.":
+      "Bạn đang mở SHOP MOD BY ERI NGUYỄN như ứng dụng trên Màn hình chính. Để tải hồ sơ iOS, hãy dùng Safari trực tiếp.":
       "Dùng Safari trên chính iPhone/iPad cần đăng ký UDID. Nếu đang ở trình duyệt trong ứng dụng khác, hãy mở bằng Safari."));
     if(standalone){
-      const action=element("a","btn outline","Mở ERI STORE bằng Safari");
+      const action=element("a","btn outline","Mở SHOP MOD BY ERI NGUYỄN bằng Safari");
       action.href="https://eri-store-web.onrender.com/";
       action.target="_blank";
       action.rel="noopener noreferrer";
@@ -199,7 +199,7 @@ function startUdidForOrder(order){
       link.rel="noreferrer";
       instructions.append(link);
       instructions.append(element("p",null,
-        "3. iPhone có thể tự chuyển về website và xóa hồ sơ tạm. Đây là bình thường nếu UDID đã được gửi. Quay lại ERI STORE để kiểm tra kết quả."));
+        "3. iPhone có thể tự chuyển về website và xóa hồ sơ tạm. Đây là bình thường nếu UDID đã được gửi. Quay lại SHOP MOD BY ERI NGUYỄN để kiểm tra kết quả."));
       steps.append(instructions);
       const qr=element("img","udid-qr");
       qr.src=scan.qr_url;qr.alt="Mã QR mở hồ sơ UDID trong Safari trên iPhone/iPad";

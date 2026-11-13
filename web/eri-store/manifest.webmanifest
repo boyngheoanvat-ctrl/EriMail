@@ -1,12 +1,12 @@
 {
-  "name": "ERI STORE",
-  "short_name": "ERI STORE",
-  "description": "ERI STORE — Cửa hàng số Mod Game, AI Plus, Chứng chỉ",
+  "name": "SHOP MOD BY ERI NGUYỄN",
+  "short_name": "SHOP MOD ERI",
+  "description": "SHOP MOD BY ERI NGUYỄN — Mod Game IPA, AI Plus và Chứng chỉ iOS",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f8f8fc",
-  "theme_color": "#f5f5ff",
+  "background_color": "#f7f8fc",
+  "theme_color": "#17152c",
   "lang": "vi",
   "icons": [
     {

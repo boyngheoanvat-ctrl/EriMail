@@ -1,49 +1,134 @@
 <!doctype html>
 <html lang="vi">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f5f5ff"><meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="ERI STORE">
-<meta name="description" content="ERI STORE — Mod Game, AI Plus và Chứng chỉ. Đăng ký, mua hàng và theo dõi đơn.">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#17152c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="SHOP MOD ERI">
+<meta name="description" content="SHOP MOD BY ERI NGUYỄN — Mod Game IPA, AI Plus, Chứng chỉ iOS. Xem sản phẩm, đăng nhập và theo dõi đơn hàng.">
+<meta property="og:title" content="SHOP MOD BY ERI NGUYỄN">
+<meta property="og:description" content="Mod Game IPA, AI Plus và chứng chỉ iOS. Shop mod của Eri Nguyễn.">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://eri-api-dag8.onrender.com; img-src 'self' data: https://eri-api-dag8.onrender.com; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
-<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/svg+xml" href="/icon.svg">
-<link rel="stylesheet" href="/styles.css"><script defer src="/app.js"></script><script defer src="/udid.js"></script>
-<title>ERI STORE — Cửa hàng số</title>
-</head><body>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/shop-theme.css">
+<script defer src="/app.js"></script><script defer src="/udid.js"></script>
+<title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
+</head>
+<body class="shop-v2">
+<svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false" width="0" height="0">
+<symbol id="ic-gamepad" viewBox="0 0 24 24"><path d="M6 9h12a4 4 0 0 1 3.8 3l1.1 5.2a2 2 0 0 1-3.2 2l-3.2-2.7h-9l-3.2 2.7a2 2 0 0 1-3.2-2L2.2 12A4 4 0 0 1 6 9Z"/><path d="M8 11.5v5m-2.5-2.5h5"/><circle cx="16.5" cy="12.5" r=".65" fill="currentColor" stroke="none"/><circle cx="19" cy="15" r=".65" fill="currentColor" stroke="none"/></symbol>
+<symbol id="ic-bag" viewBox="0 0 24 24"><path d="M4 8h16l-1 13H5L4 8Z"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></symbol>
+<symbol id="ic-sparkles" viewBox="0 0 24 24"><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2ZM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z"/></symbol>
+<symbol id="ic-shield" viewBox="0 0 24 24"><path d="m12 2 8 4v6c0 5-3.3 8.5-8 10-4.7-1.5-8-5-8-10V6l8-4Z"/><path d="m8.5 12 2.3 2.5 4.7-5"/></symbol>
+<symbol id="ic-receipt" viewBox="0 0 24 24"><path d="M5 3h14v18l-3-2-4 2-4-2-3 2V3Z"/><path d="M9 8h6M9 12h6M9 16h4"/></symbol>
+<symbol id="ic-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 21v-2a7.5 7.5 0 0 1 15 0v2"/></symbol>
+<symbol id="ic-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+<symbol id="ic-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3"/></symbol>
+<symbol id="ic-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-5L4 8"/><path d="M4 3v5h5M4 13a8 8 0 0 0 14 5l2-2"/><path d="M20 21v-5h-5"/></symbol>
+<symbol id="ic-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v11H3V10Z"/><path d="M9 21v-8h6v8"/></symbol>
+<symbol id="ic-package" viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7l9-5Z"/><path d="m3 7 9 5 9-5M12 12v10"/></symbol>
+<symbol id="ic-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></symbol>
+<symbol id="ic-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="ic-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="ic-zap" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></symbol>
+<symbol id="ic-tag" viewBox="0 0 24 24"><path d="M3 3h9l9 9-9 9-9-9V3Z"/><circle cx="8.5" cy="8.5" r="1"/></symbol>
+<symbol id="ic-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="ic-circleCheck" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></symbol>
+<symbol id="ic-wallet" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M16 14h2M6 6V4h13"/></symbol>
+<symbol id="ic-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="15" rx="2"/><path d="M8 22h8M12 18v4"/></symbol>
+<symbol id="ic-star" viewBox="0 0 24 24"><path d="m12 2 3 6.3 7 .9-5.1 4.9 1.3 7-6.2-3.3-6.2 3.3 1.3-7L2 9.2l7-.9L12 2Z"/></symbol>
+<symbol id="ic-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+</svg>
+<div class="announcement"><div class="wrap announcement-inner">
+  <span><svg class="icon" aria-hidden="true"><use href="#ic-zap"></use></svg> Shop Mod Game &amp; sản phẩm số</span>
+  <span class="announcement-right"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg> Đơn hàng theo tài khoản riêng</span>
+</div></div>
 <header class="header"><div class="wrap header-inner">
-<a class="brand" href="#store"><span class="brand-mark">E</span><span><strong>ERI STORE</strong><small>Cửa hàng số</small></span></a>
-<button id="header-account" type="button" class="avatar" aria-label="Tài khoản">↗</button>
+  <a class="brand" href="#store" aria-label="SHOP MOD BY ERI NGUYỄN — Trang chủ">
+    <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#ic-gamepad"></use></svg></span>
+    <span class="brand-copy"><strong>SHOP MOD</strong><small>BY ERI NGUYỄN</small></span>
+  </a>
+  <div class="header-actions"><span class="header-tag"><svg class="icon" aria-hidden="true"><use href="#ic-circleCheck"></use></svg> SHOP ONLINE</span>
+  <button id="header-account" type="button" class="avatar" aria-label="Mở tài khoản"><svg class="icon" aria-hidden="true"><use href="#ic-user"></use></svg></button></div>
 </div></header>
 <main class="wrap content">
 <div id="banner" class="banner hidden" role="alert"></div>
-<section class="hero" id="hero"><div>
-<div class="eyebrow"><span class="live-dot"></span> ERI DIGITAL STORE</div>
-<h1>Sản phẩm số,<br><em>mua thật dễ.</em></h1>
-<p>Mod Game, AI Plus và Chứng chỉ. Chọn sản phẩm, đặt hàng với tài khoản riêng và thanh toán bằng QR MoMo.</p>
-<div class="hero-buttons"><button id="explore" class="btn primary" type="button">Khám phá sản phẩm ↗</button><button id="hero-orders" class="btn light" type="button">Xem đơn hàng ↗</button></div>
-</div><div class="hero-art" aria-hidden="true"><span class="orbit one"></span><span class="orbit two"></span><span class="hero-symbol">E</span><span class="float-label a">✦ AI Plus</span><span class="float-label b">✓ Nhận hàng qua tài khoản</span></div></section>
-<div class="features"><div><span>♙</span><div><b>Tài khoản riêng</b><small>Đăng ký nhanh chóng</small></div></div><div><span>▣</span><div><b>Thanh toán MoMo</b><small>Quét QR thanh toán</small></div></div><div><span>✓</span><div><b>Theo dõi đơn</b><small>Lịch sử mua hàng</small></div></div></div>
-<section id="store" class="section"><div class="heading"><div><span class="overline">KHÁM PHÁ</span><h2>Danh mục sản phẩm</h2></div><button id="reload" class="link-button" type="button">↻ Làm mới</button></div>
-<div id="tabs" class="tabs" role="tablist" aria-label="Loại sản phẩm">
-<button class="tab selected" type="button" role="tab" aria-selected="true" data-kind="mod">🎮 Mod Game</button>
-<button class="tab" type="button" role="tab" aria-selected="false" data-kind="ai">✦ AI Plus</button>
-<button class="tab" type="button" role="tab" aria-selected="false" data-kind="certificate">✓ Chứng chỉ</button>
-</div><div id="certificate-udid" class="udid-panel hidden">
-  <div class="udid-panel-mark" aria-hidden="true">▣</div>
-  <div class="udid-panel-content">
-    <h3>Lấy UDID cho Chứng chỉ iOS</h3>
-    <p>Đặt mua Chứng chỉ, chọn đơn và lấy UDID trên iPhone hoặc iPad cần đăng ký.</p>
-    <p class="small">Bạn cần đồng ý cài hồ sơ iOS để gửi UDID cho đơn hàng đã chọn.</p>
-    <button type="button" class="btn primary" id="start-udid">Lấy UDID thiết bị</button>
+<section class="hero" id="hero" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <div class="eyebrow"><span class="live-dot"></span> WELCOME TO SHOP MOD BY ERI NGUYỄN</div>
+    <h1 id="hero-title">Nâng cấp trải nghiệm.<br><em>Chọn mod đúng gu.</em></h1>
+    <p>Khám phá Mod Game IPA, AI Plus và chứng chỉ iOS. Giao diện dễ dùng, quản lý đơn rõ ràng trên một tài khoản.</p>
+    <div class="hero-buttons">
+      <button id="explore" class="btn primary" type="button"><svg class="icon" aria-hidden="true"><use href="#ic-bag"></use></svg> Xem sản phẩm <svg class="icon" aria-hidden="true"><use href="#ic-arrow"></use></svg></button>
+      <button id="hero-orders" class="btn light" type="button"><svg class="icon" aria-hidden="true"><use href="#ic-receipt"></use></svg> Đơn của tôi</button>
+    </div>
+    <div class="hero-points"><span><svg class="icon" aria-hidden="true"><use href="#ic-check"></use></svg> Sản phẩm theo danh mục</span><span><svg class="icon" aria-hidden="true"><use href="#ic-check"></use></svg> Theo dõi đơn hàng</span></div>
   </div>
-</div><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><div id="products" class="products"></div></section>
-<section id="orders-view" class="section hidden"><div class="heading"><div><span class="overline">ĐƠN HÀNG</span><h2>Lịch sử mua hàng</h2></div><button id="refresh-orders" class="link-button" type="button">↻ Làm mới</button></div><div id="orders" class="order-list"></div></section>
-<section id="account-view" class="section hidden"><div class="heading"><div><span class="overline">TÀI KHOẢN</span><h2>Thông tin của bạn</h2></div></div><div id="profile" class="profile"></div></section>
+  <div class="hero-art" aria-hidden="true">
+    <div class="hero-halo halo-one"></div><div class="hero-halo halo-two"></div>
+    <div class="hero-console"><svg class="icon" aria-hidden="true"><use href="#ic-gamepad"></use></svg></div>
+    <div class="hero-floating hero-floating-top"><svg class="icon" aria-hidden="true"><use href="#ic-sparkles"></use></svg> AI PLUS</div>
+    <div class="hero-floating hero-floating-bottom"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg> CHỨNG CHỈ iOS</div>
+    <div class="hero-art-dots"><span></span><span></span><span></span></div>
+  </div>
+</section>
+<div class="features" aria-label="Dịch vụ nổi bật">
+  <div class="feature-card"><span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#ic-lock"></use></svg></span><div><b>Tài khoản riêng</b><small>Quản lý thông tin &amp; đơn mua</small></div></div>
+  <div class="feature-card"><span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#ic-wallet"></use></svg></span><div><b>Thanh toán MoMo</b><small>Quét mã QR cho đơn hàng</small></div></div>
+  <div class="feature-card"><span class="feature-icon"><svg class="icon" aria-hidden="true"><use href="#ic-package"></use></svg></span><div><b>Theo dõi đơn</b><small>Kiểm tra trạng thái giao file</small></div></div>
+</div>
+<section id="store" class="section" aria-labelledby="products-heading">
+  <div class="heading">
+    <div><span class="overline">SHOP MOD · KHÁM PHÁ</span><h2 id="products-heading">Danh mục sản phẩm<span class="heading-dot">.</span></h2>
+      <p class="section-lead">Chọn danh mục bạn cần và xem thông tin sản phẩm ngay bên dưới.</p>
+    </div>
+    <button id="reload" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#ic-refresh"></use></svg> <span>Làm mới</span></button>
+  </div>
+  <div id="tabs" class="tabs" role="tablist" aria-label="Loại sản phẩm">
+    <button class="tab selected" type="button" role="tab" aria-selected="true" data-kind="mod"><svg class="icon" aria-hidden="true"><use href="#ic-gamepad"></use></svg> <span>Mod Game</span></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-kind="ai"><svg class="icon" aria-hidden="true"><use href="#ic-sparkles"></use></svg> <span>AI Plus</span></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-kind="certificate"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg> <span>Chứng chỉ iOS</span></button>
+  </div>
+  <div id="mod-subtabs" class="mod-subtabs" role="tablist" aria-label="Mod Game miễn phí hoặc trả phí">
+    <button class="mod-subtab" type="button" role="tab" data-mod-mode="free" aria-selected="false"><svg class="icon" aria-hidden="true"><use href="#ic-download"></use></svg> FREE</button>
+    <button class="mod-subtab selected" type="button" role="tab" data-mod-mode="paid" aria-selected="true"><svg class="icon" aria-hidden="true"><use href="#ic-bag"></use></svg> MUA</button>
+  </div>
+  <div id="certificate-udid" class="udid-panel hidden">
+    <div class="udid-panel-mark"><svg class="icon" aria-hidden="true"><use href="#ic-phone"></use></svg></div>
+    <div class="udid-panel-content">
+      <h3>Đăng ký UDID cho chứng chỉ iOS</h3>
+      <p>Chọn đơn Chứng chỉ đã mua để lấy UDID trên iPhone / iPad. Thông tin thiết bị chỉ gửi khi bạn đồng ý.</p>
+      <p class="small">Safari sẽ yêu cầu bạn tải và cài hồ sơ lấy UDID. Hồ sơ không cần tồn tại vĩnh viễn trên thiết bị.</p>
+      <button type="button" class="btn primary" id="start-udid"><svg class="icon" aria-hidden="true"><use href="#ic-phone"></use></svg> Lấy UDID thiết bị <svg class="icon" aria-hidden="true"><use href="#ic-arrow"></use></svg></button>
+    </div>
+  </div>
+  <div class="products-toolbar"><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><span class="products-toolbar-label"><svg class="icon" aria-hidden="true"><use href="#ic-circleCheck"></use></svg> Danh mục cập nhật từ máy chủ</span></div>
+  <div id="products" class="products"></div>
+</section>
+<section id="orders-view" class="section hidden" aria-labelledby="orders-heading">
+  <div class="heading"><div><span class="overline">ĐƠN MUA CỦA BẠN</span><h2 id="orders-heading">Lịch sử đơn hàng<span class="heading-dot">.</span></h2></div>
+    <button id="refresh-orders" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#ic-refresh"></use></svg> Làm mới</button>
+  </div><div id="orders" class="order-list"></div>
+</section>
+<section id="account-view" class="section hidden" aria-labelledby="account-heading">
+  <div class="heading"><div><span class="overline">TÀI KHOẢN KHÁCH HÀNG</span><h2 id="account-heading">Tài khoản của bạn<span class="heading-dot">.</span></h2></div></div>
+  <div id="profile" class="profile"></div>
+</section>
+<footer class="site-footer"><div class="footer-brand"><span class="footer-mark"><svg class="icon" aria-hidden="true"><use href="#ic-gamepad"></use></svg></span><span><b>SHOP MOD BY ERI NGUYỄN</b><small>Mod Game · AI Plus · Chứng chỉ iOS</small></span></div><span class="footer-note">Thanh toán được xác nhận theo trạng thái đơn trên hệ thống.</span></footer>
 </main>
-<nav class="bottom-nav" aria-label="Điều hướng">
-<button data-view="store" class="nav-button selected" type="button"><span>⌂</span>Cửa hàng</button>
-<button data-view="orders" class="nav-button" type="button"><span>▤</span>Đơn hàng</button>
-<button data-view="account" class="nav-button" type="button"><span>♙</span>Tài khoản</button>
+<nav class="bottom-nav" aria-label="Điều hướng chính">
+  <button data-view="store" class="nav-button selected" type="button" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#ic-home"></use></svg><span>Cửa hàng</span></button>
+  <button data-view="orders" class="nav-button" type="button"><svg class="icon" aria-hidden="true"><use href="#ic-receipt"></use></svg><span>Đơn hàng</span></button>
+  <button data-view="account" class="nav-button" type="button"><svg class="icon" aria-hidden="true"><use href="#ic-user"></use></svg><span>Tài khoản</span></button>
 </nav>
-<div id="overlay" class="overlay hidden"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><header class="dialog-header"><h2 id="dialog-title">ERI STORE</h2><button id="dialog-close" type="button" aria-label="Đóng" class="close">×</button></header><div id="dialog-body"></div></div></div>
-</body></html>
+<div id="overlay" class="overlay hidden">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+    <header class="dialog-header"><h2 id="dialog-title">SHOP MOD BY ERI NGUYỄN</h2><button id="dialog-close" type="button" aria-label="Đóng" class="close"><svg class="icon" aria-hidden="true"><use href="#ic-x"></use></svg></button></header>
+    <div id="dialog-body"></div>
+  </div>
+</div>
+</body>
+</html>

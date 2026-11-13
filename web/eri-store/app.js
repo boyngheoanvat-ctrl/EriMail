@@ -8,7 +8,7 @@ const KINDS={
 const $=id=>document.getElementById(id);
 const TOKEN_KEY="eri_store_buyer_token";
 const state={
-  category:"mod",view:"store",items:[],
+  category:"mod",modTab:"paid",view:"store",items:[],
   token:sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||"",
   remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null,registrationMinName:2
 };
@@ -36,6 +36,17 @@ const element=(tag,cls,content)=>{
   if(content!==undefined&&content!==null)node.textContent=String(content);
   return node;
 };
+function shopIcon(name){
+  // Icons are local SVG symbols: crisp on iPhone and no third-party CDN.
+  const ns="http://www.w3.org/2000/svg";
+  const svg=document.createElementNS(ns,"svg");
+  svg.setAttribute("class","icon");
+  svg.setAttribute("aria-hidden","true");
+  const use=document.createElementNS(ns,"use");
+  use.setAttribute("href","#ic-"+name);
+  svg.append(use);
+  return svg;
+}
 async function syncRegistrationLimits(){
   try{
     const info=await request("/openapi.json");
@@ -135,36 +146,90 @@ function setView(view){
   window.scrollTo({top:0,behavior:"smooth"});
 }
 function updateHeader(){
-  $("header-account").textContent=state.buyer?.display_name?.trim()?.slice(0,1)?.toUpperCase()||"ĐN";
+  const avatar=$("header-account");
+  avatar.replaceChildren();
+  if(state.buyer?.display_name?.trim()){
+    avatar.textContent=state.buyer.display_name.trim().slice(0,1).toUpperCase();
+  }else{
+    avatar.append(shopIcon("user"));
+  }
+}
+function renderCatalog(){
+  const grid=$("products");
+  grid.replaceChildren();
+  const category=state.category;
+  const items=category==="mod"
+    ?state.items.filter(item=>state.modTab==="free" ? Number(item.price_vnd)===0 : Number(item.price_vnd)>0)
+    :state.items;
+  document.querySelectorAll("[data-mod-mode]").forEach(tab=>{
+    const active=tab.dataset.modMode===state.modTab;
+    tab.classList.toggle("selected",active);
+    tab.setAttribute("aria-selected",String(active));
+  });
+  $("catalog-message").textContent=items.length+" sản phẩm · "+
+    (category==="mod" ? (state.modTab==="free" ? "Mod Game FREE" : "Mod Game MUA") : KINDS[category].title);
+  if(!items.length){
+    grid.append(element("div","empty",category==="mod"
+      ? (state.modTab==="free" ? "Chưa có Mod Game miễn phí." : "Chưa có Mod Game trả phí.")
+      : "Danh mục hiện chưa có sản phẩm. Vui lòng quay lại sau."));
+    return;
+  }
+  for(const item of items){
+    const free=category==="mod"&&Number(item.price_vnd)===0;
+    const card=element("article","product product--"+category);
+    const visual=element("div","product-art");
+    visual.append(shopIcon(category==="mod"?"gamepad":category==="ai"?"sparkles":"shield"));
+    const chip=element("span","product-chip"+(free?" is-free":""),free?"FREE":category==="mod"?"MOD GAME":category==="ai"?"AI PLUS":"CHỨNG CHỈ");
+    visual.append(chip);
+    const body=element("div","product-body");
+    body.append(element("h3",null,item.name));
+    body.append(element("p","product-desc",item.description||"Sản phẩm số từ SHOP MOD BY ERI NGUYỄN"));
+    const extraText=category==="mod"?(item.version?"Phiên bản "+item.version:"Sản phẩm IPA")
+      :category==="certificate"?(item.issuer||"Chứng chỉ iOS"):"Sản phẩm số";
+    const extra=element("div","product-info");
+    extra.append(shopIcon(category==="mod"?"package":category==="certificate"?"shield":"sparkles"),document.createTextNode(extraText));
+    body.append(extra);
+    const footer=element("div","product-footer");
+    footer.append(element("strong","price",free?"FREE":money(item.price_vnd)));
+    if(free){
+      const expected="/api/v1/mods/"+item.id+"/download";
+      if(item.download_path===expected && Number.isSafeInteger(Number(item.id)) && Number(item.id)>0){
+        const link=element("a","btn primary");
+        link.append(shopIcon("download"),document.createTextNode("Tải IPA"));
+        link.href=API+expected;
+        link.rel="noreferrer";
+        link.setAttribute("aria-label","Tải IPA miễn phí: "+item.name);
+        footer.append(link);
+      }else{
+        footer.append(element("span","small","Tệp đang cập nhật"));
+      }
+    }else{
+      const action=button("Mua ngay","btn primary",()=>buy(item.id,category));
+      action.append(shopIcon("arrow"));
+      footer.append(action);
+    }
+    body.append(footer);
+    card.append(visual,body);
+    grid.append(card);
+  }
 }
 async function loadCatalog(){
+  const category=state.category;
   const udidPanel=$("certificate-udid");
-  if(udidPanel)udidPanel.classList.toggle("hidden",state.category!=="certificate");
-  $("catalog-message").textContent="Đang tải "+KINDS[state.category].title+"...";
-  const grid=$("products");grid.replaceChildren();
-  grid.append(element("div","placeholder"),element("div","placeholder"),element("div","placeholder"));
+  if(udidPanel)udidPanel.classList.toggle("hidden",category!=="certificate");
+  const modTabs=$("mod-subtabs");
+  if(modTabs)modTabs.classList.toggle("hidden",category!=="mod");
+  $("catalog-message").textContent="Đang tải "+KINDS[category].title+"...";
+  const grid=$("products");
+  grid.replaceChildren(element("div","placeholder"),element("div","placeholder"),element("div","placeholder"));
   try{
-    const data=await request("/api/v1/"+KINDS[state.category].endpoint);
+    const data=await request("/api/v1/"+KINDS[category].endpoint);
+    if(category!==state.category)return;
     if(!Array.isArray(data.items))throw new Error("Danh mục chưa đúng định dạng.");
     state.items=data.items;
-
-    grid.replaceChildren();
-    $("catalog-message").textContent=data.items.length?data.items.length+" sản phẩm đang hiển thị":"";
-    if(!data.items.length){grid.append(element("div","empty","Danh mục hiện chưa có sản phẩm. Vui lòng quay lại sau."));return}
-    data.items.forEach(item=>{
-      const card=element("article","product");
-      const visual=element("div","product-art",KINDS[state.category].icon);
-      const body=element("div","product-body");
-      body.append(element("h3",null,item.name));
-      body.append(element("p","product-desc",item.description||"Sản phẩm từ ERI STORE"));
-      const extra=state.category==="mod"?(item.version?"Phiên bản "+item.version:"Sản phẩm số"):state.category==="certificate"?(item.issuer||"Sản phẩm số"):"Sản phẩm số";
-      body.append(element("div","product-info",extra));
-      const footer=element("div","product-footer");
-      footer.append(element("strong","price",money(item.price_vnd)));
-      footer.append(button("Mua ngay","btn primary",()=>buy(item.id,state.category)));
-      body.append(footer);card.append(visual,body);grid.append(card);
-    });
+    renderCatalog();
   }catch(e){
+    if(category!==state.category)return;
     grid.replaceChildren(element("div","empty",errorMessage(e)));
     $("catalog-message").textContent="Không tải được sản phẩm";
     showBanner(errorMessage(e));
@@ -185,7 +250,7 @@ function signOut(clear=true){
   if(state.view==="account")showProfile();
 }
 function authModal(register=false){
-  openDialog(register?"Đăng ký ERI STORE":"Đăng nhập ERI STORE");
+  openDialog(register?"Đăng ký SHOP MOD BY ERI NGUYỄN":"Đăng nhập SHOP MOD BY ERI NGUYỄN");
   const root=$("dialog-body");
   const form=element("form");
   const controls=[
@@ -210,7 +275,7 @@ function authModal(register=false){
   rememberBox.type="checkbox";rememberBox.checked=state.remembered;
   rememberLabel.append(rememberBox,element("span",null,"Lưu tài khoản trên thiết bị này"));
   form.append(rememberLabel);
-  form.append(element("p","small","Giữ đăng nhập khi mở lại ERI STORE. Không lưu mật khẩu."));
+  form.append(element("p","small","Giữ đăng nhập khi mở lại SHOP MOD BY ERI NGUYỄN. Không lưu mật khẩu."));
   const failure=element("p","form-error");failure.setAttribute("role","alert");
   const actions=element("div","dialog-actions");
   const submit=element("button","btn primary",register?"Tạo tài khoản":"Đăng nhập");submit.type="submit";
@@ -256,7 +321,7 @@ async function buy(id,kind){
 // service worker. The bearer token never appears in an URL or download link.
 async function prepareNativeDownload(order){
   if(!("serviceWorker" in navigator) || !("MessageChannel" in window)){
-    throw new Error("Trình duyệt chưa hỗ trợ tải file lớn. Hãy mở ERI STORE bằng Safari mới nhất.");
+    throw new Error("Trình duyệt chưa hỗ trợ tải file lớn. Hãy mở SHOP MOD BY ERI NGUYỄN bằng Safari mới nhất.");
   }
   const ready=await Promise.race([
     navigator.serviceWorker.ready,
@@ -270,7 +335,7 @@ async function prepareNativeDownload(order){
     ]);
   }
   const controller=navigator.serviceWorker.controller;
-  if(!controller)throw new Error("Hãy làm mới trang ERI STORE một lần để bật tính năng tải file.");
+  if(!controller)throw new Error("Hãy làm mới trang SHOP MOD BY ERI NGUYỄN một lần để bật tính năng tải file.");
   return await new Promise((resolve,reject)=>{
     const channel=new MessageChannel();
     const timer=setTimeout(()=>{
@@ -317,7 +382,7 @@ async function downloadDelivery(order){
     link.href=localPath;
     link.download=order.delivery.filename||"eri-delivery";
     root.append(link);
-    root.append(element("p","small","Giữ ERI STORE đang mở trong lúc tải. Nếu iPhone hỏi xác nhận tải xuống, hãy chọn Tải về. Nếu không thấy file, kiểm tra ứng dụng Tệp → Tải về."));
+    root.append(element("p","small","Giữ SHOP MOD BY ERI NGUYỄN đang mở trong lúc tải. Nếu iPhone hỏi xác nhận tải xuống, hãy chọn Tải về. Nếu không thấy file, kiểm tra ứng dụng Tệp → Tải về."));
     root.append(button("Đóng","btn outline",closeDialog));
     showBanner("");
   }catch(err){showBanner(errorMessage(err))}
@@ -402,7 +467,7 @@ async function loadOrders(){
 function showProfile(){
   const root=$("profile");root.replaceChildren();
   if(!state.buyer){
-    root.append(element("h3",null,"Đăng nhập ERI STORE"));
+    root.append(element("h3",null,"Đăng nhập SHOP MOD BY ERI NGUYỄN"));
     root.append(element("p",null,"Mỗi khách có tài khoản và lịch sử đơn riêng. Đăng ký miễn phí để mua hàng."));
     root.append(button("Đăng nhập","btn primary",()=>authModal()));
     root.append(" ");
@@ -433,6 +498,10 @@ document.addEventListener("DOMContentLoaded",()=>{
   $("explore").addEventListener("click",()=>{$("store").scrollIntoView({behavior:"smooth"})});
   $("hero-orders").addEventListener("click",()=>setView("orders"));
   $("reload").addEventListener("click",loadCatalog);
+  document.querySelectorAll("[data-mod-mode]").forEach(tab=>tab.addEventListener("click",()=>{
+    state.modTab=tab.dataset.modMode==="free"?"free":"paid";
+    if(state.category==="mod")renderCatalog();
+  }));
   $("refresh-orders").addEventListener("click",loadOrders);
   document.querySelectorAll("[data-kind]").forEach(tab=>tab.addEventListener("click",()=>{
     state.category=tab.dataset.kind;
