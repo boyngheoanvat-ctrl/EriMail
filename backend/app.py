@@ -640,6 +640,11 @@ def admin_orders():
 from signing_api import router as signing_router
 app.include_router(signing_router)
 
+# Customer tools: inspect IPA ZIP/FairPlay status, decrypt password-protected ZIPs
+# and re-sign iOS IPAs with a customer-supplied P12/provisioning profile.
+from ipa_tools import register_ipa_tools
+register_ipa_tools(app, require_customer)
+
 
 # Private macOS signing service. Deploy this API on a macOS host with Apple codesign.
 # Never expose this route without a strong per-client token and HTTPS termination.
