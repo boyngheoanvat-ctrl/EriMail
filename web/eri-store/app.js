@@ -8,7 +8,7 @@ const KINDS={
 const $=id=>document.getElementById(id);
 const TOKEN_KEY="eri_store_buyer_token";
 const state={
-  category:"mod",modTab:"paid",view:"store",items:[],
+  category:"mod",modTab:"paid",modPlatform:"ipa",view:"store",items:[],
   token:sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||"",
   remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null,registrationMinName:2
 };
@@ -159,15 +159,23 @@ function renderCatalog(){
   grid.replaceChildren();
   const category=state.category;
   const items=category==="mod"
-    ?state.items.filter(item=>state.modTab==="free" ? Number(item.price_vnd)===0 : Number(item.price_vnd)>0)
+    ?state.items.filter(item=>
+      (state.modTab==="free" ? Number(item.price_vnd)===0 : Number(item.price_vnd)>0) &&
+      (item.platform==="apk"?"apk":"ipa")===state.modPlatform)
     :state.items;
+  document.querySelectorAll("[data-mod-platform]").forEach(tab=>{
+    const active=tab.dataset.modPlatform===state.modPlatform;
+    tab.classList.toggle("selected",active);
+    tab.setAttribute("aria-selected",String(active));
+  });
   document.querySelectorAll("[data-mod-mode]").forEach(tab=>{
     const active=tab.dataset.modMode===state.modTab;
     tab.classList.toggle("selected",active);
     tab.setAttribute("aria-selected",String(active));
   });
   $("catalog-message").textContent=items.length+" sản phẩm · "+
-    (category==="mod" ? (state.modTab==="free" ? "Mod Game FREE" : "Mod Game MUA") : KINDS[category].title);
+    (category==="mod" ? (state.modTab==="free" ? "Mod Game FREE" : "Mod Game BÁN")+
+      " · "+state.modPlatform.toUpperCase() : KINDS[category].title);
   if(!items.length){
     grid.append(element("div","empty",category==="mod"
       ? (state.modTab==="free" ? "Chưa có Mod Game miễn phí." : "Chưa có Mod Game trả phí.")
@@ -176,15 +184,17 @@ function renderCatalog(){
   }
   for(const item of items){
     const free=category==="mod"&&Number(item.price_vnd)===0;
+    const platform=item.platform==="apk"?"APK":"IPA";
     const card=element("article","product product--"+category);
     const visual=element("div","product-art");
     visual.append(shopIcon(category==="mod"?"gamepad":category==="ai"?"sparkles":"shield"));
     const chip=element("span","product-chip"+(free?" is-free":""),free?"FREE":category==="mod"?"MOD GAME":category==="ai"?"AI PLUS":"CHỨNG CHỈ");
     visual.append(chip);
+    if(category==="mod")visual.append(element("span","product-chip",platform));
     const body=element("div","product-body");
     body.append(element("h3",null,item.name));
     body.append(element("p","product-desc",item.description||"Sản phẩm số từ SHOP MOD BY ERI NGUYỄN"));
-    const extraText=category==="mod"?(item.version?"Phiên bản "+item.version:"Sản phẩm IPA")
+    const extraText=category==="mod"?(item.version?"Phiên bản "+item.version+" · "+platform:"Sản phẩm "+platform)
       :category==="certificate"?(item.issuer||"Chứng chỉ iOS"):"Sản phẩm số";
     const extra=element("div","product-info");
     extra.append(shopIcon(category==="mod"?"package":category==="certificate"?"shield":"sparkles"),document.createTextNode(extraText));
@@ -195,13 +205,13 @@ function renderCatalog(){
       const expected="/api/v1/mods/"+item.id+"/download";
       if(item.download_path===expected && Number.isSafeInteger(Number(item.id)) && Number(item.id)>0){
         const link=element("a","btn primary");
-        link.append(shopIcon("download"),document.createTextNode("Tải IPA"));
+        link.append(shopIcon("download"),document.createTextNode("Tải "+platform));
         link.href=API+expected;
         link.rel="noreferrer";
-        link.setAttribute("aria-label","Tải IPA miễn phí: "+item.name);
+        link.setAttribute("aria-label","Tải "+platform+" miễn phí: "+item.name);
         footer.append(link);
       }else{
-        footer.append(element("span","small","Tệp đang cập nhật"));
+        footer.append(element("span","small","Tệp chưa sẵn sàng · Liên hệ shop để tải lại"));
       }
     }else{
       const action=button("Mua ngay","btn primary",()=>buy(item.id,category));
@@ -219,6 +229,8 @@ async function loadCatalog(){
   if(udidPanel)udidPanel.classList.toggle("hidden",category!=="certificate");
   const modTabs=$("mod-subtabs");
   if(modTabs)modTabs.classList.toggle("hidden",category!=="mod");
+  const platformTabs=$("mod-platform-tabs");
+  if(platformTabs)platformTabs.classList.toggle("hidden",category!=="mod");
   $("catalog-message").textContent="Đang tải "+KINDS[category].title+"...";
   const grid=$("products");
   grid.replaceChildren(element("div","placeholder"),element("div","placeholder"),element("div","placeholder"));
@@ -500,6 +512,10 @@ document.addEventListener("DOMContentLoaded",()=>{
   $("reload").addEventListener("click",loadCatalog);
   document.querySelectorAll("[data-mod-mode]").forEach(tab=>tab.addEventListener("click",()=>{
     state.modTab=tab.dataset.modMode==="free"?"free":"paid";
+    if(state.category==="mod")renderCatalog();
+  }));
+  document.querySelectorAll("[data-mod-platform]").forEach(tab=>tab.addEventListener("click",()=>{
+    state.modPlatform=tab.dataset.modPlatform==="apk"?"apk":"ipa";
     if(state.category==="mod")renderCatalog();
   }));
   $("refresh-orders").addEventListener("click",loadOrders);
