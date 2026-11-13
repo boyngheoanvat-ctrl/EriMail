@@ -442,6 +442,9 @@ jobs:
           grep -q 'data-mod-mode="free"' web/eri-store/index.html
           grep -q 'data-mod-mode="paid"' web/eri-store/index.html
           grep -q 'free?"FREE":money(item.price_vnd)' web/eri-store/app.js
+          grep -q 'ensureFreeModSupported' apps/ERIAdmin/ERIAdminApp.swift
+          grep -q 'serverDetail(_ body: Data)' apps/ERIAdmin/ERIAdminApp.swift
+          grep -q 'case httpDetail(Int, String)' apps/ERIAdmin/ERIAdminApp.swift
           grep -q '/api/v1/mods/' web/eri-store/app.js
           node --check web/eri-store/udid.js
           grep -q 'id="certificate-udid"' web/eri-store/index.html

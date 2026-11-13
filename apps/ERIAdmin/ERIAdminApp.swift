@@ -72,14 +72,63 @@ private final class AdminSession: ObservableObject {
         if data != nil { req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         return req
     }
+    // Preserve FastAPI's validation details; "HTTP 422" alone is not actionable.
+    private func serverDetail(_ body: Data) -> String {
+        guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let detail = obj["detail"] else {
+            return ""
+        }
+        if let message = detail as? String {
+            return String(message.prefix(400))
+        }
+        if let errors = detail as? [[String: Any]] {
+            let descriptions = errors.prefix(3).compactMap { issue -> String? in
+                let path = (issue["loc"] as? [Any])?.last.map { String(describing: $0) } ?? "thông tin"
+                let fieldLabels = ["price_vnd": "Giá bán", "authorized": "Quyền phân phối",
+                                   "name": "Tên sản phẩm", "filename": "Tên tệp",
+                                   "size_bytes": "Kích thước tệp", "kind": "Loại sản phẩm",
+                                   "description": "Mô tả", "issuer": "Nhà phát hành"]
+                let label = fieldLabels[path] ?? path
+                let msg = String((issue["msg"] as? String ?? "Không hợp lệ").prefix(140))
+                if path == "price_vnd" && msg.lowercased().contains("greater than 0") {
+                    return "Máy chủ chỉ chấp nhận giá lớn hơn 0đ (chưa hỗ trợ FREE)"
+                }
+                return label + ": " + msg
+            }
+            return descriptions.joined(separator: "; ")
+        }
+        return ""
+    }
+
     func send(_ path: String, method: String = "GET", data: Data? = nil) async throws -> Data {
         let (body, response) = try await URLSession.shared.data(for: request(path, method: method, data: data))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200...299).contains(status) else {
             if status == 401 || status == 403 { throw AdminError.invalidKey }
+            let detail = serverDetail(body)
+            if !detail.isEmpty { throw AdminError.httpDetail(status, detail) }
             throw AdminError.http(status)
         }
         return body
+    }
+
+    func ensureFreeModSupported() async throws {
+        // The live API may still reject price_vnd=0 even when the app UI has FREE.
+        // Fail BEFORE starting a 320MB+ upload and never silently turn FREE into paid.
+        let schemaData = try await send("/openapi.json")
+        guard let schema = try? JSONSerialization.jsonObject(with: schemaData) as? [String: Any],
+              let components = schema["components"] as? [String: Any],
+              let schemas = components["schemas"] as? [String: Any],
+              let upload = schemas["EriChunkStart"] as? [String: Any],
+              let properties = upload["properties"] as? [String: Any],
+              let price = properties["price_vnd"] as? [String: Any],
+              let minimum = price["minimum"] as? NSNumber,
+              minimum.doubleValue == 0,
+              price["exclusiveMinimum"] == nil,
+              let routes = schema["paths"] as? [String: Any],
+              routes["/api/v1/mods/{product_id}/download"] != nil else {
+            throw AdminError.freeNotSupported
+        }
     }
 
 
@@ -170,6 +219,9 @@ private final class AdminSession: ObservableObject {
         guard let price = Int(values["price_vnd"] ?? ""),
               price >= 0, (kind == "ipa" || price > 0) else {
             throw URLError(.badURL)
+        }
+        if kind == "ipa" && price == 0 {
+            try await ensureFreeModSupported()
         }
         let payload: [String: Any] = [
             "kind": kind,
@@ -302,9 +354,15 @@ private final class AdminSession: ObservableObject {
 private enum AdminError: LocalizedError {
     case invalidKey
     case http(Int)
+    case httpDetail(Int, String)
+    case freeNotSupported
     var errorDescription: String? {
         switch self {
         case .invalidKey: return "Khóa quản trị không đúng hoặc đã hết hiệu lực."
+        case .freeNotSupported:
+            return "API trên Render chưa hỗ trợ Mod Game FREE. Không thể đăng miễn phí khi giá là 0đ. Hãy dùng MUA với giá lớn hơn 0đ hoặc nâng backend sau khi bảo toàn dữ liệu."
+        case .httpDetail(let status, let detail):
+            return "HTTP \(status): " + detail
         case .http(let status):
             if status == 404 {
                 return "HTTP 404: Máy chủ chưa có tính năng này. Hãy cập nhật backend trên Render."
@@ -1277,7 +1335,8 @@ private struct AdminUploadView: View {
             selectedFile = nil
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         } catch {
-            status = "Tạm ngắt upload: " + error.localizedDescription + ". Giữ tệp đã chọn và bấm lại để tiếp tục."
+            status = "Không thể tải lên: " + error.localizedDescription +
+                ". Tệp IPA đã chọn vẫn được giữ trong ERI ADMIN."
         }
     }
 }
