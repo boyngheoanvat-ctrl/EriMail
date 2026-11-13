@@ -1,0 +1,31 @@
+name: ERI Login Native Dylib
+on:
+  push:
+    branches:
+      - eri-login-dylib-injector
+    paths:
+      - 'ios/ERILoginDylib/**'
+      - '.github/workflows/build-eri-login-dylib.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile arm64 iOS login injection module
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build
+          xcrun clang -arch arm64 -isysroot "$SDK" -miphoneos-version-min=16.0 \
+            -fobjc-arc -O2 -dynamiclib -framework UIKit -framework Foundation -framework Security \
+            -Wl,-install_name,@executable_path/Frameworks/ERILogin.dylib \
+            ios/ERILoginDylib/ERILogin.m -o build/ERILogin.dylib
+          lipo -info build/ERILogin.dylib
+          xcrun otool -D build/ERILogin.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERILogin-native-dylib-arm64
+          path: build/ERILogin.dylib
+          retention-days: 30
