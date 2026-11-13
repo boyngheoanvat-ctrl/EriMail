@@ -16,6 +16,7 @@ private let server = "https://eri-api-dag8.onrender.com"
 
 @main
 struct ERIAdminApp: App {
+    @UIApplicationDelegateAdaptor(ERIBackgroundAppDelegate.self) private var appDelegate
     var body: some Scene { WindowGroup { AdminHome().frame(maxWidth: .infinity, maxHeight: .infinity) } }
 }
 
@@ -1308,6 +1309,7 @@ private struct ERIDocumentPicker: UIViewControllerRepresentable {
 
 private struct AdminUploadView: View {
     @EnvironmentObject private var session: AdminSession
+    @ObservedObject private var backgroundUploader = ERIBackgroundUploader.shared
     let kind: UploadKind
     @State private var name = ""
     @State private var issuer = ""
@@ -1367,18 +1369,28 @@ private struct AdminUploadView: View {
                 }
                 Text("Chọn tệp trong Files; hệ thống cho phép duyệt mọi định dạng và ứng dụng chỉ chấp nhận: " + kind.accepted.map { "." + $0 }.joined(separator: ", "))
                     .font(.footnote).foregroundStyle(.secondary)
-                if working {
-                    ProgressView(value: progress)
-                    Text("Đã gửi " + String(format: "%.1f", progress * 100) + "% · Khi mất mạng, bấm lại để tiếp tục")
+                if working || backgroundUploader.pending {
+                    let displayed = backgroundUploader.pending ? backgroundUploader.progress : progress
+                    ProgressView(value: displayed)
+                    Text("Tiến độ tải: " + String(format: "%.1f", displayed * 100) + "%")
                         .font(.footnote).foregroundStyle(.secondary)
-                    if !uploadPhase.isEmpty {
+                    if backgroundUploader.pending {
+                        Text(backgroundUploader.status).font(.footnote)
+                        Text("Bạn có thể khóa màn hình hoặc mở ứng dụng khác. Đừng vuốt tắt hẳn ERI ADMIN trong bộ chuyển ứng dụng.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if !backgroundUploader.active {
+                            Button("Tiếp tục upload") { backgroundUploader.retry() }
+                        }
+                    } else if !uploadPhase.isEmpty {
                         Text(uploadPhase).font(.footnote).foregroundStyle(.secondary)
                     }
+                } else if !backgroundUploader.status.isEmpty {
+                    Text(backgroundUploader.status).font(.footnote)
                 }
-                Button(working ? "Đang tải " + String(format: "%.1f", progress * 100) + "%" : "Cập nhật lên máy chủ") {
+                Button(working ? "Đang chuẩn bị file..." : "Cập nhật lên máy chủ") {
                     Task { await publish() }
                 }
-                .disabled(!valid || working || importing)
+                .disabled(!valid || working || importing || backgroundUploader.pending)
                 if !status.isEmpty { Text(status).font(.footnote) }
             }
             Section {
@@ -1442,32 +1454,51 @@ private struct AdminUploadView: View {
         }
     }
     private func publish() async {
-        guard let file = selectedFile else { return }
+        guard let file = selectedFile, !backgroundUploader.pending else { return }
         working = true
         progress = 0
         uploadPhase = "Đang kiểm tra kết nối..."
         defer { working = false; uploadPhase = "" }
-        let fields: [(String, String)] = [
-            ("name", name.trimmingCharacters(in: .whitespacesAndNewlines)),
-            ("price_vnd", (kind == .ipa && modIsFree) ? "0" : price),
-            ("issuer", issuer),
-            ("description", description),
-            ("authorized", authorized ? "true" : "false")
-        ]
+        let amount = (kind == .ipa && modIsFree) ? 0 : (Int(price) ?? -1)
         do {
-            try await session.uploadFile(kind: kind.rawValue, file: file,
-                                         fields: fields, maxBytes: kind.maxBytes,
-                                         onStatus: { phase in uploadPhase = phase },
-                                         onProgress: { ratio in
-                progress = ratio
-                status = "Đang tải lên máy chủ: " + String(format: "%.1f", ratio * 100) + "%"
-            })
-            status = "Đã tải tệp và cập nhật sản phẩm thành công."
+            if kind == .ipa && amount == 0 {
+                try await session.ensureFreeModSupported()
+            }
+            let info = try FileManager.default.attributesOfItem(atPath: file.path)
+            guard let number = info[.size] as? NSNumber,
+                  number.intValue > 0 && number.intValue <= kind.maxBytes else {
+                throw URLError(.dataLengthExceedsMaximum)
+            }
+            let size = number.intValue
+            let payload: [String: Any] = [
+                "kind": kind.rawValue,
+                "filename": file.lastPathComponent,
+                "size_bytes": size,
+                "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
+                "description": description,
+                "price_vnd": amount,
+                "issuer": issuer,
+                "authorized": authorized,
+                "fast": true
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let response = try await session.send("/api/v1/admin/upload-sessions",
+                                                  method: "POST", data: data)
+            guard let begin = try JSONSerialization.jsonObject(with: response) as? [String: Any],
+                  let uploadID = begin["upload_id"] as? String,
+                  let chunkBytes = begin["chunk_bytes"] as? Int,
+                  begin["fast"] as? Bool == true else {
+                throw URLError(.badServerResponse)
+            }
+            uploadPhase = "Đang chuẩn bị file để iOS tải trong nền..."
+            try await backgroundUploader.start(source: file, uploadID: uploadID,
+                                               size: size, chunkBytes: chunkBytes)
+            status = "Đã giao cho iOS tự tải nền. Bạn có thể rời ứng dụng hoặc khóa màn hình."
             selectedFile = nil
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         } catch {
-            status = "Không thể tải lên: " + error.localizedDescription +
-                ". Tệp IPA đã chọn vẫn được giữ trong ERI ADMIN."
+            status = "Không thể bắt đầu tải nền: " + error.localizedDescription +
+                ". Tệp đã chọn vẫn được giữ trong ERI ADMIN."
         }
     }
 }
