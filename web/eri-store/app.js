@@ -133,7 +133,7 @@ function setView(view){
   if(!["store","orders","account"].includes(view))view="store";
   state.view=view;
   $("store").classList.toggle("hidden",view!=="store");
-  $("ipa-tools")?.classList.toggle("hidden",view!=="store");
+  $("ipa-tools")?.classList.toggle("hidden",view!=="store" || !["decrypt","sign"].includes(state.category));
   $("hero").classList.toggle("hidden",view!=="store");
   document.querySelector(".features").classList.toggle("hidden",view!=="store");
   $("orders-view").classList.toggle("hidden",view!=="orders");
@@ -226,6 +226,19 @@ function renderCatalog(){
 }
 async function loadCatalog(){
   const category=state.category;
+  const toolSelected=category==="decrypt" || category==="sign";
+  $("catalog-heading")?.classList.toggle("hidden",toolSelected);
+  $("products-toolbar")?.classList.toggle("hidden",toolSelected);
+  $("products")?.classList.toggle("hidden",toolSelected);
+  $("ipa-tools")?.classList.toggle("hidden",!toolSelected || state.view!=="store");
+  $("ipa-decrypt-panel")?.classList.toggle("hidden",category!=="decrypt");
+  $("ipa-sign-panel")?.classList.toggle("hidden",category!=="sign");
+  if(toolSelected){
+    $("mod-subtabs")?.classList.add("hidden");
+    $("mod-platform-tabs")?.classList.add("hidden");
+    $("certificate-udid")?.classList.add("hidden");
+    return;
+  }
   const udidPanel=$("certificate-udid");
   if(udidPanel)udidPanel.classList.toggle("hidden",category!=="certificate");
   const modTabs=$("mod-subtabs");
@@ -526,6 +539,14 @@ document.addEventListener("DOMContentLoaded",()=>{
     loadCatalog();
   }));
   document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));
+  if(location.hash==="#ipa-tools"){
+    state.category="decrypt";
+    document.querySelectorAll("[data-kind]").forEach(tab=>{
+      const active=tab.dataset.kind==="decrypt";
+      tab.classList.toggle("selected",active);
+      tab.setAttribute("aria-selected",String(active));
+    });
+  }
   updateHeader();loadCatalog();restoreSession();syncRegistrationLimits();
   if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js").catch(()=>{});
 });
