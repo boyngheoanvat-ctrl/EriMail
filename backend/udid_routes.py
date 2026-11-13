@@ -146,7 +146,7 @@ def install_udid_routes(app, connection, require_customer, require_admin):
             )
         return {
             "scan_token": token, "expires_in_seconds": SCAN_TTL_MINUTES * 60,
-            "profile_url": API_ORIGIN + "/api/v1/cert-udid/profile/" + token,
+            "profile_url": API_ORIGIN + "/api/v1/cert-udid/profile/" + token + "/ERI-STORE-UDID.mobileconfig",
             "qr_url": API_ORIGIN + "/api/v1/cert-udid/qr/" + token,
             "order_id": order_id
         }
@@ -183,6 +183,7 @@ def install_udid_routes(app, connection, require_customer, require_admin):
         return {"complete": False}
 
     @app.get("/api/v1/cert-udid/profile/{token}")
+    @app.get("/api/v1/cert-udid/profile/{token}/ERI-STORE-UDID.mobileconfig")
     def download_profile(token: str):
         row = _lookup_session(token)
         if row["completed_at"]:
@@ -208,7 +209,9 @@ def install_udid_routes(app, connection, require_customer, require_admin):
             plistlib.dumps(profile, fmt=plistlib.FMT_XML),
             media_type="application/x-apple-aspen-config",
             headers={
-                "Content-Disposition": 'attachment; filename="ERI-STORE-UDID.mobileconfig"',
+                # Safari recognizes the correct profile MIME type on a normal
+                # top-level navigation. Avoid forcing an attachment download:
+                # some iOS in-app browsers/PWAs save it as a generic file instead.
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
                 "Referrer-Policy": "no-referrer"
@@ -220,7 +223,7 @@ def install_udid_routes(app, connection, require_customer, require_admin):
         _lookup_session(token)
         try:
             import segno
-            qr = segno.make(API_ORIGIN + "/api/v1/cert-udid/profile/" + token)
+            qr = segno.make(API_ORIGIN + "/api/v1/cert-udid/profile/" + token + "/ERI-STORE-UDID.mobileconfig")
             data = io.BytesIO()
             qr.save(data, kind="svg", scale=5, border=2)
             return Response(data.getvalue(), media_type="image/svg+xml", headers={

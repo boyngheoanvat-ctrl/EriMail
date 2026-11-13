@@ -164,6 +164,15 @@ jobs:
           profile_path=urlparse(new_scan.json()["profile_url"]).path
           profile=client.get(profile_path)
           assert profile.status_code == 200,profile.text
+          # iOS Safari should navigate to a .mobileconfig resource with the
+          # Apple profile MIME, not a forced generic attachment download.
+          assert profile_path.endswith("/ERI-STORE-UDID.mobileconfig")
+          assert profile.headers["content-type"].startswith("application/x-apple-aspen-config")
+          assert "content-disposition" not in profile.headers
+          assert profile.headers["cache-control"] == "no-store"
+          legacy=client.get("/api/v1/cert-udid/profile/"+token)
+          assert legacy.status_code == 200,legacy.text
+          assert legacy.headers["content-type"].startswith("application/x-apple-aspen-config")
           p=plistlib.loads(profile.content)
           assert p["PayloadType"] == "Profile Service"
           assert p["PayloadContent"]["DeviceAttributes"] == ["UDID"]
@@ -372,6 +381,9 @@ jobs:
           grep -q 'id="certificate-udid"' web/eri-store/index.html
           grep -q 'id="start-udid"' web/eri-store/index.html
           grep -q 'src="/udid.js"' web/eri-store/index.html
+          grep -q 'udidHandleProfileReturn' web/eri-store/udid.js
+          grep -q 'udidStandalone' web/eri-store/udid.js
+          grep -q 'udidRemember' web/eri-store/udid.js
           grep -q 'if(udidPanel)udidPanel.classList.toggle' web/eri-store/app.js
           test -s backend/udid_routes.py
           test -s backend/apple_iphone_device_ca.pem
