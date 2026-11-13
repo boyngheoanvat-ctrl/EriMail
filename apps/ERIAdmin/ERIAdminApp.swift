@@ -1354,7 +1354,7 @@ private struct AdminUploadView: View {
                 }
                 TextField("Mô tả sản phẩm", text: $description, axis: .vertical)
                     .lineLimit(2...5)
-                if kind != .ipa || !modIsFree {
+                if (kind != .ipa && kind != .apk) || !modIsFree {
                     TextField((kind == .ipa || kind == .apk) ? "Giá bán (VND)" : "Giá vốn (VND)", text: $price)
                         .keyboardType(.numberPad)
                 }
