@@ -12,6 +12,8 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -215,20 +217,35 @@ def register_signing_jobs(router: APIRouter, require_customer, inspect, validate
             if not SIGN_SLOTS.acquire(blocking=False):
                 raise RuntimeError("Máy chủ đang ký IPA khác, hãy thử lại")
             try:
-                import ipasign
                 inspection = inspect(source)
                 if inspection["zip_password_protected"] or inspection["fairplay_encrypted"] is True:
                     raise ValueError("IPA còn mã hóa không thể ký lại trực tiếp")
                 output = folder / "signed.ipa"
-                signed = ipasign.Key(str(folder / "cert.p12"),
-                                     str(folder / "profile.mobileprovision"),
-                                     password).sign(str(source), str(output))
+                worker = Path(__file__).with_name("ipa_sign_worker.py")
+                # Protect the API process from an oversized/corrupt IPA crashing
+                # the signer. Never pass the password through argv or logs.
+                try:
+                    result = subprocess.run(
+                        [sys.executable, str(worker), str(source),
+                         str(folder / "cert.p12"),
+                         str(folder / "profile.mobileprovision"), str(output)],
+                        input=password + "\n", text=True,
+                        capture_output=True, timeout=600, check=False
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    raise RuntimeError("Signing worker failed or timed out")
+                if result.returncode != 0:
+                    raise RuntimeError("Signing worker exited before completing")
+                try:
+                    signed_bundle = json.loads(result.stdout)["bundle_id"]
+                except (ValueError, KeyError):
+                    raise RuntimeError("Signing worker did not return a bundle ID")
                 if not output.is_file() or output.stat().st_size == 0:
                     raise ValueError("Bộ ký IPA không tạo ra kết quả")
                 with zipfile.ZipFile(output) as archive:
                     validate(archive)
                 metadata = details(output)
-                if metadata["bundle_id"] != str(signed.bundle_id):
+                if metadata["bundle_id"] != signed_bundle:
                     raise ValueError("Bundle ID không khớp với kết quả ký")
                 result = register_output(output, metadata)
                 with LOCK:
