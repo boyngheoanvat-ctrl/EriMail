@@ -402,13 +402,6 @@ private struct AdminHome: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("ERI LOGIN — Key / Tài khoản") {
-                    NavigationLink {
-                        ERILicenseAdminView()
-                    } label: {
-                        Label("Tạo key, gia hạn, khóa/mở khóa", systemImage: "key.horizontal.fill")
-                    }
-                }
                 Section("IPA Mod Game") {
                     NavigationLink {
                         AdminUploadView(kind: .ipa).environmentObject(session)
