@@ -78,16 +78,18 @@ with tempfile.TemporaryDirectory(prefix="eri-job-ci-") as root:
         assert again.status_code == 200 and again.json()["duplicate"] is True
     assert client.get(path, headers=headers).json()["uploaded_bytes"] == len(ipa)
 
-    class FakeSigner:
-        def __init__(self, certificate, provision, password):
-            assert Path(certificate).read_bytes() == b"test-p12"
-            assert Path(provision).read_bytes() == b"test-provision"
-            assert password == "test-password"
-        def sign(self, source, output):
-            shutil.copyfile(source, output)
-            return type("SignedResult", (), {"bundle_id": "com.eri.signingtest"})()
+    def fake_subprocess(args, *, input, text, capture_output, timeout, check):
+        assert args[0] and args[1].endswith("ipa_sign_worker.py")
+        assert Path(args[3]).read_bytes() == b"test-p12"
+        assert Path(args[4]).read_bytes() == b"test-provision"
+        assert input == "test-password\n"
+        shutil.copyfile(args[2], args[5])
+        return type("ProcessResult", (), {
+            "returncode": 0,
+            "stdout": '{"bundle_id": "com.eri.signingtest"}'
+        })()
 
-    with patch.object(ipasign, "Key", FakeSigner):
+    with patch("signing_jobs.subprocess.run", side_effect=fake_subprocess):
         started = client.post(path + "/start", headers=headers, files={
             "p12": ("cert.p12", b"test-p12", "application/octet-stream"),
             "mobileprovision": ("cert.mobileprovision", b"test-provision", "application/octet-stream")
