@@ -30,6 +30,7 @@ MAX_IPA = 512 * 1024 * 1024
 MAX_CERT = 10 * 1024 * 1024
 MAX_EXPANDED = 2 * 1024 * 1024 * 1024
 TICKET_TTL = 15 * 60
+SIGNED_TICKET_TTL = 60 * 60  # Large OTA installs may need several range requests.
 PENDING_LIMIT = 3
 PUBLIC_HTTPS = "https://eri-api-dag8.onrender.com"
 _tickets = {}
@@ -240,14 +241,14 @@ def _register_signed_output(file: Path, metadata: dict):
         dest = Path(tempfile.gettempdir()) / ("eri-signed-" + token + ".ipa")
         os.replace(file, dest)
         os.chmod(dest, 0o600)
-        _signed_tickets[token] = (str(dest), time.time() + TICKET_TTL, metadata)
+        _signed_tickets[token] = (str(dest), time.time() + SIGNED_TICKET_TTL, metadata)
     base_path = "/api/v1/tools/ipa/install/" + token
     manifest_url = PUBLIC_HTTPS + base_path + "/manifest.plist"
     return {
         "download_path": base_path + "/app.ipa",
         "manifest_path": base_path + "/manifest.plist",
         "install_url": "itms-services://?action=download-manifest&url=" + quote(manifest_url, safe=""),
-        "expires_in_seconds": TICKET_TTL,
+        "expires_in_seconds": SIGNED_TICKET_TTL,
     }
 
 
