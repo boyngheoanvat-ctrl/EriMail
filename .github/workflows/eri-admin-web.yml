@@ -245,6 +245,72 @@ jobs:
           assert old["amount_vnd"] == 260000 and old["status"] == "fulfilled"
           assert client.get("/api/v1/auth/me", headers=other_auth).status_code == 200
           print("Admin customer deletion: guarded, anonymized, sessions revoked: OK")
+          # Full account purge: delete profile, ALL orders, delivered files
+          # and login sessions, without affecting any other customer.
+          from app import UPLOAD_DIR, connection
+          users=client.get("/api/v1/admin/customers",headers=h)
+          assert users.status_code == 200,users.text
+          by_username={x["username"]:x for x in users.json()["items"]}
+          assert {"testbuyer","differentbuyer"} <= set(by_username)
+          first_id=by_username["testbuyer"]["id"]
+          second_id=by_username["differentbuyer"]["id"]
+          assert by_username["testbuyer"]["order_count"] == 3
+          assert client.get("/api/v1/admin/customers").status_code == 403
+          assert client.request("DELETE",f"/api/v1/admin/customers/{first_id}",json={
+              "confirm_username":"testbuyer"
+          }).status_code == 403
+          no_confirm=client.request("DELETE",f"/api/v1/admin/customers/{first_id}",headers=h)
+          assert no_confirm.status_code == 422
+          wrong=client.request("DELETE",f"/api/v1/admin/customers/{first_id}",headers=h,json={
+              "confirm_username":"differentbuyer"
+          })
+          assert wrong.status_code == 422,wrong.text
+          assert client.get("/api/v1/auth/me",headers=auth).status_code == 200
+
+          with connection() as db:
+              delivery_record=db.execute("SELECT storage_name FROM order_deliveries WHERE order_id=?",
+                                         (order_id,)).fetchone()
+          assert delivery_record is not None
+          delivery_file=UPLOAD_DIR/delivery_record["storage_name"]
+          assert delivery_file.is_file()
+          purge=client.request("DELETE",f"/api/v1/admin/customers/{first_id}",headers=h,json={
+              "confirm_username":"testbuyer"
+          })
+          assert purge.status_code == 200,purge.text
+          assert purge.json()["deleted_orders"] == 3
+          assert purge.json()["deleted_delivery_files"] == 1
+          assert not delivery_file.exists()
+          assert client.get("/api/v1/auth/me",headers=auth).status_code == 401
+          assert client.get("/api/v1/me/orders",headers=auth).status_code == 401
+          assert client.get("/api/v1/orders/"+order_id,headers=auth).status_code == 401
+          assert client.get("/api/v1/me/orders/"+order_id+"/delivery",headers=auth).status_code == 401
+          assert client.get("/api/v1/auth/me",headers=other_auth).status_code == 200
+          assert client.get("/api/v1/admin/customers",headers=h).json()["items"][0]["username"] == "differentbuyer"
+          with connection() as db:
+              assert db.execute("SELECT COUNT(*) FROM customers WHERE id=?",(first_id,)).fetchone()[0] == 0
+              assert db.execute("SELECT COUNT(*) FROM customer_sessions WHERE customer_id=?",
+                                (first_id,)).fetchone()[0] == 0
+              assert db.execute("SELECT COUNT(*) FROM orders WHERE customer_id=?",
+                                (first_id,)).fetchone()[0] == 0
+              assert db.execute("SELECT COUNT(*) FROM orders WHERE id=?",(order_id,)).fetchone()[0] == 0
+              assert db.execute("SELECT COUNT(*) FROM order_deliveries WHERE order_id=?",
+                                (order_id,)).fetchone()[0] == 0
+          # Even pending orders are deleted, not anonymized.
+          pending=client.post("/api/v1/orders",headers=other_auth,json={
+              "kind":"mod","product_id":m.json()["id"]
+          })
+          assert pending.status_code == 201,pending.text
+          wipe_pending=client.request("DELETE",f"/api/v1/admin/customers/{second_id}",headers=h,json={
+              "confirm_username":"differentbuyer"
+          })
+          assert wipe_pending.status_code == 200,wipe_pending.text
+          assert wipe_pending.json()["deleted_orders"] == 1
+          assert client.get("/api/v1/auth/me",headers=other_auth).status_code == 401
+          with connection() as db:
+              assert db.execute("SELECT COUNT(*) FROM orders WHERE id=?",
+                                (pending.json()["id"],)).fetchone()[0] == 0
+              assert db.execute("SELECT COUNT(*) FROM customers").fetchone()[0] == 0
+          print("Full account purge, all order statuses, deleted files, session revocation and isolation: OK")
           print("Private paid-order file delivery and buyer isolation: OK")
           print("Mod Game original price; AI and certificate 30% markup: OK")
           PY

@@ -442,7 +442,6 @@ private struct ManagedCustomer: Decodable, Identifiable {
     let paid_count: Int
     let fulfilled_count: Int
 
-    var hasOpenOrders: Bool { pending_count > 0 || paid_count > 0 }
 }
 
 private struct ManagedCustomerEnvelope: Decodable {
@@ -470,9 +469,9 @@ private struct CustomerManagementView: View {
     var body: some View {
         List {
             Section {
-                Text("Quản lý khách đã đăng ký ERI STORE. Xóa tài khoản sẽ đăng xuất tất cả phiên của khách và xóa thông tin cá nhân. Lịch sử giao dịch chỉ giữ mã đơn, số tiền và trạng thái.")
+                Text("Chọn một tài khoản để xóa vĩnh viễn toàn bộ dữ liệu thuộc tài khoản đó: thông tin đăng ký, phiên đăng nhập, đơn hàng mọi trạng thái và file đã giao.")
                     .font(.footnote).foregroundStyle(.secondary)
-                Text("Tài khoản còn đơn đang chờ thanh toán hoặc chờ giao không thể xóa.")
+                Text("Không ảnh hưởng sản phẩm đang bán hoặc tài khoản khách hàng khác. Việc xóa không thể hoàn tác.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             if !status.isEmpty {
@@ -500,11 +499,7 @@ private struct CustomerManagementView: View {
                         Button("Xóa tài khoản", role: .destructive) {
                             selected = customer
                         }
-                        .disabled(busy || customer.hasOpenOrders)
-                        if customer.hasOpenOrders {
-                            Text("Cần xử lý các đơn chưa hoàn tất trước khi xóa.")
-                                .font(.caption).foregroundStyle(.orange)
-                        }
+                        .disabled(busy)
                     }
                     .padding(.vertical, 6)
                 }
@@ -517,21 +512,11 @@ private struct CustomerManagementView: View {
                 .disabled(busy)
         }
         .task { await reload() }
-        .confirmationDialog(
-            "Xóa tài khoản @" + (selected?.username ?? "") + "?",
-            isPresented: Binding(
-                get: { selected != nil },
-                set: { if !$0 { selected = nil } }
-            ), titleVisibility: .visible
-        ) {
-            Button("Xóa vĩnh viễn", role: .destructive) {
-                guard let customer = selected else { return }
+        .sheet(item: $selected) { customer in
+            CustomerPurgeConfirmationView(customer: customer) {
                 selected = nil
                 Task { await delete(customer) }
             }
-            Button("Hủy", role: .cancel) { selected = nil }
-        } message: {
-            Text("Khách sẽ bị đăng xuất, không thể xem lại đơn trên tài khoản đã xóa. File đã giao cho khách sẽ được gỡ; thông tin cá nhân bị xóa khỏi lịch sử giao dịch. Thao tác không thể hoàn tác.")
         }
     }
 
@@ -548,21 +533,85 @@ private struct CustomerManagementView: View {
     }
 
     private func delete(_ customer: ManagedCustomer) async {
-        guard !busy && !customer.hasOpenOrders else { return }
+        guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
-            _ = try await session.send(
+            let data = try JSONSerialization.data(withJSONObject: [
+                "confirm_username": customer.username
+            ])
+            let result = try await session.send(
                 "/api/v1/admin/customers/" + String(customer.id),
-                method: "DELETE"
+                method: "DELETE", data: data
             )
+            let receipt = try JSONDecoder().decode(CustomerPurgeReceipt.self, from: result)
             await reload()
-            status = "Đã xóa tài khoản @" + customer.username + "."
+            status = "Đã xóa sạch @" + customer.username +
+                     " và " + String(receipt.deleted_orders) + " đơn hàng. " +
+                     "Đã xóa " + String(receipt.deleted_delivery_files) + " file."
         } catch {
             status = "Không xóa được @" + customer.username +
-                     ". Nếu còn đơn chưa xử lý, hãy xử lý đơn trước. " +
-                     error.localizedDescription
+                     ": " + error.localizedDescription
             await reload()
+        }
+    }
+}
+
+
+private struct CustomerPurgeReceipt: Decodable {
+    let deleted: Bool
+    let deleted_orders: Int
+    let deleted_delivery_files: Int
+}
+
+private struct CustomerPurgeConfirmationView: View {
+    @Environment(\.dismiss) private var dismiss
+    let customer: ManagedCustomer
+    let onDelete: () -> Void
+    @State private var typedUsername = ""
+
+    private var verified: Bool {
+        typedUsername.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            == customer.username.lowercased()
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Xóa sạch dữ liệu khách hàng") {
+                    Text(customer.display_name).font(.headline)
+                    Text("Tài khoản: @" + customer.username)
+                    Text("Sẽ xóa " + String(customer.order_count) +
+                         " đơn hàng và toàn bộ file đã giao trong các đơn đó.")
+                        .foregroundStyle(.red)
+                    Text("Mọi phiên đăng nhập bị thu hồi. Khách không thể tải các file cũ hoặc xem lịch sử mua hàng nữa.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Xác nhận xóa vĩnh viễn") {
+                    Text("Nhập chính xác tên tài khoản @" + customer.username +
+                         " để xác nhận.")
+                        .font(.footnote)
+                    TextField("Tên tài khoản cần xóa", text: $typedUsername)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Xóa sạch tài khoản và toàn bộ dữ liệu", role: .destructive) {
+                        guard verified else { return }
+                        onDelete()
+                        dismiss()
+                    }
+                    .disabled(!verified)
+                }
+                Section {
+                    Text("Chỉ xóa dữ liệu của tài khoản được chọn trong ERI STORE. Bản sao ngoài máy chủ, nhật ký hạ tầng hoặc dữ liệu bên thứ ba không bị xóa bởi chức năng này.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Xác nhận xóa tài khoản")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Hủy") { dismiss() }
+                }
+            }
         }
     }
 }

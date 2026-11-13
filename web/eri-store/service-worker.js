@@ -1,7 +1,7 @@
 // ERI STORE private download streaming (native Safari downloads, no large JS Blob).
 // Each capability nonce lives only in this service worker memory and is never
 // a customer bearer token. No private file or auth token is cached.
-const VERSION="eri-store-v4";
+const VERSION="eri-store-v5";
 const STATIC=["/","/index.html","/styles.css","/app.js","/icon.svg","/manifest.webmanifest"];
 const DOWNLOAD_PREFIX="/_eri_download/";
 const API="https://eri-api-dag8.onrender.com";
@@ -44,8 +44,7 @@ self.addEventListener("message",event=>{
 function safeDisposition(filename){
   const safe=filename.replace(/[\r\n\/\\"]/g,"_").slice(0,180)||"eri-delivery";
   const fallback=safe.replace(/[^\x20-\x7e]/g,"_");
-  return 'attachment; filename="'+fallback+'"; filename*=UTF-8'+
-    String.fromCharCode(39,39)+encodeURIComponent(safe);
+  return `attachment; filename="${fallback}"; filename*=UTF-8\'\'${encodeURIComponent(safe)}`;
 }
 function downloadMime(filename){
   const ext=(filename.split(".").pop()||"").toLowerCase();
@@ -62,8 +61,7 @@ async function streamPrivateFile(event,nonce){
     status:410,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}
   });
   const headers={"Authorization":"Bearer "+grant.token};
-  const range=event.request.headers.get("Range");
-  if(range&&/^bytes=\d+-\d*$/.test(range))headers.Range=range;
+
   let upstream;
   try{
     upstream=await fetch(API+"/api/v1/me/orders/"+grant.orderId+"/delivery",{
@@ -87,13 +85,8 @@ async function streamPrivateFile(event,nonce){
     "Referrer-Policy":"no-referrer"};
   const length=upstream.headers.get("Content-Length");
   if(length&&/^\d+$/.test(length))out["Content-Length"]=length;
-  // Keep the worker alive on WebKit until the final byte has reached the
-  // native download manager. The body is streamed, never buffered into Blob.
-  if(typeof TransformStream!=="undefined"){
-    const relay=new TransformStream();
-    event.waitUntil(upstream.body.pipeTo(relay.writable).catch(()=>{}));
-    return new Response(relay.readable,{status:upstream.status,headers:out});
-  }
+  // Pass the upstream ReadableStream through without buffering the whole IPA.
+  // Browser download manager owns the stream and its lifetime.
   return new Response(upstream.body,{status:upstream.status,headers:out});
 }
 self.addEventListener("fetch",event=>{
