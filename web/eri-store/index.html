@@ -154,6 +154,14 @@
         <button class="btn primary" type="submit">Ký IPA và cài đặt</button>
       </div>
     </form>
+    <div id="ipa-sign-progress" class="ipa-sign-progress hidden" aria-live="polite">
+      <div class="ipa-sign-progress-heading">
+        <strong id="ipa-sign-progress-label">Đang chuẩn bị tải IPA</strong>
+        <span id="ipa-sign-progress-percent">0%</span>
+      </div>
+      <progress id="ipa-sign-progress-bar" max="100" value="0" aria-label="Tiến độ IPA máy chủ đã nhận"></progress>
+      <p id="ipa-sign-progress-stage">Thanh % chỉ tính dữ liệu máy chủ xác nhận đã nhận.</p>
+    </div>
     <div id="ipa-sign-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
     <p class="small">Mật khẩu và chứng chỉ chỉ được gửi khi bạn bấm ký; máy chủ xử lý tạm thời rồi xóa tệp đầu vào. Không sử dụng chứng chỉ hoặc IPA mà bạn không có quyền sử dụng.</p>
   </div>
