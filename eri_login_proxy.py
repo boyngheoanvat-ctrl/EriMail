@@ -152,6 +152,11 @@ def backend_health_probe():
         with urllib.request.urlopen(req, timeout=20) as response:
             data = json.loads(response.read(2048))
             print("ERI backend readiness:", response.status, data.get("status"), data.get("service"), flush=True)
+        req2 = urllib.request.Request(FN + "/admin/list?app_id=vn.eri.store",
+            headers={"X-ERI-INTERNAL-SECRET": INTERNAL}, method="GET")
+        with urllib.request.urlopen(req2, timeout=20) as response:
+            data = json.loads(response.read(4096))
+            print("ERI backend database test:", response.status, "users=", len(data.get("users", [])), flush=True)
     except Exception as exc:
         print("ERI backend readiness failed:", type(exc).__name__, str(exc), flush=True)
 
