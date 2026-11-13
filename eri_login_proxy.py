@@ -10,6 +10,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 FN = os.environ.get("ERI_SUPABASE_FUNCTION_URL", "").rstrip("/")
+KEY_FN = os.environ.get("ERI_KEY_FUNCTION_URL", "").rstrip("/")
 INTERNAL = os.environ.get("ERI_INTERNAL_KEY", "")
 ADMIN = os.environ.get("ERI_ADMIN_KEY", "")
 
@@ -58,6 +59,10 @@ async function go(action){
 POSTS = {
     "/api/login", "/api/verify", "/api/admin/create", "/api/admin/extend",
     "/api/admin/disable", "/api/admin/enable", "/api/admin/delete",
+    "/api/key/activate", "/api/key/verify",
+    "/api/admin/key/create", "/api/admin/key/extend",
+    "/api/admin/key/disable", "/api/admin/key/enable",
+    "/api/admin/key/reset-device", "/api/admin/key/delete",
 }
 
 class Handler(BaseHTTPRequestHandler):
@@ -89,7 +94,10 @@ class Handler(BaseHTTPRequestHandler):
     def forward(self, path, method, body=None):
         if not FN.startswith("https://") or len(INTERNAL) < 32:
             return self.send(503, {"error":"Máy chủ chưa được cấu hình đầy đủ"})
-        destination = FN + path.removeprefix("/api")
+        target = KEY_FN if path.startswith("/api/key/") or path.startswith("/api/admin/key/") else FN
+        if not target.startswith("https://"):
+            return self.send(503, {"error": "ERI key API chưa được cấu hình"})
+        destination = target + path.removeprefix("/api")
         req = urllib.request.Request(destination,
             data=body,
             headers={"Content-Type":"application/json", "X-ERI-INTERNAL-SECRET": INTERNAL},
@@ -112,13 +120,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, ADMIN_HTML.encode("utf-8"), "text/html; charset=utf-8")
         if path == "/api/health":
             return self.forward("/api/health", "GET")
-        if path == "/api/admin/list":
+        if path in ("/api/admin/list", "/api/admin/key/list"):
             if not self.is_admin():
                 return self.send(403, {"error":"Không có quyền Admin"})
             parsed = urllib.parse.urlsplit(self.path)
             query = urllib.parse.parse_qs(parsed.query)
             app_id = query.get("app_id", [""])[0][:128]
-            return self.forward("/api/admin/list?app_id="+urllib.parse.quote(app_id, safe=""), "GET")
+            return self.forward(path+"?app_id="+urllib.parse.quote(app_id, safe=""), "GET")
         self.send(404, {"error":"Không tìm thấy API"})
 
     def do_POST(self):
