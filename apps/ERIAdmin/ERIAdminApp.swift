@@ -9,6 +9,7 @@ private func eriMoney(_ amount: Int) -> String {
 }
 
 import Security
+import CryptoKit
 import UniformTypeIdentifiers
 
 private let server = "https://eri-api-dag8.onrender.com"
@@ -169,8 +170,118 @@ private final class AdminSession: ObservableObject {
         let size_bytes: Int
         let chunk_bytes: Int
         let offset: Int
+        let fast: Bool?
     }
-    private struct UploadPosition: Decodable { let offset: Int }
+    private struct UploadPosition: Decodable {
+        let offset: Int
+        let fast: Bool?
+    }
+    private struct FastUploadStatus: Decodable {
+        let received: [Int]
+        let chunk_bytes: Int
+        let size_bytes: Int
+        let total_parts: Int
+    }
+    private struct FastPartAck: Decodable {
+        let index: Int
+        let received_bytes: Int
+    }
+
+    // Upload a validated 4 MiB slice. The API can acknowledge a chunk even
+    // when iOS misses its response; reconcile before retrying the same data.
+    private func sendFastPart(path: String, index: Int, file: URL,
+                              totalSize: Int, chunkBytes: Int) async throws -> Int {
+        let position = index * chunkBytes
+        let expected = min(chunkBytes, totalSize - position)
+        let reader = try FileHandle(forReadingFrom: file)
+        defer { try? reader.close() }
+        try reader.seek(toOffset: UInt64(position))
+        guard let chunk = try reader.read(upToCount: expected),
+              chunk.count == expected else { throw URLError(.cannotOpenFile) }
+        let sha = SHA256.hash(data: chunk).map { String(format: "%02x", $0) }.joined()
+        var req = try request(path + "/fast-parts/" + String(index), method: "POST")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        req.setValue(sha, forHTTPHeaderField: "X-ERI-Chunk-SHA256")
+        req.httpBody = chunk
+        req.timeoutInterval = 45
+
+        var errorToThrow: Error = URLError(.networkConnectionLost)
+        for attempt in 0..<3 {
+            try Task.checkCancellation()
+            do {
+                let (body, response) = try await URLSession.shared.data(for: req)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard (200...299).contains(code) else { throw AdminError.http(code) }
+                let ack = try JSONDecoder().decode(FastPartAck.self, from: body)
+                guard ack.index == index && ack.received_bytes == expected else {
+                    throw URLError(.badServerResponse)
+                }
+                return expected
+            } catch {
+                errorToThrow = error
+                // Check if the server already committed this piece before retry.
+                if let body = try? await send(path + "/fast-parts"),
+                   let status = try? JSONDecoder().decode(FastUploadStatus.self, from: body),
+                   status.received.contains(index) {
+                    return expected
+                }
+                if attempt < 2 {
+                    try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 600_000_000)
+                }
+            }
+        }
+        throw errorToThrow
+    }
+
+    // Up to three HTTPS transfers run concurrently without faking progress.
+    // Progress is calculated from chunks confirmed by the backend.
+    private func transferFastChunks(path: String, file: URL, size: Int,
+                                    chunkBytes: Int, onStatus: @escaping @MainActor (String) -> Void,
+                                    onProgress: @escaping @MainActor (Double) -> Void) async throws {
+        let body = try await send(path + "/fast-parts")
+        let status = try JSONDecoder().decode(FastUploadStatus.self, from: body)
+        let total = (size + chunkBytes - 1) / chunkBytes
+        guard status.size_bytes == size, status.chunk_bytes == chunkBytes,
+              status.total_parts == total, total > 0,
+              status.received.allSatisfy({ (0..<total).contains($0) }) else {
+            throw URLError(.badServerResponse)
+        }
+        let received = Set(status.received)
+        let missing = (0..<total).filter { !received.contains($0) }
+        var completed = 0
+        for index in received {
+            completed += min(chunkBytes, size - index * chunkBytes)
+        }
+        onProgress(Double(completed) / Double(size))
+        onStatus("Chế độ nhanh: tối đa 3 kết nối HTTPS song song")
+
+        var nextToStart = 0
+        try await withThrowingTaskGroup(of: Int.self) { group in
+            for _ in 0..<min(3, missing.count) {
+                let index = missing[nextToStart]
+                nextToStart += 1
+                group.addTask {
+                    try await self.sendFastPart(path: path, index: index, file: file,
+                                                totalSize: size, chunkBytes: chunkBytes)
+                }
+            }
+            while let bytes = try await group.next() {
+                completed += bytes
+                onProgress(Double(completed) / Double(size))
+                let sentMB = String(format: "%.1f", Double(completed) / (1024 * 1024))
+                let totalMB = String(format: "%.1f", Double(size) / (1024 * 1024))
+                onStatus("Máy chủ đã nhận " + sentMB + "/" + totalMB + " MB · 3 luồng")
+                if nextToStart < missing.count {
+                    let index = missing[nextToStart]
+                    nextToStart += 1
+                    group.addTask {
+                        try await self.sendFastPart(path: path, index: index, file: file,
+                                                    totalSize: size, chunkBytes: chunkBytes)
+                    }
+                }
+            }
+        }
+    }
 
     // Shared adaptive uploader for product listings (IPA, cert, AI) and order delivery.
     // Fast connections ramp from 256 KiB to 4 MiB; unstable ones use smaller chunks.
@@ -297,7 +408,8 @@ private final class AdminSession: ObservableObject {
             "description": values["description"] ?? "",
             "price_vnd": price,
             "issuer": values["issuer"] ?? "",
-            "authorized": values["authorized"] == "true"
+            "authorized": values["authorized"] == "true",
+            "fast": true
         ]
         let body = try JSONSerialization.data(withJSONObject: payload)
         let fileInfo = try FileManager.default.attributesOfItem(atPath: file.path)
@@ -314,7 +426,8 @@ private final class AdminSession: ObservableObject {
                let remote = try? JSONDecoder().decode(UploadPosition.self, from: body),
                remote.offset >= 0 && remote.offset <= size {
                 session = UploadBegin(upload_id: savedID, size_bytes: size,
-                                      chunk_bytes: 4 * 1024 * 1024, offset: remote.offset)
+                                      chunk_bytes: 4 * 1024 * 1024, offset: remote.offset,
+                                      fast: remote.fast)
             } else {
                 UserDefaults.standard.removeObject(forKey: checkpointKey)
             }
@@ -331,9 +444,16 @@ private final class AdminSession: ObservableObject {
 
         let path = "/api/v1/admin/upload-sessions/" + active.upload_id
         onStatus(active.offset > 0 ? "Đang tiếp tục tải từ tiến độ cũ" : "Đã kết nối API, bắt đầu tải...")
-        try await transferChunks(path: path, file: file, size: size,
-                                 offset: active.offset, maxChunkBytes: active.chunk_bytes,
-                                 onStatus: onStatus, onProgress: onProgress)
+        if active.fast == true {
+            try await transferFastChunks(path: path, file: file, size: size,
+                                         chunkBytes: active.chunk_bytes,
+                                         onStatus: onStatus, onProgress: onProgress)
+        } else {
+            // Compatible with any previously started legacy upload sessions.
+            try await transferChunks(path: path, file: file, size: size,
+                                     offset: active.offset, maxChunkBytes: active.chunk_bytes,
+                                     onStatus: onStatus, onProgress: onProgress)
+        }
         _ = try await send(path + "/complete", method: "POST", data: Data())
         UserDefaults.standard.removeObject(forKey: checkpointKey)
         onProgress(1.0)
