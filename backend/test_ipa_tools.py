@@ -94,4 +94,47 @@ with tempfile.TemporaryDirectory(prefix="eri-tools-test-") as root:
             assert zip_file.read("Payload/Sample.app/Info.plist") == plist
         assert client.get(download).status_code == 404
 
-    print("IPA analyze, FairPlay detection, password ZIP decrypt and private signing validation: OK")
+
+    # Realistic framework symlinks are valid IPA entries, but links escaping
+    # the Payload are rejected before the user provides P12 material.
+    safe_archive = io.BytesIO()
+    with zipfile.ZipFile(safe_archive, "w") as writer:
+        writer.writestr("Payload/Sample.app/Info.plist", plist)
+        symlink = zipfile.ZipInfo("Payload/Sample.app/Frameworks/Tool.framework/Versions/Current")
+        symlink.create_system = 3
+        symlink.external_attr = (0o120777 << 16)
+        writer.writestr(symlink, "A")
+    valid_link = client.post("/api/v1/tools/ipa/analyze", headers=auth,
+                             files={"ipa": ("frameworks.ipa", safe_archive.getvalue(),
+                                             "application/octet-stream")})
+    assert valid_link.status_code == 200, valid_link.text
+
+    unsafe_archive = io.BytesIO()
+    with zipfile.ZipFile(unsafe_archive, "w") as writer:
+        writer.writestr("Payload/Sample.app/Info.plist", plist)
+        symlink = zipfile.ZipInfo("Payload/Sample.app/link")
+        symlink.create_system = 3
+        symlink.external_attr = (0o120777 << 16)
+        writer.writestr(symlink, "../../../../outside")
+    invalid_link = client.post("/api/v1/tools/ipa/analyze", headers=auth,
+                               files={"ipa": ("unsafe.ipa", unsafe_archive.getvalue(),
+                                               "application/octet-stream")})
+    assert invalid_link.status_code == 422, invalid_link.text
+
+    from ipa_tools import _manifest_details, _register_signed_output
+    signed_test = Path(root) / "signed-test.ipa"
+    signed_test.write_bytes(make_ipa(executable))
+    metadata = _manifest_details(signed_test)
+    assert metadata["bundle_id"] == "vn.eri.tool.test"
+    signed_result = _register_signed_output(signed_test, metadata)
+    assert signed_result["install_url"].startswith("itms-services://?action=download-manifest")
+    manifest = client.get(signed_result["manifest_path"])
+    assert manifest.status_code == 200, manifest.text
+    manifest_data = plistlib.loads(manifest.content)
+    assert manifest_data["items"][0]["metadata"]["bundle-identifier"] == "vn.eri.tool.test"
+    assert manifest_data["items"][0]["metadata"]["kind"] == "software"
+    actual_ipa = client.get(signed_result["download_path"])
+    assert actual_ipa.status_code == 200 and actual_ipa.content == make_ipa(executable)
+    assert client.get(signed_result["download_path"]).status_code == 200
+
+    print("IPA analysis, symlink validation, decrypt and iOS install manifest: OK")
