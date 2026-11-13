@@ -11,6 +11,7 @@ with tempfile.TemporaryDirectory(prefix="eri-mod-test-") as root:
     os.environ["ERI_DB_PATH"] = str(Path(root) / "shop.sqlite3")
     os.environ["ERI_UPLOAD_DIR"] = str(Path(root) / "files")
     os.environ["ERI_ADMIN_KEY"] = "ci-test-admin-password-0123456789abcdef"
+    os.environ["ERI_PAYMENT_MODE"] = "static_momo"
     from fastapi.testclient import TestClient
     from app import app, UPLOAD_DIR
 
@@ -70,4 +71,38 @@ with tempfile.TemporaryDirectory(prefix="eri-mod-test-") as root:
     assert "download_path" not in paid
     assert client.get("/api/v1/mods/" + str(product_id) + "/download").status_code == 404
     assert client.get("/api/v1/admin/catalog/apk", headers=admin).status_code == 200
-    print("FREE IPA/APK downloads, paid APK, missing files and admin catalog: OK")
+    # A paid APK must be deliverable to its specific buyer, never publicly.
+    buyer = client.post("/api/v1/auth/register", json={
+        "username": "apkbuyer", "password": "apktestpassword2026",
+        "display_name": "APK Customer", "contact": "contact@example.test"
+    })
+    assert buyer.status_code == 201, buyer.text
+    token = buyer.json()["token"]
+    authorization = {"Authorization": "Bearer " + token}
+    order = client.post("/api/v1/orders", headers=authorization, json={
+        "kind": "mod", "product_id": product_id
+    })
+    assert order.status_code == 201, order.text
+    order_id = order.json()["id"]
+    from app import connection
+    with connection() as db:
+        db.execute("UPDATE orders SET status='paid' WHERE id=?", (order_id,))
+    delivery = sample_file("apk")
+    base = "/api/v1/admin/orders/" + order_id + "/delivery-sessions"
+    begin = client.post(base, headers=admin, json={
+        "filename": "paid-game.apk", "size_bytes": len(delivery)
+    })
+    assert begin.status_code == 201, begin.text
+    session_id = begin.json()["upload_id"]
+    session_path = base + "/" + session_id
+    transferred = client.put(session_path, headers={
+        **admin, "X-ERI-Upload-Offset": "0"
+    }, content=delivery)
+    assert transferred.status_code == 200, transferred.text
+    completed = client.post(session_path + "/complete", headers=admin)
+    assert completed.status_code == 201, completed.text
+    received = client.get("/api/v1/me/orders/" + order_id + "/delivery",
+                          headers=authorization)
+    assert received.status_code == 200 and received.content == delivery
+
+    print("FREE IPA/APK, missing files, paid APK order and delivery: OK")
