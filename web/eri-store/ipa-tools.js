@@ -3,6 +3,7 @@
 (() => {
   const API = "https://eri-api-dag8.onrender.com";
   const TOKEN_KEY = "eri_store_buyer_token";
+  const APPSTORE_DRAFT = "eri_store_appstore_draft_v1";
   const MAX_IPA = 512 * 1024 * 1024;
   const $ = id => document.getElementById(id);
   const readToken = () => sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || "";
@@ -47,7 +48,7 @@
       : "Liên kết tải một lần, hết hạn sau 15 phút. Tệp không được lưu trên tài khoản cửa hàng.";
     target.append(info);
   }
-  function submitUpload(endpoint, form, result, {onlyInspect = false} = {}) {
+  function submitUpload(endpoint, form, result) {
     const ipa = form.querySelector('input[name="ipa"]')?.files?.[0];
     if (!ipa || !ipa.name.toLowerCase().endsWith(".ipa")) {
       display(result, "Hãy chọn tệp .ipa hợp lệ.", "error");
@@ -59,15 +60,18 @@
     }
     const token = readToken();
     if (!token) {
-      display(result, "Bạn cần đăng nhập tài khoản ERI STORE trước khi sử dụng công cụ.", "error");
+      display(result, "Bạn cần đăng nhập ERI STORE. Các file đang chọn vẫn được giữ khi bạn chuyển sang Tài khoản mà không tải lại trang.", "error");
+      const account = document.createElement("button");
+      account.type = "button";
+      account.className = "btn outline";
+      account.textContent = "Đi tới Đăng nhập";
+      account.addEventListener("click", () => document.querySelector('[data-view="account"]')?.click());
+      result.append(document.createElement("p"), account);
       return;
     }
     const buttons = Array.from(form.querySelectorAll("button"));
-    const inspectBtn = $("ipa-inspect-btn");
-    if (onlyInspect && inspectBtn) buttons.push(inspectBtn);
     buttons.forEach(b => b.disabled = true);
     const payload = new FormData(form);
-    if (onlyInspect) payload.delete("password");
     const xhr = new XMLHttpRequest();
     xhr.open("POST", API + endpoint, true);
     xhr.timeout = 600000;
@@ -81,33 +85,28 @@
       let response;
       try { response = JSON.parse(xhr.responseText || "{}"); } catch { response = {}; }
       if (xhr.status < 200 || xhr.status >= 300) {
-        display(result, errorText(response) || "HTTP " + xhr.status, "error");
+        display(result, xhr.status === 401
+          ? "Phiên đăng nhập đã hết hạn. Bạn hãy đăng nhập lại rồi bấm Ký; tệp đã chọn sẽ không bị xóa nếu không tải lại trang."
+          : errorText(response) || "HTTP " + xhr.status, "error");
+        if (xhr.status === 401) {
+          const go = document.createElement("button");
+          go.type = "button";
+          go.className = "btn outline";
+          go.textContent = "Đăng nhập lại";
+          go.addEventListener("click", () => document.querySelector('[data-view="account"]')?.click());
+          result.append(document.createElement("p"), go);
+        }
         return;
       }
-      if (onlyInspect) {
-        const encrypted = response.fairplay_encrypted;
-        const fairplay = encrypted === true ? "Có mã hóa FairPlay." :
-          encrypted === false ? "Không phát hiện mã hóa FairPlay trên tệp thực thi chính." :
-          "Chưa xác định được tình trạng FairPlay từ tệp này.";
-        const zipped = response.zip_password_protected ?
-          "Lớp ZIP có mật khẩu, có thể mở bằng mật khẩu hợp lệ." : "Lớp ZIP không có mật khẩu.";
-        const name = response.app?.name ? "Ứng dụng: " + response.app.name + ". " : "";
-        display(result, name + zipped + " " + fairplay + " " + (response.note || ""), "success");
-      } else {
-        display(result, response.message || "Xử lý IPA thành công.", "success");
-        makeDownload(response, result);
-      }
+      display(result, response.message || "IPA đã được ký.", "success");
+      makeDownload(response, result);
+      const pwd = form.querySelector('input[name="password"]');
+      if (pwd) pwd.value = "";
     };
     xhr.onerror = () => display(result, "Không kết nối được máy chủ. Kiểm tra mạng và thử lại.", "error");
     xhr.ontimeout = () => display(result, "Quá thời gian xử lý trên máy chủ. Tệp lớn có thể cần dịch vụ xử lý chuyên dụng.", "error");
     xhr.onabort = () => display(result, "Yêu cầu đã bị hủy.", "error");
-    xhr.onloadend = () => {
-      buttons.forEach(b => b.disabled = false);
-      if (!onlyInspect) {
-        const pwd = form.querySelector('input[name="password"]');
-        if (pwd) pwd.value = "";
-      }
-    };
+    xhr.onloadend = () => { buttons.forEach(b => b.disabled = false); };
     display(result, "Đang kết nối máy chủ...");
     xhr.send(payload);
   }
@@ -117,6 +116,11 @@
     const appStoreForm = $("ipa-appstore-form");
     const appStoreResult = $("ipa-appstore-result");
     if (appStoreForm && appStoreResult) {
+      const urlField = appStoreForm.elements.namedItem("appstore_url");
+      try { if (urlField) urlField.value = localStorage.getItem(APPSTORE_DRAFT) || ""; } catch {}
+      urlField?.addEventListener("input", () => {
+        try { localStorage.setItem(APPSTORE_DRAFT, urlField.value.slice(0, 500)); } catch {}
+      });
       appStoreForm.addEventListener("submit", async ev => {
         ev.preventDefault();
         const link = String(appStoreForm.elements.namedItem("appstore_url")?.value || "").trim();
@@ -147,20 +151,30 @@
           display(appStoreResult, name + " · " + developer +
             "\nBundle ID: " + bundle + " · Phiên bản: " + version +
             "\n" + (data.message || "Link App Store không phải tệp IPA có thể tải về."), "success");
+          const actions = document.createElement("div");
+          actions.className = "ipa-tool-actions";
+          const unavailable = document.createElement("button");
+          unavailable.type = "button";
+          unavailable.className = "btn outline";
+          unavailable.disabled = true;
+          unavailable.textContent = "Tải IPA (chưa có file)";
+          unavailable.title = "Link App Store không chứa tệp IPA công khai";
+          actions.append(unavailable);
           if (typeof data.app_store_url === "string") {
             try {
               const destination = new URL(data.app_store_url);
               if (destination.protocol === "https:" && destination.hostname === "apps.apple.com") {
-                const open = document.createElement("a");
-                open.className = "btn outline";
-                open.href = destination.href;
-                open.rel = "noopener noreferrer";
-                open.target = "_blank";
-                open.textContent = "Mở ứng dụng trên App Store";
-                appStoreResult.append(document.createElement("p"), open);
+                const install = document.createElement("a");
+                install.className = "btn primary";
+                install.href = destination.href;
+                install.rel = "noopener noreferrer";
+                install.target = "_blank";
+                install.textContent = "Cài trực tiếp qua App Store";
+                actions.prepend(install);
               }
-            } catch { /* Ignore an invalid URL rather than linking to an untrusted host. */ }
+            } catch { /* No unsafe destination. */ }
           }
+          appStoreResult.append(actions);
         } catch (error) {
           display(appStoreResult, error.name === "AbortError"
             ? "App Store phản hồi quá lâu. Hãy thử lại."
@@ -171,24 +185,9 @@
         }
       });
     }
-    const decryptForm = $("ipa-decrypt-form");
     const signForm = $("ipa-sign-form");
-    const decryptStatus = $("ipa-decrypt-status");
     const signStatus = $("ipa-sign-status");
-    if (!decryptForm || !signForm || !decryptStatus || !signStatus) return;
-    $("ipa-inspect-btn")?.addEventListener("click", () => {
-      submitUpload("/api/v1/tools/ipa/analyze", decryptForm, decryptStatus, {onlyInspect:true});
-    });
-    decryptForm.addEventListener("submit", ev => {
-      ev.preventDefault();
-      if (!decryptForm.reportValidity()) return;
-      const pwd = decryptForm.elements.namedItem("password")?.value || "";
-      if (!pwd) {
-        display(decryptStatus, "Hãy kiểm tra IPA trước. Chỉ IPA ZIP có mật khẩu mới giải mã bằng mật khẩu ZIP.", "error");
-        return;
-      }
-      submitUpload("/api/v1/tools/ipa/decrypt", decryptForm, decryptStatus);
-    });
+    if (!signForm || !signStatus) return;
     signForm.addEventListener("submit", ev => {
       ev.preventDefault();
       if (!signForm.reportValidity()) return;
