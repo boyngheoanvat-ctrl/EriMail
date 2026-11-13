@@ -488,4 +488,9 @@ def register_ipa_tools(app, require_customer):
             background=BackgroundTask(lambda: Path(path).unlink(missing_ok=True))
         )
 
+    # Chunked signing avoids a single long multipart upload that can time out
+    # on cellular networks and on Render's reverse proxy.
+    from signing_jobs import register_signing_jobs
+    register_signing_jobs(router, require_customer, _inspect_archive,
+                          _validate_ipa, _manifest_details, _register_signed_output)
     app.include_router(router)
