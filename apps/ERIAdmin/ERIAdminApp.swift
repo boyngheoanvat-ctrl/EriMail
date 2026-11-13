@@ -210,6 +210,7 @@ private final class AdminSession: ObservableObject {
     // Send 4MB chunks instead of a 200+ MB multipart body.
     // When a request drops, read the server's acknowledged offset and resume.
     func uploadFile(kind: String, file: URL, fields: [(String, String)], maxBytes: Int,
+                    onStatus: @escaping @MainActor (String) -> Void,
                     onProgress: @escaping @MainActor (Double) -> Void) async throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         guard let number = attributes[.size] as? NSNumber else { throw URLError(.fileDoesNotExist) }
@@ -269,22 +270,29 @@ private final class AdminSession: ObservableObject {
         defer { try? reader.close() }
         var offset = active.offset
         let path = "/api/v1/admin/upload-sessions/" + active.upload_id
+        // Smaller HTTPS requests are more reliable across iOS cellular/Wi-Fi and proxies.
+        // Server accepts any chunk up to active.chunk_bytes, not just 4 MiB.
+        let uploadChunkBytes = min(active.chunk_bytes, 1024 * 1024)
+        let totalChunks = (size + uploadChunkBytes - 1) / uploadChunkBytes
         onProgress(Double(offset) / Double(size))
+        onStatus(offset > 0 ? "Tiếp tục từ phần đã gửi trước đó." : "Đã kết nối API, chuẩn bị gửi phần đầu tiên...")
         while offset < size {
             try Task.checkCancellation()
             try reader.seek(toOffset: UInt64(offset))
-            let count = min(active.chunk_bytes, size - offset)
+            let count = min(uploadChunkBytes, size - offset)
             guard let chunk = try reader.read(upToCount: count), chunk.count == count else {
                 throw URLError(.cannotOpenFile)
             }
             var sent = false
             var lastError: Error = URLError(.networkConnectionLost)
-            for attempt in 0..<4 {
+            for attempt in 0..<3 {
+                onStatus("Đang gửi phần \(offset / uploadChunkBytes + 1)/\(totalChunks)" +
+                         (attempt > 0 ? " · Thử lại lần \(attempt + 1)" : ""))
                 do {
                     var req = try request(path, method: "PUT")
                     req.setValue(String(offset), forHTTPHeaderField: "X-ERI-Upload-Offset")
                     req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                    req.timeoutInterval = 90
+                    req.timeoutInterval = 35
                     let (result, response) = try await URLSession.shared.upload(for: req, from: chunk)
                     let http = (response as? HTTPURLResponse)?.statusCode ?? 0
                     guard (200...299).contains(http) else { throw AdminError.http(http) }
@@ -306,7 +314,7 @@ private final class AdminSession: ObservableObject {
                         sent = true
                         break
                     }
-                    if attempt < 3 {
+                    if attempt < 2 {
                         try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 700_000_000)
                     }
                 }
@@ -1197,6 +1205,7 @@ private struct AdminUploadView: View {
     @State private var working = false
     @State private var status = ""
     @State private var progress = 0.0
+    @State private var uploadPhase = ""
 
     var body: some View {
         Form {
@@ -1244,10 +1253,13 @@ private struct AdminUploadView: View {
                     .font(.footnote).foregroundStyle(.secondary)
                 if working {
                     ProgressView(value: progress)
-                    Text("Đã gửi " + Int(progress * 100).description + "% · Khi mất mạng, bấm lại để tiếp tục")
+                    Text("Đã gửi " + String(format: "%.1f", progress * 100) + "% · Khi mất mạng, bấm lại để tiếp tục")
+                    if !uploadPhase.isEmpty {
+                        Text(uploadPhase).font(.footnote).foregroundStyle(.secondary)
+                    }
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Button(working ? "Đang tải " + Int(progress * 100).description + "%" : "Cập nhật lên máy chủ") {
+                Button(working ? "Đang tải " + String(format: "%.1f", progress * 100) + "%" : "Cập nhật lên máy chủ") {
                     Task { await publish() }
                 }
                 .disabled(!valid || working || importing)
@@ -1317,7 +1329,8 @@ private struct AdminUploadView: View {
         guard let file = selectedFile else { return }
         working = true
         progress = 0
-        defer { working = false }
+        uploadPhase = "Đang kiểm tra kết nối..."
+        defer { working = false; uploadPhase = "" }
         let fields: [(String, String)] = [
             ("name", name.trimmingCharacters(in: .whitespacesAndNewlines)),
             ("price_vnd", (kind == .ipa && modIsFree) ? "0" : price),
@@ -1327,10 +1340,12 @@ private struct AdminUploadView: View {
         ]
         do {
             try await session.uploadFile(kind: kind.rawValue, file: file,
-                                         fields: fields, maxBytes: kind.maxBytes) { ratio in
+                                         fields: fields, maxBytes: kind.maxBytes,
+                                         onStatus: { phase in uploadPhase = phase },
+                                         onProgress: { ratio in
                 progress = ratio
-                status = "Đang tải lên máy chủ: " + String(Int(ratio * 100)) + "%"
-            }
+                status = "Đang tải lên máy chủ: " + String(format: "%.1f", ratio * 100) + "%"
+            })
             status = "Đã tải tệp và cập nhật sản phẩm thành công."
             selectedFile = nil
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
