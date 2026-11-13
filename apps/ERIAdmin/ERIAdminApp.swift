@@ -506,10 +506,13 @@ private struct AdminHome: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("IPA Mod Game") {
+                Section("Mod Game — IPA / APK") {
                     NavigationLink {
                         AdminUploadView(kind: .ipa).environmentObject(session)
-                    } label: { Label("Nhập tệp IPA", systemImage: "square.and.arrow.up") }
+                    } label: { Label("Nhập IPA · FREE / BÁN", systemImage: "square.and.arrow.up") }
+                    NavigationLink {
+                        AdminUploadView(kind: .apk).environmentObject(session)
+                    } label: { Label("Nhập APK · FREE / BÁN", systemImage: "square.and.arrow.up") }
                 }
                 Section("Đăng sản phẩm — giao sau khi khách mua") {
                     NavigationLink {
@@ -529,6 +532,9 @@ private struct AdminHome: View {
                 Section("Quản lý sản phẩm đã đăng") {
                     NavigationLink { AdminCatalogView(kind: .ipa).environmentObject(session) } label: {
                         Label("Xóa IPA Mod Game", systemImage: "trash")
+                    }
+                    NavigationLink { AdminCatalogView(kind: .apk).environmentObject(session) } label: {
+                        Label("Xóa APK Mod Game", systemImage: "trash")
                     }
                     NavigationLink { AdminCatalogView(kind: .certificate).environmentObject(session) } label: {
                         Label("Xóa chứng chỉ", systemImage: "trash")
@@ -1199,10 +1205,11 @@ private struct OrderFileDeliveryView: View {
 }
 
 private enum UploadKind: String {
-    case ipa, certificate, ai
+    case ipa, apk, certificate, ai
     var title: String {
         switch self {
         case .ipa: return "Cập nhật IPA Mod Game"
+        case .apk: return "Cập nhật APK Mod Game"
         case .certificate: return "Cập nhật chứng chỉ"
         case .ai: return "Cập nhật AI Plus"
         }
@@ -1210,6 +1217,7 @@ private enum UploadKind: String {
     var accepted: [String] {
         switch self {
         case .ipa: return ["ipa"]
+        case .apk: return ["apk"]
         case .certificate: return ["p12", "mobileprovision", "zip"]
         case .ai: return ["txt", "json", "csv", "zip"]
         }
@@ -1217,7 +1225,7 @@ private enum UploadKind: String {
     // Use a broad system document picker; validate file extension after selection.
     var maxBytes: Int {
         switch self {
-        case .ipa: return 512 * 1_048_576
+        case .ipa, .apk: return 512 * 1_048_576
         case .certificate: return 15 * 1_048_576
         case .ai: return 20 * 1_048_576
         }
@@ -1329,7 +1337,7 @@ private struct AdminUploadView: View {
         Form {
             Section("Thông tin sản phẩm") {
                 TextField("Tên sản phẩm", text: $name)
-                if kind == .ipa {
+                if (kind == .ipa || kind == .apk) {
                     Picker("Loại Mod Game", selection: $modIsFree) {
                         Text("FREE").tag(true)
                         Text("BÁN").tag(false)
@@ -1347,7 +1355,7 @@ private struct AdminUploadView: View {
                 TextField("Mô tả sản phẩm", text: $description, axis: .vertical)
                     .lineLimit(2...5)
                 if kind != .ipa || !modIsFree {
-                    TextField(kind == .ipa ? "Giá bán (VND)" : "Giá vốn (VND)", text: $price)
+                    TextField((kind == .ipa || kind == .apk) ? "Giá bán (VND)" : "Giá vốn (VND)", text: $price)
                         .keyboardType(.numberPad)
                 }
             }
@@ -1443,12 +1451,12 @@ private struct AdminUploadView: View {
     }
 
     private var valid: Bool {
-        let amount = (kind == .ipa && modIsFree) ? 0 : (Int(price) ?? -1)
+        let amount = ((kind == .ipa || kind == .apk) && modIsFree) ? 0 : (Int(price) ?? -1)
         guard session.authenticated, selectedFile != nil,
               !name.trimmingCharacters(in: .whitespaces).isEmpty,
-              amount >= 0, (kind == .ipa || amount > 0) else { return false }
+              amount >= 0, ((kind == .ipa || kind == .apk) || amount > 0) else { return false }
         switch kind {
-        case .ipa: return authorized
+        case .ipa, .apk: return authorized
         case .certificate: return !issuer.isEmpty
         case .ai: return true
         }
@@ -1459,9 +1467,9 @@ private struct AdminUploadView: View {
         progress = 0
         uploadPhase = "Đang kiểm tra kết nối..."
         defer { working = false; uploadPhase = "" }
-        let amount = (kind == .ipa && modIsFree) ? 0 : (Int(price) ?? -1)
+        let amount = ((kind == .ipa || kind == .apk) && modIsFree) ? 0 : (Int(price) ?? -1)
         do {
-            if kind == .ipa && amount == 0 {
+            if (kind == .ipa || kind == .apk) && amount == 0 {
                 try await session.ensureFreeModSupported()
             }
             let info = try FileManager.default.attributesOfItem(atPath: file.path)
@@ -1600,12 +1608,12 @@ private struct AdminCatalogView: View {
     @State private var message = ""
 
     private var visibleProducts: [CatalogProduct] {
-        kind == .ipa ? products.filter { ($0.price_vnd == 0) == showFree } : products
+        (kind == .ipa || kind == .apk) ? products.filter { ($0.price_vnd == 0) == showFree } : products
     }
 
     var body: some View {
         List {
-            if kind == .ipa {
+            if (kind == .ipa || kind == .apk) {
                 Picker("Loại Mod Game", selection: $showFree) {
                     Text("FREE").tag(true)
                     Text("BÁN").tag(false)
@@ -1620,7 +1628,7 @@ private struct AdminCatalogView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.name).font(.headline)
                     if !item.description.isEmpty { Text(item.description) }
-                    Text(kind == .ipa && item.price_vnd == 0 ? "FREE · Tải trực tiếp" : eriMoney(item.price_vnd))
+                    Text((kind == .ipa || kind == .apk) && item.price_vnd == 0 ? "FREE · Tải trực tiếp" : eriMoney(item.price_vnd))
                     Button("Xóa sản phẩm", role: .destructive) { toDelete = item }
                         .disabled(busy)
                 }
