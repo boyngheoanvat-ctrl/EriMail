@@ -157,44 +157,9 @@ private final class AdminSession: ObservableObject {
             throw URLError(.badServerResponse)
         }
         let path = base + "/" + session.upload_id
-        let reader = try FileHandle(forReadingFrom: file)
-        defer { try? reader.close() }
-        var offset = 0
-        while offset < size {
-            let count = min(session.chunk_bytes, size - offset)
-            try reader.seek(toOffset: UInt64(offset))
-            guard let bytes = try reader.read(upToCount: count), bytes.count == count else {
-                throw URLError(.cannotDecodeRawData)
-            }
-            var attempt = 0
-            while true {
-                do {
-                    var req = try request(path, method: "PUT")
-                    req.timeoutInterval = 120
-                    req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                    req.setValue(String(offset), forHTTPHeaderField: "X-ERI-Upload-Offset")
-                    let (reply, response) = try await URLSession.shared.upload(for: req, from: bytes)
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard (200...299).contains(status) else { throw AdminError.http(status) }
-                    let received = try JSONDecoder().decode(OrderDeliveryOffset.self, from: reply)
-                    guard received.offset == offset + count else { throw URLError(.badServerResponse) }
-                    offset = received.offset
-                    onProgress(Double(offset) / Double(size))
-                    break
-                } catch {
-                    attempt += 1
-                    guard attempt <= 3 else { throw error }
-                    let data = try await send(path)
-                    let received = try JSONDecoder().decode(OrderDeliveryOffset.self, from: data)
-                    if received.offset == offset + count {
-                        offset = received.offset
-                        onProgress(Double(offset) / Double(size))
-                        break
-                    }
-                    guard received.offset == offset else { throw URLError(.badServerResponse) }
-                }
-            }
-        }
+        try await transferChunks(path: path, file: file, size: size,
+                                 offset: 0, maxChunkBytes: session.chunk_bytes,
+                                 onStatus: nil, onProgress: onProgress)
         _ = try await send(path + "/complete", method: "POST")
         onProgress(1)
     }
@@ -207,8 +172,108 @@ private final class AdminSession: ObservableObject {
     }
     private struct UploadPosition: Decodable { let offset: Int }
 
-    // Send 4MB chunks instead of a 200+ MB multipart body.
-    // When a request drops, read the server's acknowledged offset and resume.
+    // Shared adaptive uploader for product listings (IPA, cert, AI) and order delivery.
+    // Fast connections ramp from 256 KiB to 4 MiB; unstable ones use smaller chunks.
+    // Every retry reconciles the server's acknowledged offset to avoid duplicate bytes.
+    private func sendUploadChunk(path: String, offset: Int, bytes: Data,
+                                 useUploadTask: Bool) async throws -> Int {
+        var req = try request(path, method: "PUT")
+        req.setValue(String(offset), forHTTPHeaderField: "X-ERI-Upload-Offset")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 35
+        let reply: Data
+        let response: URLResponse
+        if useUploadTask {
+            (reply, response) = try await URLSession.shared.upload(for: req, from: bytes)
+        } else {
+            req.httpBody = bytes
+            (reply, response) = try await URLSession.shared.data(for: req)
+        }
+        let http = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200...299).contains(http) else { throw AdminError.http(http) }
+        return try JSONDecoder().decode(UploadPosition.self, from: reply).offset
+    }
+
+    private func transferChunks(path: String, file: URL, size: Int, offset initialOffset: Int,
+                                maxChunkBytes: Int, onStatus: ((String) -> Void)?,
+                                onProgress: @escaping @MainActor (Double) -> Void) async throws {
+        let mib = 1024 * 1024
+        let upper = min(maxChunkBytes, 4 * mib)
+        guard upper >= 64 * 1024 else { throw URLError(.badServerResponse) }
+        var chunkSize = min(upper, 256 * 1024)
+        var offset = initialOffset
+        let reader = try FileHandle(forReadingFrom: file)
+        defer { try? reader.close() }
+        onProgress(Double(offset) / Double(size))
+
+        while offset < size {
+            try Task.checkCancellation()
+            let count = min(chunkSize, size - offset)
+            try reader.seek(toOffset: UInt64(offset))
+            guard let chunk = try reader.read(upToCount: count), chunk.count == count else {
+                throw URLError(.cannotOpenFile)
+            }
+            let startOffset = offset
+            let startedAt = Date()
+            var acknowledged: Int?
+            var successfulAttempt = -1
+            var lastError: Error = URLError(.networkConnectionLost)
+
+            for attempt in 0..<3 {
+                onStatus?("Đang gửi \(startOffset / mib) / \((size + mib - 1) / mib) MB · Khối \((count + 1023) / 1024) KB" +
+                          (attempt > 0 ? " · Thử \(attempt + 1)" : ""))
+                do {
+                    let next = try await sendUploadChunk(path: path, offset: startOffset,
+                                                         bytes: chunk, useUploadTask: attempt == 1)
+                    guard next == startOffset + count else { throw URLError(.badServerResponse) }
+                    acknowledged = next
+                    successfulAttempt = attempt
+                    break
+                } catch {
+                    lastError = error
+                    // The server may have stored data even if the response timed out.
+                    // Query the committed offset before replaying the chunk.
+                    if let body = try? await send(path),
+                       let position = try? JSONDecoder().decode(UploadPosition.self, from: body),
+                       position.offset > startOffset && position.offset <= size {
+                        acknowledged = position.offset
+                        break
+                    }
+                    if attempt < 2 {
+                        onStatus?("Mạng chậm hoặc lỗi: \(error.localizedDescription). Đang thử lại...")
+                        try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
+                    }
+                }
+            }
+
+            guard let next = acknowledged else {
+                if chunkSize > 64 * 1024 {
+                    chunkSize = max(64 * 1024, chunkSize / 2)
+                    onStatus?("Kết nối yếu, giảm khối còn \(chunkSize / 1024) KB rồi thử lại")
+                    continue
+                }
+                throw lastError
+            }
+            guard next > offset else { throw URLError(.badServerResponse) }
+            offset = next
+            onProgress(Double(offset) / Double(size))
+            let elapsed = max(Date().timeIntervalSince(startedAt), 0.1)
+            let rate = Double(offset - startOffset) / Double(mib) / elapsed
+            onStatus?("Đã gửi \(String(format: "%.1f", Double(offset) / Double(mib))) / " +
+                      "\(String(format: "%.1f", Double(size) / Double(mib))) MB · " +
+                      "\(String(format: "%.2f", rate)) MB/s")
+
+            if successfulAttempt == 0 && elapsed < 15 {
+                // Fewer round trips on a healthy connection.
+                chunkSize = min(upper, chunkSize * 2)
+            } else if successfulAttempt != 0 {
+                // A retry or partial acknowledgement indicates a weak connection.
+                chunkSize = max(64 * 1024, chunkSize / 2)
+            }
+        }
+    }
+
+    // Resume product uploads across intermittent connections.
     func uploadFile(kind: String, file: URL, fields: [(String, String)], maxBytes: Int,
                     onStatus: @escaping @MainActor (String) -> Void,
                     onProgress: @escaping @MainActor (Double) -> Void) async throws {
@@ -245,13 +310,11 @@ private final class AdminSession: ObservableObject {
         if let savedID = UserDefaults.standard.string(forKey: checkpointKey),
            savedID.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil {
             let endpoint = "/api/v1/admin/upload-sessions/" + savedID
-            if let data = try? await send(endpoint),
-               let server = try? JSONDecoder().decode(UploadPosition.self, from: data),
-               server.offset >= 0 && server.offset <= size {
-                session = UploadBegin(upload_id: savedID,
-                                      size_bytes: size,
-                                      chunk_bytes: 4 * 1024 * 1024,
-                                      offset: server.offset)
+            if let body = try? await send(endpoint),
+               let remote = try? JSONDecoder().decode(UploadPosition.self, from: body),
+               remote.offset >= 0 && remote.offset <= size {
+                session = UploadBegin(upload_id: savedID, size_bytes: size,
+                                      chunk_bytes: 4 * 1024 * 1024, offset: remote.offset)
             } else {
                 UserDefaults.standard.removeObject(forKey: checkpointKey)
             }
@@ -266,72 +329,11 @@ private final class AdminSession: ObservableObject {
         guard let active = session, active.size_bytes == size, active.chunk_bytes > 0,
               active.chunk_bytes <= 4 * 1024 * 1024 else { throw URLError(.badServerResponse) }
 
-        let reader = try FileHandle(forReadingFrom: file)
-        defer { try? reader.close() }
-        var offset = active.offset
         let path = "/api/v1/admin/upload-sessions/" + active.upload_id
-        // Smaller HTTPS requests are more reliable across iOS cellular/Wi-Fi and proxies.
-        // Server accepts any chunk up to active.chunk_bytes, not just 4 MiB.
-        let uploadChunkBytes = min(active.chunk_bytes, 1024 * 1024)
-        let totalChunks = (size + uploadChunkBytes - 1) / uploadChunkBytes
-        onProgress(Double(offset) / Double(size))
-        onStatus(offset > 0 ? "Tiếp tục từ phần đã gửi trước đó." : "Đã kết nối API, chuẩn bị gửi phần đầu tiên...")
-        while offset < size {
-            try Task.checkCancellation()
-            try reader.seek(toOffset: UInt64(offset))
-            let count = min(uploadChunkBytes, size - offset)
-            guard let chunk = try reader.read(upToCount: count), chunk.count == count else {
-                throw URLError(.cannotOpenFile)
-            }
-            var sent = false
-            var lastError: Error = URLError(.networkConnectionLost)
-            for attempt in 0..<3 {
-                onStatus("Đang gửi phần \(offset / uploadChunkBytes + 1)/\(totalChunks)" +
-                         (attempt > 0 ? " · Thử lại lần \(attempt + 1)" : ""))
-                do {
-                    var req = try request(path, method: "PUT")
-                    req.setValue(String(offset), forHTTPHeaderField: "X-ERI-Upload-Offset")
-                    req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                    req.timeoutInterval = 25
-                    // For 1 MiB chunks, a normal HTTP body avoids the background
-                    // upload plumbing that can stall on some iOS/HTTP proxy paths.
-                    // Retry using URLSession's upload API if the standard path fails.
-                    let result: Data
-                    let response: URLResponse
-                    if attempt == 1 {
-                        (result, response) = try await URLSession.shared.upload(for: req, from: chunk)
-                    } else {
-                        req.httpBody = chunk
-                        (result, response) = try await URLSession.shared.data(for: req)
-                    }
-                    let http = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard (200...299).contains(http) else { throw AdminError.http(http) }
-                    let next = try JSONDecoder().decode(UploadPosition.self, from: result).offset
-                    guard next > offset && next <= size else { throw URLError(.badServerResponse) }
-                    offset = next
-                    onProgress(Double(offset) / Double(size))
-                    sent = true
-                    break
-                } catch {
-                    lastError = error
-                    onStatus("Lỗi gửi phần \(offset / uploadChunkBytes + 1): \(error.localizedDescription). Đang kiểm tra để tiếp tục...")
-                    // A lost response does not mean the server missed the chunk.
-                    // Always ask its committed offset before re-sending.
-                    if let data = try? await send(path),
-                       let position = try? JSONDecoder().decode(UploadPosition.self, from: data),
-                       position.offset > offset && position.offset <= size {
-                        offset = position.offset
-                        onProgress(Double(offset) / Double(size))
-                        sent = true
-                        break
-                    }
-                    if attempt < 2 {
-                        try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 700_000_000)
-                    }
-                }
-            }
-            if !sent { throw lastError }
-        }
+        onStatus(active.offset > 0 ? "Đang tiếp tục tải từ tiến độ cũ" : "Đã kết nối API, bắt đầu tải...")
+        try await transferChunks(path: path, file: file, size: size,
+                                 offset: active.offset, maxChunkBytes: active.chunk_bytes,
+                                 onStatus: onStatus, onProgress: onProgress)
         _ = try await send(path + "/complete", method: "POST", data: Data())
         UserDefaults.standard.removeObject(forKey: checkpointKey)
         onProgress(1.0)
