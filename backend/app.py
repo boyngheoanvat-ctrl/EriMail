@@ -1173,3 +1173,68 @@ def delivery_download(order_id: str, customer=Depends(require_customer)):
         filename=file["original_name"],content_disposition_type="attachment",
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
                  "Content-Security-Policy":"default-src 'none'"})
+
+
+# Protected customer account management. Existing sale records are retained
+# without customer identity; deleting a buyer revokes all active login sessions.
+@app.get("/api/v1/admin/customers", dependencies=[Depends(require_admin)])
+def admin_customers():
+    with connection() as db:
+        rows = db.execute(
+            "SELECT c.id,c.username,c.display_name,c.contact,c.created_at,"
+            "COUNT(o.id) AS order_count,"
+            "SUM(CASE WHEN o.status='pending' THEN 1 ELSE 0 END) AS pending_count,"
+            "SUM(CASE WHEN o.status='paid' THEN 1 ELSE 0 END) AS paid_count,"
+            "SUM(CASE WHEN o.status='fulfilled' THEN 1 ELSE 0 END) AS fulfilled_count "
+            "FROM customers c LEFT JOIN orders o ON o.customer_id=c.id "
+            "GROUP BY c.id ORDER BY c.id DESC LIMIT 500"
+        ).fetchall()
+    return {"items": [dict(row) for row in rows]}
+
+@app.delete("/api/v1/admin/customers/{customer_id}",
+            dependencies=[Depends(require_admin)])
+async def admin_delete_customer(customer_id: int):
+    if customer_id < 1:
+        raise HTTPException(404, "Không tìm thấy tài khoản")
+    # Coordinate with the order-delivery completion endpoint so a customer
+    # cannot be removed while a paid order is being finalized for delivery.
+    async with _eri_upload_lock:
+        with connection() as db:
+            customer = db.execute(
+                "SELECT username FROM customers WHERE id=?", (customer_id,)
+            ).fetchone()
+            if customer is None:
+                raise HTTPException(404, "Không tìm thấy tài khoản")
+            unfinished = db.execute(
+                "SELECT COUNT(*) AS n FROM orders WHERE customer_id=? "
+                "AND status IN ('pending','paid')", (customer_id,)
+            ).fetchone()["n"]
+            if unfinished:
+                raise HTTPException(
+                    409, "Tài khoản còn đơn chờ thanh toán hoặc chờ giao. "
+                         "Hãy xử lý hoặc hủy các đơn này trước khi xóa."
+                )
+            deliveries = db.execute(
+                "SELECT d.storage_name FROM order_deliveries d "
+                "JOIN orders o ON o.id=d.order_id "
+                "WHERE o.customer_id=?", (customer_id,)
+            ).fetchall()
+            affected = db.execute(
+                "SELECT COUNT(*) AS n FROM orders WHERE customer_id=?", (customer_id,)
+            ).fetchone()["n"]
+            # Keep financial/order history without name, contact, or customer link.
+            db.execute(
+                "DELETE FROM order_deliveries WHERE order_id IN "
+                "(SELECT id FROM orders WHERE customer_id=?)", (customer_id,)
+            )
+            db.execute(
+                "UPDATE orders SET customer_id=NULL WHERE customer_id=?", (customer_id,)
+            )
+            db.execute("DELETE FROM customer_sessions WHERE customer_id=?", (customer_id,))
+            db.execute("DELETE FROM customers WHERE id=?", (customer_id,))
+        for record in deliveries:
+            filename = record["storage_name"]
+            if filename and Path(filename).name == filename:
+                (UPLOAD_DIR / filename).unlink(missing_ok=True)
+    return {"deleted": True, "anonymized_orders": affected}
+

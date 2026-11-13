@@ -351,6 +351,13 @@ private struct AdminHome: View {
                         Label("Xóa AI Plus", systemImage: "trash")
                     }
                 }
+                Section("Quản lý tài khoản khách hàng") {
+                    NavigationLink {
+                        CustomerManagementView().environmentObject(session)
+                    } label: {
+                        Label("Danh sách và xóa tài khoản", systemImage: "person.crop.circle.badge.xmark")
+                    }
+                }
                 Section("Lịch sử khách đã đặt mua") {
                     NavigationLink {
                         OrdersView(kind: "all").environmentObject(session)
@@ -419,6 +426,143 @@ private struct LoginView: View {
             }
             .navigationTitle("Bảo mật")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+        }
+    }
+}
+
+
+private struct ManagedCustomer: Decodable, Identifiable {
+    let id: Int
+    let username: String
+    let display_name: String
+    let contact: String
+    let created_at: String
+    let order_count: Int
+    let pending_count: Int
+    let paid_count: Int
+    let fulfilled_count: Int
+
+    var hasOpenOrders: Bool { pending_count > 0 || paid_count > 0 }
+}
+
+private struct ManagedCustomerEnvelope: Decodable {
+    let items: [ManagedCustomer]
+}
+
+private struct CustomerManagementView: View {
+    @EnvironmentObject private var session: AdminSession
+    @State private var customers: [ManagedCustomer] = []
+    @State private var selected: ManagedCustomer?
+    @State private var busy = false
+    @State private var status = ""
+    @State private var searchText = ""
+
+    private var shown: [ManagedCustomer] {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return customers }
+        return customers.filter {
+            $0.username.localizedCaseInsensitiveContains(keyword) ||
+            $0.display_name.localizedCaseInsensitiveContains(keyword) ||
+            $0.contact.localizedCaseInsensitiveContains(keyword)
+        }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text("Quản lý khách đã đăng ký ERI STORE. Xóa tài khoản sẽ đăng xuất tất cả phiên của khách và xóa thông tin cá nhân. Lịch sử giao dịch chỉ giữ mã đơn, số tiền và trạng thái.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Tài khoản còn đơn đang chờ thanh toán hoặc chờ giao không thể xóa.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if !status.isEmpty {
+                Section { Text(status).font(.footnote).foregroundStyle(.secondary) }
+            }
+            Section("Khách hàng (" + String(customers.count) + ")") {
+                if shown.isEmpty {
+                    Text(customers.isEmpty ? "Chưa có khách đăng ký." : "Không tìm thấy tài khoản.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(shown) { customer in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(customer.display_name).font(.headline)
+                        Text("@" + customer.username)
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        Text("Liên hệ: " + customer.contact)
+                            .textSelection(.enabled)
+                        Text("Tổng đơn: " + String(customer.order_count) +
+                             " · Chờ thanh toán: " + String(customer.pending_count) +
+                             " · Chờ giao: " + String(customer.paid_count) +
+                             " · Đã giao: " + String(customer.fulfilled_count))
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Text("Ngày đăng ký: " + customer.created_at)
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Xóa tài khoản", role: .destructive) {
+                            selected = customer
+                        }
+                        .disabled(busy || customer.hasOpenOrders)
+                        if customer.hasOpenOrders {
+                            Text("Cần xử lý các đơn chưa hoàn tất trước khi xóa.")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        .searchable(text: $searchText, prompt: "Tên, tài khoản hoặc liên hệ")
+        .navigationTitle("Tài khoản khách")
+        .toolbar {
+            Button("Làm mới") { Task { await reload() } }
+                .disabled(busy)
+        }
+        .task { await reload() }
+        .confirmationDialog(
+            "Xóa tài khoản @" + (selected?.username ?? "") + "?",
+            isPresented: Binding(
+                get: { selected != nil },
+                set: { if !$0 { selected = nil } }
+            ), titleVisibility: .visible
+        ) {
+            Button("Xóa vĩnh viễn", role: .destructive) {
+                guard let customer = selected else { return }
+                selected = nil
+                Task { await delete(customer) }
+            }
+            Button("Hủy", role: .cancel) { selected = nil }
+        } message: {
+            Text("Khách sẽ bị đăng xuất, không thể xem lại đơn trên tài khoản đã xóa. File đã giao cho khách sẽ được gỡ; thông tin cá nhân bị xóa khỏi lịch sử giao dịch. Thao tác không thể hoàn tác.")
+        }
+    }
+
+    private func reload() async {
+        do {
+            customers = try JSONDecoder().decode(
+                ManagedCustomerEnvelope.self,
+                from: await session.send("/api/v1/admin/customers")
+            ).items
+            status = ""
+        } catch {
+            status = "Không tải được khách hàng: " + error.localizedDescription
+        }
+    }
+
+    private func delete(_ customer: ManagedCustomer) async {
+        guard !busy && !customer.hasOpenOrders else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await session.send(
+                "/api/v1/admin/customers/" + String(customer.id),
+                method: "DELETE"
+            )
+            await reload()
+            status = "Đã xóa tài khoản @" + customer.username + "."
+        } catch {
+            status = "Không xóa được @" + customer.username +
+                     ". Nếu còn đơn chưa xử lý, hãy xử lý đơn trước. " +
+                     error.localizedDescription
+            await reload()
         }
     }
 }

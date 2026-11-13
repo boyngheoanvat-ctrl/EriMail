@@ -202,6 +202,49 @@ async function buy(id,kind){
   }
 }
 
+// Prepare a short-lived, browser-native download through the same-origin
+// service worker. The bearer token never appears in an URL or download link.
+async function prepareNativeDownload(order){
+  if(!("serviceWorker" in navigator) || !("MessageChannel" in window)){
+    throw new Error("Trình duyệt chưa hỗ trợ tải file lớn. Hãy mở ERI STORE bằng Safari mới nhất.");
+  }
+  const ready=await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((_,reject)=>setTimeout(()=>reject(new Error("Chưa khởi động được trình tải file. Hãy làm mới trang rồi thử lại.")),8000))
+  ]);
+  if(!ready.active)throw new Error("Trình tải file chưa sẵn sàng. Hãy làm mới trang.");
+  if(!navigator.serviceWorker.controller){
+    await Promise.race([
+      new Promise(resolve=>navigator.serviceWorker.addEventListener("controllerchange",resolve,{once:true})),
+      new Promise(resolve=>setTimeout(resolve,3500))
+    ]);
+  }
+  const controller=navigator.serviceWorker.controller;
+  if(!controller)throw new Error("Hãy làm mới trang ERI STORE một lần để bật tính năng tải file.");
+  return await new Promise((resolve,reject)=>{
+    const channel=new MessageChannel();
+    const timer=setTimeout(()=>{
+      channel.port1.close();
+      reject(new Error("Không chuẩn bị được lượt tải. Hãy thử lại."));
+    },8000);
+    channel.port1.onmessage=event=>{
+      clearTimeout(timer);channel.port1.close();
+      const response=event.data||{};
+      if(response.ok && typeof response.url==="string" &&
+         /^\/_eri_download\/[A-Za-z0-9_-]{20,60}$/.test(response.url)){
+        resolve(response.url);
+      }else{
+        reject(new Error(response.error||"Không thể chuẩn bị file."));
+      }
+    };
+    controller.postMessage({
+      type:"ERI_PREPARE_DOWNLOAD",
+      orderId:order.id,
+      token:state.token,
+      filename:order.delivery.filename
+    },[channel.port2]);
+  });
+}
 async function downloadDelivery(order){
   if(!state.token){authModal();return}
   const path=order.delivery?.download_path;
@@ -210,27 +253,22 @@ async function downloadDelivery(order){
      !/^\/api\/v1\/me\/orders\/[A-F0-9]{12}\/delivery$/.test(path)){
     showBanner("Đơn này chưa có file được giao.");return;
   }
-  let response;
   try{
-    response=await fetch(API+path,{
-      headers:{Authorization:"Bearer "+state.token},
-      cache:"no-store"
-    });
-    if(!response.ok){
-      if(response.status===410)throw new Error("Tệp hiện không khả dụng. Vui lòng liên hệ hỗ trợ để nhận lại.");
-      if(response.status===401){signOut(false);throw new Error("Phiên đăng nhập đã hết hạn.");}
-      throw new Error("Không tải được file (HTTP "+response.status+").");
+    const localPath=await prepareNativeDownload(order);
+    openDialog("Tải file đã giao");
+    const root=$("dialog-body");
+    root.append(element("p",null,"Tệp: "+(order.delivery.filename||"Sản phẩm đã mua")));
+    if(Number(order.delivery.size_bytes)>0){
+      root.append(element("p","small","Dung lượng: "+(Number(order.delivery.size_bytes)/1048576).toFixed(1)+" MB"));
     }
-    const blob=await response.blob();
-    if(!blob.size)throw new Error("Tệp giao hàng rỗng.");
-    const url=URL.createObjectURL(blob);
-    const link=document.createElement("a");
-    link.href=url;
+    const info=element("p",null,"Nhấn nút dưới đây để Safari tải file trực tiếp về thiết bị. File sẽ nằm trong mục Tệp → Tải về (Downloads).");
+    root.append(info);
+    const link=element("a","btn primary","⇩ Bắt đầu tải file");
+    link.href=localPath;
     link.download=order.delivery.filename||"eri-delivery";
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),120000);
+    root.append(link);
+    root.append(element("p","small","Giữ ERI STORE đang mở trong lúc tải. Nếu iPhone hỏi xác nhận tải xuống, hãy chọn Tải về. Nếu không thấy file, kiểm tra ứng dụng Tệp → Tải về."));
+    root.append(button("Đóng","btn outline",closeDialog));
     showBanner("");
   }catch(err){showBanner(errorMessage(err))}
 }

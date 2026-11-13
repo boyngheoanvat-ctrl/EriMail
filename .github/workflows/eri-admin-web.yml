@@ -190,6 +190,61 @@ jobs:
           assert client.post(base,headers=h,json={
               "filename":sample_file,"size_bytes":len(sample)
           }).status_code == 409
+          # Admin-only account management; do not leak users publicly.
+          assert client.get("/api/v1/admin/customers").status_code == 403
+          assert client.get("/api/v1/admin/customers", headers=auth).status_code == 403
+          customer_list = client.get("/api/v1/admin/customers", headers=h)
+          assert customer_list.status_code == 200, customer_list.text
+          buyer_row = next(x for x in customer_list.json()["items"]
+                           if x["username"] == "testbuyer")
+          assert buyer_row["order_count"] == 3
+          assert buyer_row["pending_count"] == 2
+          assert buyer_row["fulfilled_count"] == 1
+          assert buyer_row["contact"] == "Zalo: testbuyer"
+          assert "password_hash" not in customer_list.text
+          assert "salt" not in customer_list.text
+          buyer_id = buyer_row["id"]
+          account_url = "/api/v1/admin/customers/" + str(buyer_id)
+          assert client.delete(account_url).status_code == 403
+          assert client.delete(account_url, headers=auth).status_code == 403
+          assert client.delete(account_url, headers=h).status_code == 409
+
+          # Prevent deletion until every unpaid/unfulfilled order is resolved.
+          all_orders = client.get("/api/v1/me/orders", headers=auth).json()["items"]
+          for unfinished_order in all_orders:
+              if unfinished_order["status"] == "pending":
+                  cancelled = client.post(
+                      "/api/v1/admin/orders/" + unfinished_order["id"] + "/status",
+                      headers=h, json={"status": "cancelled"}
+                  )
+                  assert cancelled.status_code == 200, cancelled.text
+          with __import__("app").connection() as db:
+              saved_file = db.execute(
+                  "SELECT d.storage_name FROM order_deliveries d WHERE d.order_id=?",
+                  (order_id,)
+              ).fetchone()["storage_name"]
+          from app import UPLOAD_DIR
+          assert (UPLOAD_DIR / saved_file).exists()
+          deleted = client.delete(account_url, headers=h)
+          assert deleted.status_code == 200, deleted.text
+          assert deleted.json() == {"deleted": True, "anonymized_orders": 3}
+          assert not (UPLOAD_DIR / saved_file).exists()
+          assert client.get("/api/v1/me/orders", headers=auth).status_code == 401
+          assert client.get("/api/v1/auth/me", headers=auth).status_code == 401
+          assert client.post("/api/v1/auth/login", json={
+              "username":"testbuyer", "password":"LongSecurePassword2026!"
+          }).status_code == 401
+          assert client.delete(account_url, headers=h).status_code == 404
+          assert all(x["username"] != "testbuyer"
+                     for x in client.get("/api/v1/admin/customers", headers=h).json()["items"])
+          remaining = client.get("/api/v1/admin/orders", headers=h).json()["items"]
+          old = next(x for x in remaining if x["id"] == order_id)
+          assert old["customer_id"] is None
+          assert old["buyer_name"] is None and old["buyer_contact"] is None
+          assert old["delivery_filename"] is None
+          assert old["amount_vnd"] == 260000 and old["status"] == "fulfilled"
+          assert client.get("/api/v1/auth/me", headers=other_auth).status_code == 200
+          print("Admin customer deletion: guarded, anonymized, sessions revoked: OK")
           print("Private paid-order file delivery and buyer isolation: OK")
           print("Mod Game original price; AI and certificate 30% markup: OK")
           PY
