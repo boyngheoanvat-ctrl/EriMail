@@ -1,0 +1,33 @@
+name: ERI Login Demo Native IPA
+on:
+  push:
+    branches:
+      - eri-key-admin-ios
+    paths:
+      - 'ios/ERILoginDemo/**'
+      - '.github/workflows/build-eri-login-demo.yml'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile standalone iPhone license demo
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          mkdir -p build/Payload/ERILoginDemo.app
+          cp ios/ERILoginDemo/Info.plist build/Payload/ERILoginDemo.app/Info.plist
+          xcrun swiftc -sdk "$SDK" -target arm64-apple-ios16.0 -parse-as-library -O \
+            -framework SwiftUI -framework UIKit -framework Security \
+            ios/ERILoginDemo/ERILoginDemoApp.swift -o build/Payload/ERILoginDemo.app/ERILoginDemo
+          printf 'APPL????' > build/Payload/ERILoginDemo.app/PkgInfo
+          lipo -info build/Payload/ERILoginDemo.app/ERILoginDemo
+          cd build
+          /usr/bin/zip -q -r ERILoginDemo-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERILoginDemo-unsigned-IPA
+          path: build/ERILoginDemo-unsigned.ipa
+          retention-days: 30
