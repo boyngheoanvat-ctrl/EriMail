@@ -12,13 +12,16 @@ private let eriBackgroundIdentifier = "com.eringuyen.admin.background-upload.v1"
 private let eriBackgroundRecordKey = "eri.background.upload.record.v1"
 
 private struct ERIBackgroundRecord: Codable {
-    let id: String
+    var id: String
     let size: Int
     let chunkBytes: Int
     let partCount: Int
     var nextPart: Int
     var acknowledgedBytes: Int
     var failures: Int
+    // Only non-secret product fields. No private key or admin key is persisted.
+    var metadata: Data?
+    var renewals: Int?
 }
 
 private enum ERIBackgroundError: LocalizedError {
@@ -48,6 +51,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
 
     private var record: ERIBackgroundRecord?
     private var sending = false
+    private var renewing = false
     private var retryBlocked = false
     private var backgroundEventsCompletion: (() -> Void)?
 
@@ -151,7 +155,8 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         restore()
     }
 
-    func start(source: URL, uploadID: String, size: Int, chunkBytes: Int) async throws {
+    func start(source: URL, uploadID: String, size: Int, chunkBytes: Int,
+               metadata: Data) async throws {
         guard record == nil else { throw ERIBackgroundError.uploadExists }
         guard size > 0, chunkBytes > 0, chunkBytes <= 4 * 1024 * 1024 else {
             throw ERIBackgroundError.invalidFile
@@ -164,7 +169,8 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
 
         record = ERIBackgroundRecord(id: uploadID, size: size, chunkBytes: chunkBytes,
                                      partCount: parts, nextPart: 0,
-                                     acknowledgedBytes: 0, failures: 0)
+                                     acknowledgedBytes: 0, failures: 0,
+                                     metadata: metadata, renewals: 0)
         progress = 0
         pending = true
         active = true
@@ -184,6 +190,84 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         restore()
     }
 
+    func discardExpiredUpload() {
+        guard !sending, !renewing else { return }
+        if let current = record, let folder = try? Self.jobFolder(current.id) {
+            try? FileManager.default.removeItem(at: folder)
+        }
+        record = nil
+        pending = false
+        active = false
+        progress = 0
+        retryBlocked = false
+        status = "Đã bỏ phiên tải cũ. Thông tin sản phẩm vẫn được lưu; vui lòng chọn lại IPA."
+        persist()
+    }
+
+    // Render's free ephemeral filesystem can lose an upload session on deploy.
+    // Only a server acknowledgement counts. If the server returns HTTP 404,
+    // create a new session and restart from byte zero using the cached chunks.
+    private func renewMissingSession() async {
+        defer { renewing = false }
+        guard var current = record, let metadata = current.metadata else {
+            retryBlocked = true
+            active = false
+            status = "Phiên cũ đã mất trên máy chủ. Hãy bỏ phiên cũ và chọn lại tệp."
+            return
+        }
+        let renewals = current.renewals ?? 0
+        guard renewals < 3 else {
+            retryBlocked = true
+            active = false
+            status = "Máy chủ nhiều lần mất phiên upload. Hãy thử lại khi máy chủ ổn định."
+            return
+        }
+        do {
+            let key = Self.storedAdminKey()
+            guard key.count >= 32 else { throw ERIBackgroundError.keyMissing }
+            var request = URLRequest(url: URL(string: eriBackgroundHost +
+                "/api/v1/admin/upload-sessions")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(key, forHTTPHeaderField: "X-ERI-Admin-Key")
+            request.httpBody = metadata
+            request.timeoutInterval = 60
+            let (body, response) = try await URLSession.shared.data(for: request)
+            let http = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard http == 201,
+                  let data = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let newID = data["upload_id"] as? String,
+                  let chunkSize = data["chunk_bytes"] as? Int,
+                  let totalSize = data["size_bytes"] as? Int,
+                  data["fast"] as? Bool == true,
+                  totalSize == current.size, chunkSize == current.chunkBytes else {
+                throw URLError(.badServerResponse)
+            }
+            let original = try Self.jobFolder(current.id)
+            let renamed = try Self.jobFolder(newID)
+            try FileManager.default.moveItem(at: original, to: renamed)
+            current.id = newID
+            current.nextPart = 0
+            current.acknowledgedBytes = 0
+            current.failures = 0
+            current.renewals = renewals + 1
+            record = current
+            progress = 0
+            pending = true
+            active = true
+            retryBlocked = false
+            persist()
+            status = "Máy chủ đã mất phiên cũ. Đã tạo phiên mới; đang tải lại từ đầu..."
+            renewing = false
+            scheduleNext()
+        } catch {
+            retryBlocked = true
+            active = false
+            status = "Không tạo lại được phiên upload: " + error.localizedDescription +
+                ". Tệp đã tách phần vẫn được giữ trên iPhone; bấm Tiếp tục để thử lại."
+        }
+    }
+
     private static func storedAdminKey() -> String {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -199,7 +283,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
     }
 
     private func scheduleNext() {
-        guard !sending, !retryBlocked, let current = record else { return }
+        guard !sending, !renewing, !retryBlocked, let current = record else { return }
         let key = Self.storedAdminKey()
         guard key.count >= 32 else {
             active = false
@@ -300,6 +384,20 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
             }
         }
 
+        if code == 404 {
+            progress = Double(current.acknowledgedBytes) / Double(current.size)
+            if current.metadata == nil {
+                active = false
+                retryBlocked = true
+                status = "Phiên upload cũ đã mất sau khi máy chủ khởi động lại. Hãy bấm Bỏ phiên cũ, rồi nhập lại."
+            } else if !renewing {
+                renewing = true
+                active = true
+                status = "HTTP 404: Máy chủ mất phiên tải; đang tạo lại từ dữ liệu trên iPhone..."
+                Task { await renewMissingSession() }
+            }
+            return
+        }
         // A missing HTTP response can happen even when the server committed the
         // chunk. The endpoint is idempotent for the same SHA-256 checksum.
         current.failures += 1
