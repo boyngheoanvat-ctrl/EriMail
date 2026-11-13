@@ -302,3 +302,20 @@ body.shop-v2{
 @media(prefers-reduced-motion:reduce){
   .shop-v2 *{scroll-behavior:auto!important;transition:none!important}
 }
+
+/* IPA inspection and signing utilities */
+.shop-v2 .ipa-tools-tabs{gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.shop-v2 .ipa-tool-panel{background:#fff;border:1px solid #e4e1f5;border-radius:19px;padding:22px;box-shadow:0 8px 22px #2016540a}
+.shop-v2 .ipa-tool-panel h3{margin:0 0 8px;font-size:20px;color:#252049}
+.shop-v2 .ipa-tool-panel>p{margin:0 0 16px;color:#616985;font-size:14px;line-height:1.7}
+.shop-v2 .ipa-tool-panel .field{display:block;margin:12px 0;font-size:13px;font-weight:750;color:#33304f}
+.shop-v2 .ipa-tool-panel .field input{display:block;width:100%;margin-top:6px;padding:11px 12px;border:1px solid #dddcef;border-radius:11px;background:#fafaff;color:#292644;min-height:45px}
+.shop-v2 .ipa-tool-panel .field input[type=file]{font-size:13px;overflow-wrap:anywhere}
+.shop-v2 .ipa-tool-panel .field input:focus{outline:2px solid #cac1fd;border-color:#7968de}
+.shop-v2 .ipa-tool-actions{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0 6px}
+.shop-v2 .ipa-tool-result{margin-top:12px;padding:12px 14px;background:#f6f5ff;border-radius:11px;color:#423c77;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+.shop-v2 .ipa-tool-result:empty{display:none}
+.shop-v2 .ipa-tool-result[data-state=error]{color:#a22f46;background:#fff0f1}
+.shop-v2 .ipa-tool-result[data-state=success]{color:#14664e;background:#eafbF2}
+.shop-v2 .ipa-tool-result .btn{margin-top:4px}
+@media(max-width:550px){.shop-v2 .ipa-tool-panel{padding:17px}.shop-v2 .ipa-tool-actions .btn{flex:1 1 145px}}
