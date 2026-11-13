@@ -87,6 +87,9 @@ jobs:
           python-version: '3.12'
       - run: python -m py_compile backend/app.py
       - run: pip install -r backend/requirements.txt httpx
+      - name: Verify IPA website tools
+        working-directory: backend
+        run: python3 test_ipa_tools.py
       - name: Test FREE IPA APK downloads and lost-file handling
         working-directory: backend
         run: python3 test_mod_downloads.py
