@@ -292,8 +292,18 @@ private final class AdminSession: ObservableObject {
                     var req = try request(path, method: "PUT")
                     req.setValue(String(offset), forHTTPHeaderField: "X-ERI-Upload-Offset")
                     req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-                    req.timeoutInterval = 35
-                    let (result, response) = try await URLSession.shared.upload(for: req, from: chunk)
+                    req.timeoutInterval = 25
+                    // For 1 MiB chunks, a normal HTTP body avoids the background
+                    // upload plumbing that can stall on some iOS/HTTP proxy paths.
+                    // Retry using URLSession's upload API if the standard path fails.
+                    let result: Data
+                    let response: URLResponse
+                    if attempt == 1 {
+                        (result, response) = try await URLSession.shared.upload(for: req, from: chunk)
+                    } else {
+                        req.httpBody = chunk
+                        (result, response) = try await URLSession.shared.data(for: req)
+                    }
                     let http = (response as? HTTPURLResponse)?.statusCode ?? 0
                     guard (200...299).contains(http) else { throw AdminError.http(http) }
                     let next = try JSONDecoder().decode(UploadPosition.self, from: result).offset
@@ -304,6 +314,7 @@ private final class AdminSession: ObservableObject {
                     break
                 } catch {
                     lastError = error
+                    onStatus("Lỗi gửi phần \(offset / uploadChunkBytes + 1): \(error.localizedDescription). Đang kiểm tra để tiếp tục...")
                     // A lost response does not mean the server missed the chunk.
                     // Always ask its committed offset before re-sending.
                     if let data = try? await send(path),
