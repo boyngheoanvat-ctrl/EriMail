@@ -190,7 +190,7 @@ function renderCatalog(){
     visual.append(shopIcon(category==="mod"?"gamepad":category==="ai"?"sparkles":"shield"));
     const chip=element("span","product-chip"+(free?" is-free":""),free?"FREE":category==="mod"?"MOD GAME":category==="ai"?"AI PLUS":"CHỨNG CHỈ");
     visual.append(chip);
-    if(category==="mod")visual.append(element("span","product-chip",platform));
+    if(category==="mod")visual.append(element("span","product-chip platform-chip",platform));
     const body=element("div","product-body");
     body.append(element("h3",null,item.name));
     body.append(element("p","product-desc",item.description||"Sản phẩm số từ SHOP MOD BY ERI NGUYỄN"));
