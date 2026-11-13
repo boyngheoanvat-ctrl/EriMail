@@ -24,7 +24,7 @@ app = FastAPI(title="ERI NGUYEN API", version="0.1.0")
 # No wildcard CORS: native iOS clients do not require browser CORS.
 origins = [x.strip() for x in os.getenv("ERI_CORS_ORIGINS", "").split(",") if x.strip()]
 if origins:
-    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Authorization", "Content-Type"], max_age=600)
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-ERI-Chunk-SHA256"], max_age=600)
 
 @contextmanager
 def connection():
