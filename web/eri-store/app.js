@@ -133,6 +133,7 @@ function setView(view){
   if(!["store","orders","account"].includes(view))view="store";
   state.view=view;
   $("store").classList.toggle("hidden",view!=="store");
+  $("ipa-tools")?.classList.toggle("hidden",view!=="store");
   $("hero").classList.toggle("hidden",view!=="store");
   document.querySelector(".features").classList.toggle("hidden",view!=="store");
   $("orders-view").classList.toggle("hidden",view!=="orders");
