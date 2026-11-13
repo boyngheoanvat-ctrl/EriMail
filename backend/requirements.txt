@@ -3,3 +3,4 @@ uvicorn[standard]>=0.30,<1
 pydantic>=2,<3
 python-multipart>=0.0.9
 segno>=1.6,<2
+ipasign==1.0
