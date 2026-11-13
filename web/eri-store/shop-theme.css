@@ -319,3 +319,13 @@ body.shop-v2{
 .shop-v2 .ipa-tool-result[data-state=success]{color:#14664e;background:#eafbF2}
 .shop-v2 .ipa-tool-result .btn{margin-top:4px}
 @media(max-width:550px){.shop-v2 .ipa-tool-panel{padding:17px}.shop-v2 .ipa-tool-actions .btn{flex:1 1 145px}}
+
+/* Show only backend-confirmed IPA bytes. Signing is a separate phase. */
+.shop-v2 .ipa-sign-progress{margin:18px 0 10px;padding:17px;border-radius:15px;background:#f7f6ff;border:1px solid #ddd9fa}
+.shop-v2 .ipa-sign-progress.hidden{display:none!important}
+.shop-v2 .ipa-sign-progress-heading{display:flex;gap:12px;justify-content:space-between;align-items:center;color:#302862;font-size:14px}
+.shop-v2 #ipa-sign-progress-percent{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.shop-v2 #ipa-sign-progress-bar{display:block;appearance:auto;width:100%;height:17px;margin-top:12px;accent-color:#6753f2}
+.shop-v2 #ipa-sign-progress-stage{margin:10px 0 0;color:#626781;font-size:12px;line-height:1.5}
+.shop-v2 .ipa-tool-result[data-state=success]>.ipa-tool-actions{display:flex;gap:10px;flex-wrap:wrap}
+.shop-v2 .ipa-tool-result[data-state=success]>.ipa-tool-actions .btn{flex:1 1 180px;text-align:center}
