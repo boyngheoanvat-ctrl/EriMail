@@ -1,0 +1,80 @@
+name: Backup ERI LOGIN 3 files to GitHub repository
+on:
+  push:
+    branches:
+      - eri-login-dylib-injector
+    paths:
+      - .github/workflows/backup-eri-login-files.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: backup-eri-login-files
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: eri-login-dylib-injector
+          persist-credentials: true
+      - name: Retrieve validated three-file build from GitHub Actions
+        uses: actions/download-artifact@v4
+        with:
+          name: ERI_LOGIN_PRODUCTION_INJECTOR
+          repository: boyngheoanvat-ctrl/EriMail
+          run-id: 43463006589
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: build/eri-login
+      - name: Verify archive contents and copy final files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s build/eri-login/LOGIN.py
+          test -s build/eri-login/ERILogin.dylib
+          test -s build/eri-login/ERIAndroidGate.dex
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct, hashlib
+          a=Path("build/eri-login")
+          dylib=(a/"ERILogin.dylib").read_bytes()
+          dex=(a/"ERIAndroidGate.dex").read_bytes()
+          assert struct.unpack_from("<I",dylib)[0] == 0xfeedfacf, "Not Mach-O 64"
+          assert dex[:4] == b"dex\n", "Not Android DEX"
+          compile((a/"LOGIN.py").read_bytes(), "LOGIN.py", "exec")
+          for f in ("LOGIN.py", "ERILogin.dylib", "ERIAndroidGate.dex"):
+              file=a/f
+              print(f, file.stat().st_size, hashlib.sha256(file.read_bytes()).hexdigest())
+          PY
+          mkdir -p backups/ERI_LOGIN
+          cp build/eri-login/LOGIN.py backups/ERI_LOGIN/LOGIN.py
+          cp build/eri-login/ERILogin.dylib backups/ERI_LOGIN/ERILogin.dylib
+          cp build/eri-login/ERIAndroidGate.dex backups/ERI_LOGIN/ERIAndroidGate.dex
+          (
+            cd backups/ERI_LOGIN
+            sha256sum LOGIN.py ERILogin.dylib ERIAndroidGate.dex > SHA256SUMS.txt
+          )
+      - name: Commit three files to repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backups/ERI_LOGIN/LOGIN.py backups/ERI_LOGIN/ERILogin.dylib backups/ERI_LOGIN/ERIAndroidGate.dex backups/ERI_LOGIN/SHA256SUMS.txt
+          if git diff --cached --quiet; then
+            echo "Files already identical; no commit needed."
+          else
+            git commit -m "Backup production ERI LOGIN Python, iOS dylib and Android dex"
+            git push origin HEAD:eri-login-dylib-injector
+          fi
+      - name: Verify backed up files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s backups/ERI_LOGIN/LOGIN.py
+          test -s backups/ERI_LOGIN/ERILogin.dylib
+          test -s backups/ERI_LOGIN/ERIAndroidGate.dex
+          (cd backups/ERI_LOGIN && sha256sum -c SHA256SUMS.txt)
