@@ -5,6 +5,7 @@ Signing requires a valid P12/private key and matching Apple provisioning profile
 Temporary inputs are deleted after each request; completed downloads expire.
 """
 import importlib.util
+import json
 import os
 import plistlib
 import re
@@ -14,10 +15,13 @@ import struct
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 import zipfile
+from urllib.parse import urlencode, urlsplit
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -184,8 +188,72 @@ def _register_output(file: Path):
             "expires_in_seconds": TICKET_TTL}
 
 
+def _appstore_reference(link: str) -> tuple[int, str]:
+    """Allow App Store product URLs only; never fetch the user-provided host."""
+    if not 25 <= len(link) <= 500:
+        raise HTTPException(422, "Link App Store không hợp lệ")
+    parsed = urlsplit(link.strip())
+    if (parsed.scheme != "https" or parsed.netloc != "apps.apple.com"
+            or parsed.username or parsed.password or parsed.fragment):
+        raise HTTPException(422, "Chỉ chấp nhận đường dẫn HTTPS từ apps.apple.com")
+    match = re.fullmatch(
+        r"/(?:(?P<country>[a-zA-Z]{2})/)?app/(?:[a-zA-Z0-9._%-]{1,180}/)?id(?P<app_id>[0-9]{6,15})/?",
+        parsed.path,
+    )
+    if not match:
+        raise HTTPException(422, "Link phải có dạng apps.apple.com/vn/app/ten-ung-dung/id123456789")
+    return int(match.group("app_id")), (match.group("country") or "vn").upper()
+
+
+def _lookup_appstore(link: str):
+    """Apple Lookup API exposes metadata; it does not expose IPA binaries."""
+    app_id, country = _appstore_reference(link)
+    query = urlencode({"id": app_id, "country": country, "entity": "software"})
+    address = "https://itunes.apple.com/lookup?" + query
+    request = urllib.request.Request(address, headers={
+        "Accept": "application/json",
+        "User-Agent": "ERIStore-AppLookup/1.0",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw = response.read(512 * 1024 + 1)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise HTTPException(503, "Không kết nối được dịch vụ thông tin App Store")
+    if len(raw) > 512 * 1024:
+        raise HTTPException(502, "Phản hồi App Store quá lớn")
+    try:
+        data = json.loads(raw)
+    except (ValueError, UnicodeError):
+        raise HTTPException(502, "Dữ liệu từ App Store không hợp lệ")
+    matches = data.get("results", []) if isinstance(data, dict) else []
+    app = next((entry for entry in matches
+                if isinstance(entry, dict) and entry.get("trackId") == app_id
+                and entry.get("kind") in ("software", "mac-software")), None)
+    if not app:
+        raise HTTPException(404, "Ứng dụng không có trong App Store khu vực này")
+    result_url = app.get("trackViewUrl") or link
+    if urlsplit(result_url).netloc != "apps.apple.com":
+        result_url = link
+    return {
+        "app_id": app_id,
+        "name": str(app.get("trackName", ""))[:160],
+        "developer": str(app.get("artistName", ""))[:160],
+        "bundle_id": str(app.get("bundleId", ""))[:255],
+        "version": str(app.get("version", ""))[:60],
+        "country": country,
+        "app_store_url": result_url,
+        "ipa_available": False,
+        "decrypted_ipa_available": False,
+        "message": "Đã tìm thấy ứng dụng. App Store không cung cấp file IPA đã giải mã qua URL công khai. Bạn có thể cài từ App Store hoặc dùng tệp IPA mà bạn có quyền cung cấp.",
+    }
+
+
 def register_ipa_tools(app, require_customer):
     router = APIRouter()
+
+    @router.get("/api/v1/tools/ipa/appstore")
+    def appstore_lookup(url: str = Query(min_length=25, max_length=500)):
+        return _lookup_appstore(url)
 
     @router.get("/api/v1/tools/ipa/status")
     def tool_status():
