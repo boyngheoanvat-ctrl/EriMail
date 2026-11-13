@@ -448,6 +448,35 @@ private struct ManagedCustomerEnvelope: Decodable {
     let items: [ManagedCustomer]
 }
 
+
+private struct CustomerListRow: View {
+    let customer: ManagedCustomer
+    let busy: Bool
+    let onDelete: () -> Void
+
+    private var orderDetails: String {
+        "Tổng đơn: \(customer.order_count) · Chờ tiền: \(customer.pending_count) · " +
+        "Chờ giao: \(customer.paid_count) · Đã giao: \(customer.fulfilled_count)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(customer.display_name).font(.headline)
+            Text("@" + customer.username)
+                .font(.subheadline).foregroundStyle(.secondary)
+            Text("Liên hệ: " + customer.contact)
+                .textSelection(.enabled)
+            Text(orderDetails)
+                .font(.footnote).foregroundStyle(.secondary)
+            Text("Ngày đăng ký: " + customer.created_at)
+                .font(.caption).foregroundStyle(.secondary)
+            Button("Xóa tài khoản", role: .destructive, action: onDelete)
+                .disabled(busy)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
 private struct CustomerManagementView: View {
     @EnvironmentObject private var session: AdminSession
     @State private var customers: [ManagedCustomer] = []
@@ -469,13 +498,14 @@ private struct CustomerManagementView: View {
     var body: some View {
         List {
             Section {
-                Text("Chọn một tài khoản để xóa vĩnh viễn toàn bộ dữ liệu thuộc tài khoản đó: thông tin đăng ký, phiên đăng nhập, đơn hàng mọi trạng thái và file đã giao.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Text("Không ảnh hưởng sản phẩm đang bán hoặc tài khoản khách hàng khác. Việc xóa không thể hoàn tác.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Xóa vĩnh viễn tài khoản được chọn, toàn bộ đơn hàng, phiên đăng nhập và file đã giao.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             if !status.isEmpty {
-                Section { Text(status).font(.footnote).foregroundStyle(.secondary) }
+                Section {
+                    Text(status).font(.footnote).foregroundStyle(.secondary)
+                }
             }
             Section("Khách hàng (" + String(customers.count) + ")") {
                 if shown.isEmpty {
@@ -483,25 +513,9 @@ private struct CustomerManagementView: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(shown) { customer in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(customer.display_name).font(.headline)
-                        Text("@" + customer.username)
-                            .font(.subheadline).foregroundStyle(.secondary)
-                        Text("Liên hệ: " + customer.contact)
-                            .textSelection(.enabled)
-                        Text("Tổng đơn: " + String(customer.order_count) +
-                             " · Chờ thanh toán: " + String(customer.pending_count) +
-                             " · Chờ giao: " + String(customer.paid_count) +
-                             " · Đã giao: " + String(customer.fulfilled_count))
-                            .font(.footnote).foregroundStyle(.secondary)
-                        Text("Ngày đăng ký: " + customer.created_at)
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Xóa tài khoản", role: .destructive) {
-                            selected = customer
-                        }
-                        .disabled(busy)
+                    CustomerListRow(customer: customer, busy: busy) {
+                        selected = customer
                     }
-                    .padding(.vertical, 6)
                 }
             }
         }
