@@ -15,7 +15,7 @@ const element=(tag,cls,content)=>{
   return node;
 };
 function errorMessage(err){
-  if(err instanceof TypeError)return "Không thể kết nối API. Máy chủ có thể chưa mở CORS cho website hoặc đang tạm ngừng.";
+  if(err instanceof TypeError)return "Không thể kết nối cửa hàng. Vui lòng thử lại sau.";
   return err.message||"Không thể thực hiện yêu cầu.";
 }
 function showBanner(message){
@@ -40,7 +40,7 @@ async function request(path,{method="GET",data,authorized=false}={}){
   try{result=await response.json()}catch{result={}}
   if(!response.ok){
     if(response.status===401&&authorized){signOut(false);throw new Error("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.")}
-    if(response.status===404&&path.startsWith("/api/v1/auth/"))throw new Error("Máy chủ chưa triển khai chức năng tài khoản. Cần cập nhật backend Render.");
+    if(response.status===404&&path.startsWith("/api/v1/auth/"))throw new Error("Tính năng tài khoản đang tạm thời không khả dụng. Vui lòng thử lại sau.");
     const detail=typeof result.detail==="string"?result.detail:"Máy chủ trả về HTTP "+response.status;
     throw new Error(detail);
   }
@@ -89,14 +89,14 @@ async function loadCatalog(){
     state.items=data.items;
     grid.replaceChildren();
     $("catalog-message").textContent=data.items.length?data.items.length+" sản phẩm đang hiển thị":"";
-    if(!data.items.length){grid.append(element("div","empty","Danh mục chưa có sản phẩm. Admin có thể đăng sản phẩm để bán."));return}
+    if(!data.items.length){grid.append(element("div","empty","Danh mục hiện chưa có sản phẩm. Vui lòng quay lại sau."));return}
     data.items.forEach(item=>{
       const card=element("article","product");
       const visual=element("div","product-art",KINDS[state.category].icon);
       const body=element("div","product-body");
       body.append(element("h3",null,item.name));
       body.append(element("p","product-desc",item.description||"Sản phẩm từ ERI STORE"));
-      const extra=state.category==="mod"?(item.version?"Phiên bản "+item.version:"Giao sau xác nhận thanh toán"):state.category==="certificate"?(item.issuer||"Giao hàng thủ công"):"Giao hàng thủ công";
+      const extra=state.category==="mod"?(item.version?"Phiên bản "+item.version:"Sản phẩm số"):state.category==="certificate"?(item.issuer||"Sản phẩm số"):"Sản phẩm số";
       body.append(element("div","product-info",extra));
       const footer=element("div","product-footer");
       footer.append(element("strong","price",money(item.price_vnd)));
@@ -189,7 +189,7 @@ async function downloadDelivery(order){
       cache:"no-store"
     });
     if(!response.ok){
-      if(response.status===410)throw new Error("File đã mất khỏi máy chủ tạm. Liên hệ Admin để được giao lại.");
+      if(response.status===410)throw new Error("Tệp hiện không khả dụng. Vui lòng liên hệ hỗ trợ để nhận lại.");
       if(response.status===401){signOut(false);throw new Error("Phiên đăng nhập đã hết hạn.");}
       throw new Error("Không tải được file (HTTP "+response.status+").");
     }
@@ -229,9 +229,9 @@ function showOrder(order){
         root.append(img);
       }
     }else if(order.payment_setup_required){
-      root.append(element("p","form-error","Chủ cửa hàng chưa liên kết mã QR MoMo. Vui lòng liên hệ trước khi chuyển tiền."));
+      root.append(element("p","form-error","Mã QR thanh toán đang được cập nhật. Vui lòng thử lại sau."));
     }
-    root.append(element("p",null,order.payment_instructions||"Chuyển đúng số tiền và đợi người bán xác nhận."));
+    root.append(element("p",null,"Vui lòng chuyển đúng số tiền và nội dung thanh toán hiển thị trong đơn."));
     if(order.transfer_note){
       root.append(element("p",null,"Nội dung chuyển khoản: "+order.transfer_note));
       root.append(button("Sao chép nội dung","btn outline",async()=>{try{await navigator.clipboard.writeText(order.transfer_note)}catch{}}));
@@ -241,10 +241,10 @@ function showOrder(order){
     root.append(element("p",null,statuses[order.status]||"Trạng thái: "+order.status));
   }
   if(order.status==="fulfilled"&&order.delivery?.download_path){
-    root.append(element("p",null,"File đã được Admin giao trực tiếp: "+order.delivery.filename));
+    root.append(element("p",null,"Tệp của bạn đã sẵn sàng: "+order.delivery.filename));
     root.append(button("⇩ Tải file đã giao","btn primary",()=>downloadDelivery(order)));
   }
-  root.append(element("p","small","Lưu mã đơn và liên hệ Admin để nhận hàng. Việc thanh toán không được xác nhận tự động; Admin chỉ đánh dấu Đã nhận tiền sau khi kiểm tra giao dịch MoMo."));
+  root.append(element("p","small","Lưu mã đơn để theo dõi thanh toán và nhận sản phẩm trong mục Đơn hàng."));
   const actions=element("div","dialog-actions");
   actions.append(button("Đóng","btn outline",closeDialog));
   actions.append(button("Xem đơn hàng","btn primary",()=>{closeDialog();setView("orders")}));
@@ -293,28 +293,13 @@ function showProfile(){
   root.append(" ");
   root.append(button("Đăng xuất","btn danger",()=>signOut()));
 }
-function showInstall(){
-  openDialog("Thêm ERI STORE vào iPhone");
-  const root=$("dialog-body");
-  const ua=navigator.userAgent;
-  if(/iPhone|iPad|iPod/.test(ua)){
-    root.append(element("p",null,"1. Mở website ERI STORE bằng trình duyệt Safari."));
-    root.append(element("p",null,"2. Chạm nút Chia sẻ (hình vuông có mũi tên lên)."));
-    root.append(element("p",null,"3. Chọn Thêm vào Màn hình chính → Thêm."));
-    root.append(element("p","small","iPhone không cần mua chứng chỉ hoặc cài IPA. Nếu đang mở bằng trình duyệt trong ứng dụng khác, hãy mở lại bằng Safari."));
-  }else{
-    root.append(element("p",null,"Trong Chrome hoặc trình duyệt tương thích, mở menu ⋮ và chọn Cài đặt ứng dụng hoặc Thêm vào Màn hình chính."));
-    root.append(element("p","small","Không cần cài APK. Website hoạt động trên điện thoại và máy tính có kết nối mạng."));
-  }
-  root.append(button("Đã hiểu","btn primary",closeDialog));
-}
 document.addEventListener("DOMContentLoaded",()=>{
   $("dialog-close").addEventListener("click",closeDialog);
   $("overlay").addEventListener("click",event=>{if(event.target===$("overlay"))closeDialog()});
   document.addEventListener("keydown",event=>{if(event.key==="Escape")closeDialog()});
   $("header-account").addEventListener("click",()=>setView("account"));
   $("explore").addEventListener("click",()=>{$("store").scrollIntoView({behavior:"smooth"})});
-  for(const id of ["hero-install","install-button"])$(id).addEventListener("click",showInstall);
+  $("hero-orders").addEventListener("click",()=>setView("orders"));
   $("reload").addEventListener("click",loadCatalog);
   $("refresh-orders").addEventListener("click",loadOrders);
   document.querySelectorAll("[data-kind]").forEach(tab=>tab.addEventListener("click",()=>{
