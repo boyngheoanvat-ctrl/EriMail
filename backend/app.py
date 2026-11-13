@@ -238,7 +238,7 @@ class IPA(BaseModel):
     download_url: HttpUrl
     sha256: str = Field(pattern=r"^[a-fA-F0-9]{64}$")
     authorized: bool = False
-    price_vnd: int = Field(gt=0)
+    price_vnd: int = Field(ge=0, le=1000000000)
 
 class Product(BaseModel):
     name: str = Field(min_length=1, max_length=160)
@@ -293,7 +293,41 @@ def admin_ipa_catalog():
 def public_mod_catalog():
     with connection() as db:
         rows = db.execute("SELECT id,name,version,bundle_id,description,price_vnd FROM ipa WHERE authorized=1 ORDER BY id DESC LIMIT 100").fetchall()
-    return {"items": [dict(x) for x in rows]}
+    items = []
+    with connection() as db:
+        for row in rows:
+            item = dict(row)
+            if item["price_vnd"] == 0 and db.execute(
+                "SELECT 1 FROM private_product_uploads WHERE kind='ipa' AND product_id=?",
+                (item["id"],)
+            ).fetchone():
+                item["download_path"] = f'/api/v1/mods/{item["id"]}/download'
+            items.append(item)
+    return {"items": items}
+
+@app.get("/api/v1/mods/{product_id}/download")
+def download_free_mod(product_id: int):
+    # Public download only for authorized, zero-price IPA files stored locally.
+    # Never expose paid files or allow a user-controlled filesystem path.
+    with connection() as db:
+        row = db.execute(
+            "SELECT p.storage_name,p.original_name,p.sha256 FROM ipa i "
+            "JOIN private_product_uploads p ON p.kind='ipa' AND p.product_id=i.id "
+            "WHERE i.id=? AND i.authorized=1 AND i.price_vnd=0",
+            (product_id,)
+        ).fetchone()
+    if row is None:
+        raise HTTPException(404, "Free IPA not available")
+    storage_name = row["storage_name"]
+    if (not re.fullmatch(r"[a-f0-9]{32}\\.ipa", storage_name)
+            or not (UPLOAD_DIR / storage_name).is_file()):
+        raise HTTPException(404, "Free IPA file not available")
+    return FileResponse(
+        UPLOAD_DIR / storage_name,
+        filename=Path(row["original_name"]).name,
+        media_type="application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"},
+    )
 
 @app.post("/api/v1/admin/ipa", dependencies=[Depends(require_admin)], status_code=201)
 def add_ipa(item: IPA):
@@ -695,7 +729,7 @@ async def upload_private_product(
     name, version, bundle_id, issuer, description = (
         field.strip() for field in (name, version, bundle_id, issuer, description)
     )
-    if not 1 <= len(name) <= 160 or not 1 <= price_vnd <= 1_000_000_000:
+    if not 1 <= len(name) <= 160 or not 0 <= price_vnd <= 1_000_000_000 or (kind != "ipa" and price_vnd == 0):
         raise HTTPException(422, "Invalid name or price")
     if len(description) > 2000:
         raise HTTPException(422, "Description too long")
@@ -784,7 +818,7 @@ class EriChunkStart(BaseModel):
     size_bytes: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=2000)
-    price_vnd: int = Field(gt=0, le=1000000000)
+    price_vnd: int = Field(ge=0, le=1000000000)
     issuer: str = Field(default="", max_length=160)
     authorized: bool = False
 
@@ -844,6 +878,8 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
         raise HTTPException(413, "File exceeds maximum size")
     if item.kind == "ipa" and not item.authorized:
         raise HTTPException(422, "Distribution authorization required")
+    if item.kind != "ipa" and item.price_vnd == 0:
+        raise HTTPException(422, "Only Mod Game supports free uploads")
     if item.kind == "certificate" and not item.issuer.strip():
         raise HTTPException(422, "Certificate issuer required")
     UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
