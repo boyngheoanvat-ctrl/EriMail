@@ -138,6 +138,8 @@ function updateHeader(){
   $("header-account").textContent=state.buyer?.display_name?.trim()?.slice(0,1)?.toUpperCase()||"ĐN";
 }
 async function loadCatalog(){
+  const udidPanel=$("certificate-udid");
+  if(udidPanel)udidPanel.classList.toggle("hidden",state.category!=="certificate");
   $("catalog-message").textContent="Đang tải "+KINDS[state.category].title+"...";
   const grid=$("products");grid.replaceChildren();
   grid.append(element("div","placeholder"),element("div","placeholder"),element("div","placeholder"));
@@ -145,7 +147,7 @@ async function loadCatalog(){
     const data=await request("/api/v1/"+KINDS[state.category].endpoint);
     if(!Array.isArray(data.items))throw new Error("Danh mục chưa đúng định dạng.");
     state.items=data.items;
-    $("certificate-udid").classList.toggle("hidden",state.category!=="certificate");
+
     grid.replaceChildren();
     $("catalog-message").textContent=data.items.length?data.items.length+" sản phẩm đang hiển thị":"";
     if(!data.items.length){grid.append(element("div","empty","Danh mục hiện chưa có sản phẩm. Vui lòng quay lại sau."));return}

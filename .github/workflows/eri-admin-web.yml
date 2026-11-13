@@ -340,6 +340,10 @@ jobs:
           set -euo pipefail
           node --check web/eri-store/app.js
           node --check web/eri-store/udid.js
+          grep -q 'id="certificate-udid"' web/eri-store/index.html
+          grep -q 'id="start-udid"' web/eri-store/index.html
+          grep -q 'src="/udid.js"' web/eri-store/index.html
+          grep -q 'if(udidPanel)udidPanel.classList.toggle' web/eri-store/app.js
           test -s backend/udid_routes.py
           test -s backend/apple_iphone_device_ca.pem
           python3 -m json.tool web/eri-store/manifest.webmanifest >/dev/null
