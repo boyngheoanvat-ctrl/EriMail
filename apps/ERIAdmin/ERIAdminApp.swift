@@ -145,7 +145,7 @@ private final class AdminSession: ObservableObject {
                      onProgress: @escaping @MainActor (Double) -> Void) async throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         guard let size = (attrs[.size] as? NSNumber)?.intValue,
-              size > 0 && size <= 300 * 1024 * 1024 else {
+              size > 0 && size <= 512 * 1024 * 1024 else {
             throw URLError(.dataLengthExceedsMaximum)
         }
         let base = "/api/v1/admin/orders/" + orderID + "/delivery-sessions"
@@ -1189,7 +1189,7 @@ private struct OrderFileDeliveryView: View {
         defer { working = false }
         do {
             let imported = try await Task.detached(priority: .userInitiated) {
-                try ImportedFile.copy(source, maxBytes: 300 * 1024 * 1024)
+                try ImportedFile.copy(source, maxBytes: 512 * 1024 * 1024)
             }.value
             defer { try? FileManager.default.removeItem(at: imported.deletingLastPathComponent()) }
             try await session.deliverFile(orderID: order.id, file: imported) { value in
