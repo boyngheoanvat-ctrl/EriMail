@@ -17,17 +17,34 @@
     element.dataset.state = type;
   };
   function makeDownload(result, target) {
-    if (typeof result.download_path !== "string" ||
-        !/^\/api\/v1\/tools\/ipa\/download\/[A-Za-z0-9_-]{32,64}$/.test(result.download_path)) return;
-    const button = document.createElement("a");
-    button.className = "btn primary";
-    button.textContent = "Tải IPA đã xử lý";
-    button.href = API + result.download_path;
-    button.rel = "noreferrer";
-    target.append(document.createElement("p"), button);
+    const path = String(result.download_path || "");
+    const isSigned = /^\/api\/v1\/tools\/ipa\/install\/[A-Za-z0-9_-]{32,64}\/app\.ipa$/.test(path);
+    const isDecrypted = /^\/api\/v1\/tools\/ipa\/download\/[A-Za-z0-9_-]{32,64}$/.test(path);
+    if (!isSigned && !isDecrypted) return;
+    const controls = document.createElement("div");
+    controls.className = "ipa-tool-actions";
+    const download = document.createElement("a");
+    download.className = "btn outline";
+    download.textContent = isSigned ? "Tải IPA đã ký" : "Tải IPA đã xử lý";
+    download.href = API + path;
+    download.rel = "noopener noreferrer";
+    controls.append(download);
+    if (isSigned) {
+      const token = path.split("/")[6];
+      const manifest = API + "/api/v1/tools/ipa/install/" + token + "/manifest.plist";
+      const launch = document.createElement("a");
+      launch.className = "btn primary";
+      launch.href = "itms-services://?action=download-manifest&url=" + encodeURIComponent(manifest);
+      launch.textContent = "Cài trực tiếp lên iPhone";
+      launch.setAttribute("aria-label", "Cài IPA đã ký lên iPhone bằng Safari");
+      controls.append(launch);
+    }
+    target.append(controls);
     const info = document.createElement("p");
     info.className = "small";
-    info.textContent = "Liên kết tải một lần, hết hạn sau 15 phút. Tệp không được lưu trên tài khoản cửa hàng.";
+    info.textContent = isSigned
+      ? "Mở bằng Safari trên iPhone. iOS chỉ cài khi chứng chỉ và provisioning profile hợp lệ cho thiết bị. Liên kết HTTPS có hiệu lực 15 phút, đừng đóng trang trước khi hoàn tất."
+      : "Liên kết tải một lần, hết hạn sau 15 phút. Tệp không được lưu trên tài khoản cửa hàng.";
     target.append(info);
   }
   function submitUpload(endpoint, form, result, {onlyInspect = false} = {}) {
