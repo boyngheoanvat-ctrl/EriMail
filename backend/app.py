@@ -100,6 +100,8 @@ def init():
             db.execute("ALTER TABLE ipa ADD COLUMN description TEXT NOT NULL DEFAULT ''")
         if "price_vnd" not in ipa_columns:
             db.execute("ALTER TABLE ipa ADD COLUMN price_vnd INTEGER NOT NULL DEFAULT 0")
+        if "platform" not in ipa_columns:
+            db.execute("ALTER TABLE ipa ADD COLUMN platform TEXT NOT NULL DEFAULT 'ipa'")
         columns = {row["name"] for row in db.execute("PRAGMA table_info(orders)")}
         for column, dtype in (("payos_order_code", "INTEGER"), ("payos_checkout_url", "TEXT"),
                               ("customer_id", "INTEGER")):
@@ -260,7 +262,7 @@ def health():
 def ipa_catalog(q: str = ""):
     with connection() as db:
         rows = db.execute(
-            "SELECT id,name,version,bundle_id,description,price_vnd FROM ipa WHERE authorized=1 AND (name LIKE ? OR bundle_id LIKE ?) ORDER BY id DESC LIMIT 100",
+            "SELECT id,name,version,bundle_id,description,price_vnd,platform FROM ipa WHERE authorized=1 AND (name LIKE ? OR bundle_id LIKE ?) ORDER BY id DESC LIMIT 100",
             (f"%{q[:100]}%", f"%{q[:100]}%"),
         ).fetchall()
     return {"items": [dict(x) for x in rows]}
@@ -286,44 +288,65 @@ def capabilities():
 @app.get("/api/v1/admin/ipa", dependencies=[Depends(require_admin)])
 def admin_ipa_catalog():
     with connection() as db:
-        rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256,authorized,price_vnd FROM ipa ORDER BY id DESC LIMIT 200").fetchall()
+        rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256,authorized,price_vnd,platform FROM ipa ORDER BY id DESC LIMIT 200").fetchall()
     return {"items": [dict(x) for x in rows]}
+
+def _eri_mod_file(row):
+    """Only advertise a free download if the actual file is still available."""
+    storage_name = row["storage_name"]
+    platform = row["platform"] if row["platform"] in ("ipa", "apk") else "ipa"
+    if (not isinstance(storage_name, str)
+            or not re.fullmatch(r"[a-f0-9]{32}\.(ipa|apk)", storage_name)):
+        return None
+    if not storage_name.endswith("." + platform):
+        return None
+    path = UPLOAD_DIR / storage_name
+    if not path.is_file() or path.stat().st_size != row["size_bytes"]:
+        return None
+    return path
+
 
 @app.get("/api/v1/mods")
 def public_mod_catalog():
     with connection() as db:
-        rows = db.execute("SELECT id,name,version,bundle_id,description,price_vnd FROM ipa WHERE authorized=1 ORDER BY id DESC LIMIT 100").fetchall()
+        rows = db.execute(
+            "SELECT i.id,i.name,i.version,i.bundle_id,i.description,i.price_vnd,"
+            "i.platform,p.storage_name,p.size_bytes "
+            "FROM ipa i LEFT JOIN private_product_uploads p "
+            "ON p.product_id=i.id AND p.kind=i.platform "
+            "WHERE i.authorized=1 ORDER BY i.id DESC LIMIT 100"
+        ).fetchall()
     items = []
-    with connection() as db:
-        for row in rows:
-            item = dict(row)
-            if item["price_vnd"] == 0 and db.execute(
-                "SELECT 1 FROM private_product_uploads WHERE kind='ipa' AND product_id=?",
-                (item["id"],)
-            ).fetchone():
+    for row in rows:
+        item = {key: row[key] for key in
+                ("id", "name", "version", "bundle_id", "description", "price_vnd", "platform")}
+        if item["price_vnd"] == 0:
+            if row["storage_name"] and _eri_mod_file(row):
                 item["download_path"] = f'/api/v1/mods/{item["id"]}/download'
-            items.append(item)
+            else:
+                item["file_available"] = False
+        items.append(item)
     return {"items": items}
+
 
 @app.get("/api/v1/mods/{product_id}/download")
 def download_free_mod(product_id: int):
-    # Public download only for authorized, zero-price IPA files stored locally.
-    # Never expose paid files or allow a user-controlled filesystem path.
+    # Only files that are authorized, FREE, and actually stored on server.
     with connection() as db:
         row = db.execute(
-            "SELECT p.storage_name,p.original_name,p.sha256 FROM ipa i "
-            "JOIN private_product_uploads p ON p.kind='ipa' AND p.product_id=i.id "
+            "SELECT p.storage_name,p.original_name,p.size_bytes,i.platform "
+            "FROM ipa i JOIN private_product_uploads p "
+            "ON p.kind=i.platform AND p.product_id=i.id "
             "WHERE i.id=? AND i.authorized=1 AND i.price_vnd=0",
             (product_id,)
         ).fetchone()
     if row is None:
-        raise HTTPException(404, "Free IPA not available")
-    storage_name = row["storage_name"]
-    if (not re.fullmatch(r"[a-f0-9]{32}\\.ipa", storage_name)
-            or not (UPLOAD_DIR / storage_name).is_file()):
-        raise HTTPException(404, "Free IPA file not available")
+        raise HTTPException(404, "Free mod file not available")
+    path = _eri_mod_file(row)
+    if path is None:
+        raise HTTPException(404, "File missing on server; ask admin to re-upload")
     return FileResponse(
-        UPLOAD_DIR / storage_name,
+        path,
         filename=Path(row["original_name"]).name,
         media_type="application/octet-stream",
         headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"},
@@ -704,9 +727,10 @@ async def sign_ipa(
 
 # Files are private and only uploadable by an authenticated admin.
 # Use persistent, access-controlled storage for ERI_UPLOAD_DIR and ERI_DB_PATH in production.
-UPLOAD_LIMITS = {"ipa": 512 * 1024**2, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
+UPLOAD_LIMITS = {"ipa": 512 * 1024**2, "apk": 512 * 1024**2, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
 UPLOAD_SUFFIXES = {
     "ipa": {".ipa"},
+    "apk": {".apk"},
     "certificate": {".p12", ".mobileprovision", ".zip"},
     "ai": {".txt", ".json", ".csv", ".zip"},
 }
@@ -729,13 +753,13 @@ async def upload_private_product(
     name, version, bundle_id, issuer, description = (
         field.strip() for field in (name, version, bundle_id, issuer, description)
     )
-    if not 1 <= len(name) <= 160 or not 0 <= price_vnd <= 1_000_000_000 or (kind != "ipa" and price_vnd == 0):
+    if not 1 <= len(name) <= 160 or not 0 <= price_vnd <= 1_000_000_000 or (kind not in ("ipa", "apk") and price_vnd == 0):
         raise HTTPException(422, "Invalid name or price")
     if len(description) > 2000:
         raise HTTPException(422, "Description too long")
-    if kind == "ipa" and (
-        not authorized or not 1 <= len(version) <= 60 or
-        not 3 <= len(bundle_id) <= 255
+    if kind in ("ipa", "apk") and (
+        not authorized or (kind == "ipa" and
+        (not 1 <= len(version) <= 60 or not 3 <= len(bundle_id) <= 255))
     ):
         raise HTTPException(422, "Valid IPA version, bundle ID and distribution rights required")
     if kind == "certificate" and not 1 <= len(issuer) <= 160:
@@ -763,7 +787,7 @@ async def upload_private_product(
                 target.write(chunk)
         if size == 0:
             raise HTTPException(422, "Empty file")
-        if suffix in {".ipa", ".zip"}:
+        if suffix in {".ipa", ".apk", ".zip"}:
             try:
                 with zipfile.ZipFile(temporary_path) as archive:
                     if kind == "ipa" and not any(
@@ -771,15 +795,18 @@ async def upload_private_product(
                         for member in archive.infolist()
                     ):
                         raise HTTPException(422, "Not a valid IPA payload")
+                    if kind == "apk" and "AndroidManifest.xml" not in archive.namelist():
+                        raise HTTPException(422, "Invalid APK: missing AndroidManifest.xml")
             except zipfile.BadZipFile:
                 raise HTTPException(422, "Invalid ZIP or IPA file")
         os.replace(temporary_path, final_path)
         with connection() as db:
-            if kind == "ipa":
+            if kind in ("ipa", "apk"):
                 row = db.execute(
-                    "INSERT INTO ipa(name,version,bundle_id,download_url,sha256,authorized,price_vnd) "
-                    "VALUES(?,?,?,?,?,1,?)",
-                    (name, version, bundle_id, "private:" + storage_id, digest.hexdigest(), price_vnd),
+                    "INSERT INTO ipa(name,version,bundle_id,download_url,sha256,authorized,price_vnd,platform) "
+                    "VALUES(?,?,?,?,?,1,?,?)",
+                    (name, version if kind == "ipa" else "", bundle_id if kind == "ipa" else "",
+                     "private:" + storage_id, digest.hexdigest(), price_vnd, kind),
                 )
             elif kind == "certificate":
                 row = db.execute(
@@ -813,7 +840,7 @@ ERI_CHUNK_BYTES = 4 * 1024 * 1024
 _eri_upload_lock = asyncio.Lock()
 
 class EriChunkStart(BaseModel):
-    kind: str = Field(pattern="^(ipa|certificate|ai)$")
+    kind: str = Field(pattern="^(ipa|apk|certificate|ai)$")
     filename: str = Field(min_length=1, max_length=180)
     size_bytes: int = Field(gt=0)
     name: str = Field(min_length=1, max_length=160)
@@ -883,9 +910,9 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
         raise HTTPException(422, "Unsupported file extension")
     if item.size_bytes > UPLOAD_LIMITS[item.kind]:
         raise HTTPException(413, "File exceeds maximum size")
-    if item.kind == "ipa" and not item.authorized:
+    if item.kind in ("ipa", "apk") and not item.authorized:
         raise HTTPException(422, "Distribution authorization required")
-    if item.kind != "ipa" and item.price_vnd == 0:
+    if item.kind not in ("ipa", "apk") and item.price_vnd == 0:
         raise HTTPException(422, "Only Mod Game supports free uploads")
     if item.kind == "certificate" and not item.issuer.strip():
         raise HTTPException(422, "Certificate issuer required")
@@ -1041,6 +1068,14 @@ async def eri_finish_chunk_upload(upload_id: str):
                 digest.update(data)
         if meta["extension"] == ".ipa":
             version, bundle_id = _eri_ipa_properties(part)
+        elif meta["extension"] == ".apk":
+            try:
+                with zipfile.ZipFile(part) as archive:
+                    if "AndroidManifest.xml" not in archive.namelist():
+                        raise HTTPException(422, "Invalid APK: missing AndroidManifest.xml")
+            except zipfile.BadZipFile:
+                raise HTTPException(422, "Invalid APK archive")
+            version, bundle_id = "", ""
         elif meta["extension"] == ".zip":
             try:
                 with zipfile.ZipFile(part) as archive:
@@ -1054,12 +1089,12 @@ async def eri_finish_chunk_upload(upload_id: str):
         os.replace(part, final)
         try:
             with connection() as db:
-                if meta["kind"] == "ipa":
+                if meta["kind"] in ("ipa", "apk"):
                     row = db.execute(
                         "INSERT INTO ipa(name,version,bundle_id,download_url,sha256,"
-                        "authorized,price_vnd,description) VALUES(?,?,?,?,?,1,?,?)",
+                        "authorized,price_vnd,description,platform) VALUES(?,?,?,?,?,1,?,?,?)",
                         (meta["name"], version, bundle_id, "private:" + upload_id,
-                         digest.hexdigest(), meta["price_vnd"], meta["description"]))
+                         digest.hexdigest(), meta["price_vnd"], meta["description"], meta["kind"]))
                 elif meta["kind"] == "certificate":
                     row = db.execute(
                         "INSERT INTO certificates(name,issuer,description,price_vnd,active)"
@@ -1151,23 +1186,29 @@ def admin_unlink_momo_qr():
 
 @app.get("/api/v1/admin/catalog/{kind}", dependencies=[Depends(require_admin)])
 def admin_catalog_products(kind: str):
-    lookup = {"ipa": "ipa", "certificate": "certificates", "ai": "products"}
+    lookup = {"ipa": "ipa", "apk": "ipa", "certificate": "certificates", "ai": "products"}
     if kind not in lookup:
         raise HTTPException(404, "Danh mục không tồn tại")
     with connection() as db:
-        rows = db.execute("SELECT id,name,description,price_vnd FROM " + lookup[kind] +
-                          " ORDER BY id DESC LIMIT 300").fetchall()
+        query = "SELECT id,name,description,price_vnd FROM " + lookup[kind]
+        params = ()
+        if kind in ("ipa", "apk"):
+            query += " WHERE platform=?"
+            params = (kind,)
+        rows = db.execute(query + " ORDER BY id DESC LIMIT 300", params).fetchall()
     return {"items": [dict(row) for row in rows]}
 
 @app.delete("/api/v1/admin/catalog/{kind}/{product_id}",
             dependencies=[Depends(require_admin)])
 def admin_delete_catalog_product(kind: str, product_id: int):
-    lookup = {"ipa": "ipa", "certificate": "certificates", "ai": "products"}
+    lookup = {"ipa": "ipa", "apk": "ipa", "certificate": "certificates", "ai": "products"}
     if kind not in lookup or product_id <= 0:
         raise HTTPException(404, "Sản phẩm không tồn tại")
     storage_names = []
     with connection() as db:
-        row = db.execute("SELECT id FROM " + lookup[kind] + " WHERE id=?", (product_id,)).fetchone()
+        condition = " AND platform=?" if kind in ("ipa", "apk") else ""
+        params = (product_id, kind) if condition else (product_id,)
+        row = db.execute("SELECT id FROM " + lookup[kind] + " WHERE id=?" + condition, params).fetchone()
         if row is None:
             raise HTTPException(404, "Sản phẩm không tồn tại")
         matches = db.execute(
