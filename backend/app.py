@@ -821,6 +821,7 @@ class EriChunkStart(BaseModel):
     price_vnd: int = Field(ge=0, le=1000000000)
     issuer: str = Field(default="", max_length=160)
     authorized: bool = False
+    fast: bool = False
 
 def _eri_paths(upload_id: str):
     if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
@@ -837,6 +838,12 @@ def _eri_read_session(upload_id: str):
     except (OSError, ValueError, TypeError):
         raise HTTPException(404, "Upload session not found; server storage may have restarted")
     actual = data_file.stat().st_size if data_file.exists() else -1
+    if metadata.get("fast"):
+        # Fast mode pre-sizes a sparse file; completed ranges are tracked
+        # independently so a partial chunk is never considered acknowledged.
+        if actual != metadata["size_bytes"]:
+            raise HTTPException(409, "Fast upload data missing or inconsistent")
+        return metadata
     if actual < 0 or actual > metadata["size_bytes"]:
         raise HTTPException(409, "Upload data missing or inconsistent")
     if actual != metadata["offset"]:
@@ -888,24 +895,114 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
         metadata_file, data_file = _eri_paths(upload_id)
         metadata = item.model_dump()
         metadata.update(upload_id=upload_id, filename=filename, extension=extension, offset=0)
-        with data_file.open("xb"):
-            pass
+        with data_file.open("xb") as dest:
+            if item.fast:
+                # Sparse allocation; avoids allocating a second full copy of large IPAs.
+                dest.truncate(item.size_bytes)
         os.chmod(data_file, 0o600)
+        if item.fast:
+            (UPLOAD_DIR / ("." + upload_id + ".parts")).mkdir(mode=0o700)
         _eri_save_session(upload_id, metadata)
-    return {"upload_id": upload_id, "offset": 0,
+    return {"upload_id": upload_id, "offset": 0, "fast": item.fast,
             "size_bytes": item.size_bytes, "chunk_bytes": ERI_CHUNK_BYTES}
 
 @app.get("/api/v1/admin/upload-sessions/{upload_id}", dependencies=[Depends(require_admin)])
 async def eri_chunk_upload_status(upload_id: str):
     async with _eri_upload_lock:
         meta = _eri_read_session(upload_id)
-        return {"offset": meta["offset"], "size_bytes": meta["size_bytes"]}
+        return {"offset": meta["offset"], "size_bytes": meta["size_bytes"],
+                "fast": bool(meta.get("fast"))}
+
+
+def _eri_fast_parts_dir(upload_id: str) -> Path:
+    # _eri_paths validates the upload_id before constructing this path.
+    _eri_paths(upload_id)
+    return UPLOAD_DIR / ("." + upload_id + ".parts")
+
+
+def _eri_fast_part_count(meta: dict) -> int:
+    return (meta["size_bytes"] + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES
+
+
+def _eri_fast_part_marker(upload_id: str, index: int) -> Path:
+    return _eri_fast_parts_dir(upload_id) / (f"{index:06d}.sha256")
+
+
+@app.get("/api/v1/admin/upload-sessions/{upload_id}/fast-parts",
+         dependencies=[Depends(require_admin)])
+async def eri_fast_upload_status(upload_id: str):
+    async with _eri_upload_lock:
+        meta = _eri_read_session(upload_id)
+        if not meta.get("fast"):
+            raise HTTPException(409, "Session is not in fast upload mode")
+        count = _eri_fast_part_count(meta)
+        received = [i for i in range(count)
+                    if _eri_fast_part_marker(upload_id, i).is_file()]
+    return {"received": received, "chunk_bytes": ERI_CHUNK_BYTES,
+            "size_bytes": meta["size_bytes"], "total_parts": count}
+
+
+@app.post("/api/v1/admin/upload-sessions/{upload_id}/fast-parts/{index}",
+          dependencies=[Depends(require_admin)])
+async def eri_send_fast_part(upload_id: str, index: int, request: Request,
+                             x_eri_chunk_sha256: str = Header(...)):
+    # Authorization is enforced before reading the body. Each range is
+    # independently hash-checked, then atomically marked as acknowledged.
+    if not re.fullmatch(r"[a-f0-9]{64}", x_eri_chunk_sha256):
+        raise HTTPException(422, "Invalid chunk checksum")
+    async with _eri_upload_lock:
+        meta = _eri_read_session(upload_id)
+        if not meta.get("fast"):
+            raise HTTPException(409, "Session is not in fast upload mode")
+        count = _eri_fast_part_count(meta)
+        if not 0 <= index < count:
+            raise HTTPException(422, "Invalid chunk index")
+        expected = min(ERI_CHUNK_BYTES, meta["size_bytes"] - index * ERI_CHUNK_BYTES)
+        marker = _eri_fast_part_marker(upload_id, index)
+        if marker.is_file():
+            if marker.read_text() != x_eri_chunk_sha256:
+                raise HTTPException(409, "Chunk checksum differs from acknowledged part")
+            return {"index": index, "received_bytes": expected, "duplicate": True}
+
+    chunk = bytearray()
+    async for piece in request.stream():
+        chunk.extend(piece)
+        if len(chunk) > expected:
+            raise HTTPException(413, "Chunk exceeds expected size")
+    if len(chunk) != expected:
+        raise HTTPException(422, "Incomplete chunk")
+    if hashlib.sha256(chunk).hexdigest() != x_eri_chunk_sha256:
+        raise HTTPException(422, "Chunk checksum mismatch")
+
+    async with _eri_upload_lock:
+        # Revalidate after the network transfer (another call can have completed).
+        meta = _eri_read_session(upload_id)
+        if not meta.get("fast"):
+            raise HTTPException(409, "Session is not in fast upload mode")
+        marker = _eri_fast_part_marker(upload_id, index)
+        if marker.is_file():
+            if marker.read_text() != x_eri_chunk_sha256:
+                raise HTTPException(409, "Chunk checksum differs from acknowledged part")
+            return {"index": index, "received_bytes": expected, "duplicate": True}
+        _, data_file = _eri_paths(upload_id)
+        with data_file.open("r+b") as dest:
+            dest.seek(index * ERI_CHUNK_BYTES)
+            dest.write(chunk)
+            dest.flush()
+        staged = marker.with_name(marker.name + "." + secrets.token_hex(8) + ".writing")
+        staged.write_text(x_eri_chunk_sha256)
+        os.chmod(staged, 0o600)
+        os.replace(staged, marker)
+    return {"index": index, "received_bytes": expected, "duplicate": False}
+
 
 @app.put("/api/v1/admin/upload-sessions/{upload_id}", dependencies=[Depends(require_admin)])
 async def eri_chunk_upload(upload_id: str, request: Request,
                            x_eri_upload_offset: int = Header(...)):
     async with _eri_upload_lock:
         meta = _eri_read_session(upload_id)
+        if meta.get("fast"):
+            raise HTTPException(409, "Use fast-parts endpoint for this session")
         if x_eri_upload_offset != meta["offset"]:
             raise HTTPException(409, detail={"offset": meta["offset"]})
         written = 0
@@ -929,6 +1026,12 @@ async def eri_chunk_upload(upload_id: str, request: Request,
 async def eri_finish_chunk_upload(upload_id: str):
     async with _eri_upload_lock:
         meta = _eri_read_session(upload_id)
+        if meta.get("fast"):
+            # Do not finalize until every validated byte range is acknowledged.
+            if any(not _eri_fast_part_marker(upload_id, i).is_file()
+                   for i in range(_eri_fast_part_count(meta))):
+                raise HTTPException(409, "Not all fast upload parts have arrived")
+            meta["offset"] = meta["size_bytes"]
         if meta["offset"] != meta["size_bytes"]:
             raise HTTPException(409, "File not fully transferred")
         metadata_file, part = _eri_paths(upload_id)
@@ -977,6 +1080,15 @@ async def eri_finish_chunk_upload(upload_id: str):
             os.replace(final, part)
             raise
         metadata_file.unlink(missing_ok=True)
+        if meta.get("fast"):
+            # Cleanup is best effort after the DB transaction succeeds.
+            directory = _eri_fast_parts_dir(upload_id)
+            try:
+                for marker in directory.iterdir():
+                    marker.unlink()
+                directory.rmdir()
+            except OSError:
+                pass
     return {"id": product_id, "name": meta["name"], "uploaded": True}
 
 
