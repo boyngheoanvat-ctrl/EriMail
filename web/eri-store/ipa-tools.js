@@ -188,22 +188,7 @@
     const signForm = $("ipa-sign-form");
     const signStatus = $("ipa-sign-status");
     if (!signForm || !signStatus) return;
-    signForm.addEventListener("submit", ev => {
-      ev.preventDefault();
-      if (!signForm.reportValidity()) return;
-      for (const [name, suffix] of [["p12", ".p12"], ["mobileprovision", ".mobileprovision"]]) {
-        const file = signForm.elements.namedItem(name)?.files?.[0];
-        if (!file || !file.name.toLowerCase().endsWith(suffix)) {
-          display(signStatus, "Vui lòng chọn đúng file " + suffix, "error");
-          return;
-        }
-        if (file.size > 10 * 1024 * 1024) {
-          display(signStatus, "Chứng chỉ hoặc mobileprovision quá 10 MB.", "error");
-          return;
-        }
-      }
-      submitUpload("/api/v1/tools/ipa/sign", signForm, signStatus);
-    });
+    // Large file signing is handled by sign-jobs.js with resumable chunks.
     fetch(API + "/api/v1/tools/ipa/status", {cache:"no-store"})
       .then(r => r.ok ? r.json() : null)
       .then(info => {
