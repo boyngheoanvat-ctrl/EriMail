@@ -123,7 +123,7 @@ USERNAME_RULE = re.compile(r"^[a-zA-Z0-9_.-]{3,32}$")
 class CustomerRegistration(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     password: str = Field(min_length=10, max_length=128)
-    display_name: str = Field(min_length=2, max_length=80)
+    display_name: str = Field(min_length=1, max_length=80)
     contact: str = Field(min_length=6, max_length=100)
 
 class CustomerLogin(BaseModel):
@@ -174,7 +174,7 @@ def customer_register(body: CustomerRegistration):
     username = body.username.strip().lower()
     display_name = body.display_name.strip()
     contact = body.contact.strip()
-    if not USERNAME_RULE.fullmatch(username) or not (2 <= len(display_name) <= 80) or not (6 <= len(contact) <= 100):
+    if not USERNAME_RULE.fullmatch(username) or not (1 <= len(display_name) <= 80) or not (6 <= len(contact) <= 100):
         raise HTTPException(422, "Thông tin đăng ký không hợp lệ")
     salt = secrets.token_bytes(16)
     hashed = _customer_password_hash(body.password, salt)

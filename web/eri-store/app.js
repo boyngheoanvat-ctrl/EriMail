@@ -63,7 +63,26 @@ async function request(path,{method="GET",data,authorized=false}={}){
   if(!response.ok){
     if(response.status===401&&authorized){signOut(false);throw new Error("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.")}
     if(response.status===404&&path.startsWith("/api/v1/auth/"))throw new Error("Tính năng tài khoản đang tạm thời không khả dụng. Vui lòng thử lại sau.");
-    const detail=typeof result.detail==="string"?result.detail:"Máy chủ trả về HTTP "+response.status;
+    let detail=typeof result.detail==="string"?result.detail:"Máy chủ trả về HTTP "+response.status;
+    if(response.status===422){
+      const labels={username:"Tên đăng nhập",password:"Mật khẩu",display_name:"Tên người nhận",contact:"Thông tin liên hệ"};
+      const notes={
+        username:"Tên đăng nhập phải gồm 3–32 ký tự: chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.",
+        password:"Mật khẩu phải dài 10–128 ký tự.",
+        display_name:"Tên người nhận phải có 1–80 ký tự.",
+        contact:"Thông tin liên hệ phải có 6–100 ký tự."
+      };
+      if(Array.isArray(result.detail)){
+        const fields=[...new Set(result.detail.map(issue=>{
+          const field=Array.isArray(issue.loc)?String(issue.loc[issue.loc.length-1]):"";
+          return labels[field]?field:null;
+        }).filter(Boolean))];
+        detail=fields.length?fields.map(field=>notes[field]).join(" "):
+          "Thông tin chưa hợp lệ. Vui lòng kiểm tra các ô đã nhập.";
+      }else if(!detail || detail.startsWith("Máy chủ trả về")){
+        detail="Thông tin chưa hợp lệ. Vui lòng kiểm tra các ô đã nhập.";
+      }
+    }
     throw new Error(detail);
   }
   return result;
@@ -159,7 +178,11 @@ function authModal(register=false){
     const label=element("label","field",title);
     const input=element("input");input.name=name;input.type=type;input.required=required;input.autocomplete=name==="username"?"username":name==="password"?(register?"new-password":"current-password"):"on";
     if(name==="username"){input.minLength=3;input.maxLength=32;input.pattern="[a-zA-Z0-9_.-]{3,32}"}
-    if(name==="password"&&register)input.minLength=10;
+    if(register){
+      if(name==="password"){input.minLength=10;input.maxLength=128}
+      if(name==="display_name"){input.minLength=1;input.maxLength=80}
+      if(name==="contact"){input.minLength=6;input.maxLength=100}
+    }
     label.append(input);form.append(label);inputs[name]=input;
   }
   const rememberLabel=element("label","remember-row");
@@ -177,7 +200,14 @@ function authModal(register=false){
     e.preventDefault();submit.disabled=true;failure.textContent="";
     try{
       const body={username:inputs.username.value.trim(),password:inputs.password.value};
-      if(register){body.display_name=inputs.display_name.value.trim();body.contact=inputs.contact.value.trim()}
+      if(register){
+        body.display_name=inputs.display_name.value.trim();
+        body.contact=inputs.contact.value.trim();
+        if(body.display_name.length<1 || body.display_name.length>80)
+          throw new Error("Vui lòng nhập tên người nhận (1–80 ký tự).");
+        if(body.contact.length<6 || body.contact.length>100)
+          throw new Error("Liên hệ giao hàng phải có từ 6 đến 100 ký tự.");
+      }
       const result=await request("/api/v1/auth/"+(register?"register":"login"),{method:"POST",data:body});
       if(!result.token||!result.customer)throw new Error("Phản hồi đăng nhập chưa đúng định dạng.");
       state.token=result.token;state.buyer=result.customer;

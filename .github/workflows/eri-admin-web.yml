@@ -116,9 +116,10 @@ jobs:
           assert client.get("/api/v1/certificates").json()["items"][0]["price_vnd"] == 260000
           register = client.post("/api/v1/auth/register", json={
               "username":"testbuyer", "password":"LongSecurePassword2026!",
-              "display_name":"Khách kiểm thử", "contact":"Zalo: testbuyer"
+              "display_name":"T", "contact":"Zalo: testbuyer"
           })
           assert register.status_code == 201, register.text
+          assert register.json()["customer"]["display_name"] == "T"
           auth = {"Authorization":"Bearer " + register.json()["token"]}
           for kind, item, amount in [("mod",m,300000),("ai",a,130000),("certificate",c,260000)]:
               order = client.post("/api/v1/orders", headers=auth,
