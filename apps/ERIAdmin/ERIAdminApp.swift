@@ -233,8 +233,8 @@ private final class AdminSession: ObservableObject {
         throw errorToThrow
     }
 
-    // Up to three HTTPS transfers run concurrently without faking progress.
-    // Progress is calculated from chunks confirmed by the backend.
+    // Use one active HTTPS upload request at a time to the ERI API host.
+    // Keep checksummed resume and show only server-acknowledged progress.
     private func transferFastChunks(path: String, file: URL, size: Int,
                                     chunkBytes: Int, onStatus: @escaping @MainActor (String) -> Void,
                                     onProgress: @escaping @MainActor (Double) -> Void) async throws {
@@ -247,39 +247,22 @@ private final class AdminSession: ObservableObject {
             throw URLError(.badServerResponse)
         }
         let received = Set(status.received)
-        let missing = (0..<total).filter { !received.contains($0) }
         var completed = 0
         for index in received {
             completed += min(chunkBytes, size - index * chunkBytes)
         }
         onProgress(Double(completed) / Double(size))
-        onStatus("Chế độ nhanh: tối đa 3 kết nối HTTPS song song")
+        onStatus("Một luồng HTTPS · tiếp tục từ dữ liệu máy chủ đã nhận")
 
-        var nextToStart = 0
-        try await withThrowingTaskGroup(of: Int.self) { group in
-            for _ in 0..<min(3, missing.count) {
-                let index = missing[nextToStart]
-                nextToStart += 1
-                group.addTask {
-                    try await self.sendFastPart(path: path, index: index, file: file,
-                                                totalSize: size, chunkBytes: chunkBytes)
-                }
-            }
-            while let bytes = try await group.next() {
-                completed += bytes
-                onProgress(Double(completed) / Double(size))
-                let sentMB = String(format: "%.1f", Double(completed) / (1024 * 1024))
-                let totalMB = String(format: "%.1f", Double(size) / (1024 * 1024))
-                onStatus("Máy chủ đã nhận " + sentMB + "/" + totalMB + " MB · 3 luồng")
-                if nextToStart < missing.count {
-                    let index = missing[nextToStart]
-                    nextToStart += 1
-                    group.addTask {
-                        try await self.sendFastPart(path: path, index: index, file: file,
-                                                    totalSize: size, chunkBytes: chunkBytes)
-                    }
-                }
-            }
+        for index in 0..<total where !received.contains(index) {
+            try Task.checkCancellation()
+            let bytes = try await sendFastPart(path: path, index: index, file: file,
+                                               totalSize: size, chunkBytes: chunkBytes)
+            completed += bytes
+            onProgress(Double(completed) / Double(size))
+            let sentMB = String(format: "%.1f", Double(completed) / (1024 * 1024))
+            let totalMB = String(format: "%.1f", Double(size) / (1024 * 1024))
+            onStatus("Máy chủ đã nhận " + sentMB + "/" + totalMB + " MB · 1 luồng HTTPS")
         }
     }
 
