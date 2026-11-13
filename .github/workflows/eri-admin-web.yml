@@ -179,6 +179,35 @@ jobs:
                            content=b"Unsigned XML is not an Apple CMS signature")
           assert spoof.status_code == 422,spoof.text
           assert client.get(status_path,headers=auth).json()["complete"] is False
+          # The real iPhone sent a valid signed callback twice: first a 303,
+          # then a 409. Simulate an already-verified CMS payload to test
+          # the redirect and replay behavior without weakening production CMS.
+          from unittest.mock import patch
+          from app import connection
+          signed_attributes={
+              "UDID":"00008020-001830D911A2002E", "CHALLENGE":token
+          }
+          callback="/api/v1/cert-udid/callback/"+token
+          with patch("udid_routes._verify_apple_cms",return_value=signed_attributes) as verified:
+              first_scan=client.post(callback,headers={
+                  "Content-Type":"application/pkcs7-mime"
+              },content=b"mock-valid-signed-cms",follow_redirects=False)
+              assert first_scan.status_code == 301,first_scan.text
+              assert first_scan.headers["location"] == "https://eri-store-web.onrender.com/?udid_scan=complete"
+              assert first_scan.headers["cache-control"] == "no-store"
+              assert token not in first_scan.headers["location"]
+              assert "00008020" not in first_scan.headers["location"]
+              retry_scan=client.post(callback,headers={
+                  "Content-Type":"application/pkcs7-mime"
+              },content=b"same-cms-retry",follow_redirects=False)
+              assert retry_scan.status_code == 301,retry_scan.text
+              assert verified.call_count == 1, "Completed retry must not verify again"
+          assert client.get(status_path,headers=auth).json()["complete"] is True
+          with connection() as db:
+              saved=db.execute("SELECT udid,source FROM cert_order_udids WHERE order_id=?",
+                               (certificate_id,)).fetchone()
+              assert saved["source"] == "apple_profile"
+          assert client.get(profile_path).status_code == 409
           manual_path="/api/v1/me/certificate-orders/"+certificate_id+"/udid"
           manual_value="00008020-001830D911A2002E"
           assert client.put(manual_path,headers=other_auth,

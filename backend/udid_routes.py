@@ -231,11 +231,23 @@ def install_udid_routes(app, connection, require_customer, require_admin):
         except ImportError:
             raise HTTPException(503, "Chưa cấu hình tạo mã QR")
 
+    def _udid_redirect():
+        # iOS Profile Service may POST its signed device info again when the
+        # previous redirect was not accepted. Use the 301 response expected by
+        # Safari's profile handoff, with no UDID or token in the Location.
+        return RedirectResponse(
+            WEB_ORIGIN + "/?udid_scan=complete",
+            status_code=301,
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        )
+
     @app.post("/api/v1/cert-udid/callback/{token}")
     async def device_callback(token: str, request: Request):
         row = _lookup_session(token)
         if row["completed_at"]:
-            raise HTTPException(409, "Lượt này đã được xử lý")
+            # The signed UDID was already verified and saved. Device retries
+            # must be idempotent: do not reject the same enrollment with 409.
+            return _udid_redirect()
         content_type = request.headers.get("content-type", "").lower()
         if not any(x in content_type for x in
                    ("application/pkcs7-signature", "application/x-apple-aspen-config",
@@ -270,7 +282,9 @@ def install_udid_routes(app, connection, require_customer, require_admin):
                 "AND kind='certificate' AND status!='cancelled'",
                 (row["order_id"], row["customer_id"])
             ).fetchone()
-            if (not current or current["completed_at"] or not order or
+            if current and current["completed_at"] and order:
+                return _udid_redirect()
+            if (not current or not order or
                 datetime.fromisoformat(current["expires_at"]) <= _utc_now()):
                 raise HTTPException(409, "Lượt quét đã hết hạn hoặc đơn hàng không còn")
             db.execute(
@@ -284,8 +298,8 @@ def install_udid_routes(app, connection, require_customer, require_admin):
                 "UPDATE cert_udid_sessions SET completed_at=? WHERE token_hash=?",
                 (now, row["token_hash"])
             )
-        # Do not include UDID or identifying data in redirected URLs.
-        return RedirectResponse(WEB_ORIGIN + "/?udid_scan=complete", status_code=303)
+        # Return the same safe redirect for initial and repeated callbacks.
+        return _udid_redirect()
 
     @app.put("/api/v1/me/certificate-orders/{order_id}/udid")
     def submit_manual_udid(order_id: str, data: ManualDeviceUDID,
