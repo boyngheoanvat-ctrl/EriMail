@@ -10,7 +10,7 @@ const TOKEN_KEY="eri_store_buyer_token";
 const state={
   category:"mod",view:"store",items:[],
   token:sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||"",
-  remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null
+  remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null,registrationMinName:2
 };
 function saveAccountOnDevice(remember){
   if(!state.token)return false;
@@ -36,6 +36,17 @@ const element=(tag,cls,content)=>{
   if(content!==undefined&&content!==null)node.textContent=String(content);
   return node;
 };
+async function syncRegistrationLimits(){
+  try{
+    const info=await request("/openapi.json");
+    const value=Number(info?.components?.schemas?.CustomerRegistration?.properties?.display_name?.minLength);
+    if(value===1||value===2){
+      state.registrationMinName=value;
+      const input=document.querySelector('input[name="display_name"]');
+      if(input)input.minLength=value;
+    }
+  }catch{ /* The live server may be waking up; use its existing 2-character rule. */ }
+}
 function errorMessage(err){
   if(err instanceof TypeError)return "Không thể kết nối cửa hàng. Vui lòng thử lại sau.";
   return err.message||"Không thể thực hiện yêu cầu.";
@@ -77,6 +88,12 @@ async function request(path,{method="GET",data,authorized=false}={}){
           const field=Array.isArray(issue.loc)?String(issue.loc[issue.loc.length-1]):"";
           return labels[field]?field:null;
         }).filter(Boolean))];
+        if(fields.includes("display_name")){
+          const nameIssue=result.detail.find(issue=>
+            Array.isArray(issue.loc)&&issue.loc.includes("display_name")&&
+            Number(issue.ctx?.min_length)>0);
+          if(nameIssue)notes.display_name="Tên người nhận phải có ít nhất "+nameIssue.ctx.min_length+" ký tự.";
+        }
         detail=fields.length?fields.map(field=>notes[field]).join(" "):
           "Thông tin chưa hợp lệ. Vui lòng kiểm tra các ô đã nhập.";
       }else if(!detail || detail.startsWith("Máy chủ trả về")){
@@ -180,7 +197,7 @@ function authModal(register=false){
     if(name==="username"){input.minLength=3;input.maxLength=32;input.pattern="[a-zA-Z0-9_.-]{3,32}"}
     if(register){
       if(name==="password"){input.minLength=10;input.maxLength=128}
-      if(name==="display_name"){input.minLength=1;input.maxLength=80}
+      if(name==="display_name"){input.minLength=state.registrationMinName;input.maxLength=80}
       if(name==="contact"){input.minLength=6;input.maxLength=100}
     }
     label.append(input);form.append(label);inputs[name]=input;
@@ -203,8 +220,8 @@ function authModal(register=false){
       if(register){
         body.display_name=inputs.display_name.value.trim();
         body.contact=inputs.contact.value.trim();
-        if(body.display_name.length<1 || body.display_name.length>80)
-          throw new Error("Vui lòng nhập tên người nhận (1–80 ký tự).");
+        if(body.display_name.length<state.registrationMinName || body.display_name.length>80)
+          throw new Error("Tên người nhận phải có ít nhất "+state.registrationMinName+" ký tự và tối đa 80 ký tự.");
         if(body.contact.length<6 || body.contact.length>100)
           throw new Error("Liên hệ giao hàng phải có từ 6 đến 100 ký tự.");
       }
@@ -413,6 +430,6 @@ document.addEventListener("DOMContentLoaded",()=>{
     loadCatalog();
   }));
   document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));
-  updateHeader();loadCatalog();restoreSession();
+  updateHeader();loadCatalog();restoreSession();syncRegistrationLimits();
   if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js").catch(()=>{});
 });
