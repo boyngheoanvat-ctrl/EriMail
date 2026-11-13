@@ -9,7 +9,8 @@ on:
   workflow_dispatch:
 jobs:
   build:
-    runs-on: macos-latest
+    timeout-minutes: 25
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Compile arm64 iOS login injection module
