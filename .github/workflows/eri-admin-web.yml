@@ -2,7 +2,7 @@ name: Build ERI ADMIN IPA and validate ERI STORE Web
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/mod-free-paid]
     paths:
       - 'apps/ERIAdmin/**'
       - 'backend/**'
@@ -114,6 +114,53 @@ jobs:
           assert client.get("/api/v1/mods").json()["items"][0]["price_vnd"] == 300000
           assert client.get("/api/v1/products").json()["items"][0]["price_vnd"] == 130000
           assert client.get("/api/v1/certificates").json()["items"][0]["price_vnd"] == 260000
+          # FREE vs MUA IPA uploads. Only FREE products allow a public file
+          # download; even a valid paid upload ID must return 404.
+          from io import BytesIO
+          import zipfile, plistlib
+          blob=BytesIO()
+          with zipfile.ZipFile(blob,"w",zipfile.ZIP_DEFLATED) as z:
+              z.writestr("Payload/Test.app/Info.plist",plistlib.dumps({
+                  "CFBundleIdentifier":"com.eri.freemod",
+                  "CFBundleShortVersionString":"1.0"
+              }))
+              z.writestr("Payload/Test.app/test.bin",b"owned sample")
+          ipa_data=blob.getvalue()
+          def upload_mod(price,label):
+              result=client.post("/api/v1/admin/upload-sessions",headers=h,json={
+                  "kind":"ipa","filename":label+".ipa","size_bytes":len(ipa_data),
+                  "name":label,"description":"Test IPA","price_vnd":price,"authorized":True
+              })
+              assert result.status_code==201,result.text
+              path="/api/v1/admin/upload-sessions/"+result.json()["upload_id"]
+              updated=client.put(path,headers={**h,"X-ERI-Upload-Offset":"0",
+                  "Content-Type":"application/octet-stream"},content=ipa_data)
+              assert updated.status_code==200,updated.text
+              assert updated.json()["offset"]==len(ipa_data)
+              done=client.post(path+"/complete",headers=h)
+              assert done.status_code==201,done.text
+              return done.json()["id"]
+          free_id=upload_mod(0,"Free IPA Example")
+          paid_id=upload_mod(250000,"Paid IPA Example")
+          mods=client.get("/api/v1/mods").json()["items"]
+          free_mod=next(x for x in mods if x["id"]==free_id)
+          paid_mod=next(x for x in mods if x["id"]==paid_id)
+          assert free_mod["price_vnd"]==0
+          assert free_mod["download_path"]=="/api/v1/mods/"+str(free_id)+"/download"
+          assert paid_mod["price_vnd"]==250000
+          assert paid_mod["download_path"] is None
+          free_get=client.get(free_mod["download_path"])
+          assert free_get.status_code==200,free_get.text
+          assert free_get.content==ipa_data
+          assert free_get.headers.get("content-disposition","").startswith("attachment;")
+          assert client.get("/api/v1/mods/"+str(paid_id)+"/download").status_code==404
+          assert client.get("/api/v1/mods/"+str(m.json()["id"])+"/download").status_code==404
+          assert client.get("/api/v1/mods/0/download").status_code==404
+          assert client.post("/api/v1/admin/upload-sessions",headers=h,json={
+              "kind":"certificate","filename":"test.zip","size_bytes":64,
+              "name":"Free certificate","issuer":"Test","price_vnd":0
+          }).status_code==422
+          print("FREE/MUA Mod Game listing, public free IPA download and paid file protection: OK")
           register = client.post("/api/v1/auth/register", json={
               "username":"testbuyer", "password":"LongSecurePassword2026!",
               "display_name":"T", "contact":"Zalo: testbuyer"
@@ -121,6 +168,20 @@ jobs:
           assert register.status_code == 201, register.text
           assert register.json()["customer"]["display_name"] == "T"
           auth = {"Authorization":"Bearer " + register.json()["token"]}
+          free_order=client.post("/api/v1/orders",headers=auth,json={
+              "kind":"mod","product_id":free_id
+          })
+          assert free_order.status_code == 422,free_order.text
+          paid_order=client.post("/api/v1/orders",headers=auth,json={
+              "kind":"mod","product_id":paid_id
+          })
+          assert paid_order.status_code == 201,paid_order.text
+          assert paid_order.json()["amount_vnd"] == 250000
+          # Clean up the test paid order so existing full-purge assertions
+          # retain exactly three orders for testbuyer.
+          with __import__("app").connection() as db:
+              db.execute("DELETE FROM orders WHERE id=?", (paid_order.json()["id"],))
+
           for kind, item, amount in [("mod",m,300000),("ai",a,130000),("certificate",c,260000)]:
               order = client.post("/api/v1/orders", headers=auth,
                                   json={"kind":kind,"product_id":item.json()["id"]})
@@ -377,6 +438,11 @@ jobs:
       - run: |
           set -euo pipefail
           node --check web/eri-store/app.js
+          grep -q 'id="mod-subtabs"' web/eri-store/index.html
+          grep -q 'data-mod-mode="free"' web/eri-store/index.html
+          grep -q 'data-mod-mode="paid"' web/eri-store/index.html
+          grep -q 'free?"FREE":money(item.price_vnd)' web/eri-store/app.js
+          grep -q '/api/v1/mods/' web/eri-store/app.js
           node --check web/eri-store/udid.js
           grep -q 'id="certificate-udid"' web/eri-store/index.html
           grep -q 'id="start-udid"' web/eri-store/index.html

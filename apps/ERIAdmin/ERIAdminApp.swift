@@ -167,7 +167,8 @@ private final class AdminSession: ObservableObject {
         let size = number.intValue
         guard size > 0 && size <= maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
         let values = Dictionary(fields, uniquingKeysWith: { _, newer in newer })
-        guard let price = Int(values["price_vnd"] ?? ""), price > 0 else {
+        guard let price = Int(values["price_vnd"] ?? ""),
+              price >= 0, (kind == "ipa" || price > 0) else {
             throw URLError(.badURL)
         }
         let payload: [String: Any] = [
@@ -1130,6 +1131,7 @@ private struct AdminUploadView: View {
     @State private var issuer = ""
     @State private var description = ""
     @State private var price = ""
+    @State private var modIsFree = false
     @State private var authorized = false
     @State private var selectedFile: URL?
     @State private var showImporter = false
@@ -1143,15 +1145,26 @@ private struct AdminUploadView: View {
             Section("Thông tin sản phẩm") {
                 TextField("Tên sản phẩm", text: $name)
                 if kind == .ipa {
+                    Picker("Loại Mod Game", selection: $modIsFree) {
+                        Text("FREE").tag(true)
+                        Text("MUA").tag(false)
+                    }
+                    .pickerStyle(.segmented)
                     Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
+                    if modIsFree {
+                        Text("Khách được tải trực tiếp IPA miễn phí, không tạo đơn thanh toán.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 if kind == .certificate {
                     TextField("Nhà phát hành chứng chỉ", text: $issuer)
                 }
                 TextField("Mô tả sản phẩm", text: $description, axis: .vertical)
                     .lineLimit(2...5)
-                TextField("Giá vốn (VND)", text: $price)
-                    .keyboardType(.numberPad)
+                if kind != .ipa || !modIsFree {
+                    TextField(kind == .ipa ? "Giá bán (VND)" : "Giá vốn (VND)", text: $price)
+                        .keyboardType(.numberPad)
+                }
             }
             Section("Nhập tệp từ ứng dụng Tệp") {
                 Button(importing ? "Đang đọc tệp..." : "Chọn tệp từ Files") { showImporter = true }
@@ -1232,9 +1245,10 @@ private struct AdminUploadView: View {
     }
 
     private var valid: Bool {
+        let amount = (kind == .ipa && modIsFree) ? 0 : (Int(price) ?? -1)
         guard session.authenticated, selectedFile != nil,
               !name.trimmingCharacters(in: .whitespaces).isEmpty,
-              let amount = Int(price), amount > 0 else { return false }
+              amount >= 0, (kind == .ipa || amount > 0) else { return false }
         switch kind {
         case .ipa: return authorized
         case .certificate: return !issuer.isEmpty
@@ -1248,7 +1262,7 @@ private struct AdminUploadView: View {
         defer { working = false }
         let fields: [(String, String)] = [
             ("name", name.trimmingCharacters(in: .whitespacesAndNewlines)),
-            ("price_vnd", price),
+            ("price_vnd", (kind == .ipa && modIsFree) ? "0" : price),
             ("issuer", issuer),
             ("description", description),
             ("authorized", authorized ? "true" : "false")
@@ -1359,18 +1373,33 @@ private struct AdminCatalogView: View {
     @EnvironmentObject private var session: AdminSession
     let kind: UploadKind
     @State private var products: [CatalogProduct] = []
+    @State private var showFree = false
     @State private var toDelete: CatalogProduct?
     @State private var busy = false
     @State private var message = ""
 
+    private var visibleProducts: [CatalogProduct] {
+        kind == .ipa ? products.filter { ($0.price_vnd == 0) == showFree } : products
+    }
+
     var body: some View {
         List {
+            if kind == .ipa {
+                Picker("Loại Mod Game", selection: $showFree) {
+                    Text("FREE").tag(true)
+                    Text("MUA").tag(false)
+                }
+                .pickerStyle(.segmented)
+            }
             if !message.isEmpty { Text(message).foregroundStyle(.secondary) }
-            ForEach(products) { item in
+            if visibleProducts.isEmpty && !products.isEmpty {
+                Text("Chưa có Mod Game thuộc tab này.").foregroundStyle(.secondary)
+            }
+            ForEach(visibleProducts) { item in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.name).font(.headline)
                     if !item.description.isEmpty { Text(item.description) }
-                    Text(eriMoney(item.price_vnd))
+                    Text(kind == .ipa && item.price_vnd == 0 ? "FREE · Tải trực tiếp" : eriMoney(item.price_vnd))
                     Button("Xóa sản phẩm", role: .destructive) { toDelete = item }
                         .disabled(busy)
                 }
