@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "name": "Example Authorized App",
+      "bundle_id": "com.example.authorizedapp",
+      "version": "1.0.0",
+      "url": "https://ipa.example.org/releases/authorized-app-1.0.0.ipa",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "distribution_authorized": true
+    }
+  ]
+}

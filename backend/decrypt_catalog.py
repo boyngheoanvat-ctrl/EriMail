@@ -5,6 +5,7 @@ The public library exposes ONLY explicitly authorized, free IPA files already
 present in this installation. No fake cryptid=0 claims or fake progress.
 """
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 import re
 import secrets
@@ -21,7 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from eri_ipa_pipeline import (
     setup as setup_pipeline, put_source, schedule as schedule_pipeline,
-    schedule_matching as schedule_matching_pipeline
+    schedule_matching as schedule_matching_pipeline,
+    sync_source_feed, feed_configured, auto_download_enabled, can_auto_acquire
 )
 
 REGIONS = ("vn", "us", "jp", "kr", "tw", "cn", "hk", "sg", "th", "gb")
@@ -236,6 +238,30 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
     router = APIRouter()
     setup_pipeline(connection)
 
+    def refresh_eri_sources():
+        # Optional, allowlisted ERI-owned source manifest. This is not an
+        # App Store IPA URL, FairPlay bypass, or third-party decrypt API.
+        if feed_configured():
+            try:
+                sync_source_feed(connection, upload_dir)
+            except Exception as exc:
+                logging.warning("ERI IPA source feed unavailable (%s)", type(exc).__name__)
+
+    @router.get("/api/v1/tools/ipa/decrypt/engine")
+    def engine_status():
+        with connection() as db:
+            registered = db.execute("SELECT COUNT(*) FROM ipa_decrypt_sources").fetchone()[0]
+        return {
+            "worker": "ERI authorized IPA pipeline",
+            "source_feed_configured": feed_configured(),
+            "registered_sources": registered,
+            "ipatool_auto_download_enabled": auto_download_enabled(),
+            "ipatool_auto_mode": "licensed_app_store_download_only",
+            "fairplay_decrypt_available": False,
+            "app_store_search": True,
+            "ipa_download_requires_verified_source": True,
+        }
+
     def source_exists(bundle_id: str, version: str) -> bool:
         if not bundle_id or not version:
             return False
@@ -252,6 +278,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             item["cached"] = match
             item["ipa_available"] = match is not None
             item["source_available"] = source_exists(item["bundle_id"], item["version"])
+            item["auto_acquisition_available"] = can_auto_acquire(item["bundle_id"])
         return items
 
     @router.get("/api/v1/tools/ipa/decrypt/search")
@@ -312,7 +339,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                                       "source_available": True})
         if app["version"] not in seen:
             versions_list.insert(0, {"version": app["version"], "cached": None,
-                                     "source": "Apple current version metadata"})
+                                     "source": "Apple current version metadata",
+                                     "auto_acquisition_available": can_auto_acquire(app["bundle_id"])})
         return {"app": app, "versions": versions_list,
                 "notice": "Apple Search API không công bố lịch sử mọi phiên bản; chỉ hiện bản hiện tại và bản đã có trong kho ERI."}
 
@@ -336,6 +364,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         for name, sql_type in (
             ("state", "TEXT NOT NULL DEFAULT 'waiting_for_source'"),
             ("progress", "INTEGER"),
+            ("estimated_size_bytes", "INTEGER"),
             ("message", "TEXT NOT NULL DEFAULT ''"),
             ("updated_at", "TEXT"),
         ):
@@ -347,15 +376,21 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             free = _all_free_ipa(connection, upload_dir, mod_file)
         match = _match_vault(free, row["bundle_id"], row["version"])
         state = "completed" if match else row["state"] or "waiting_for_source"
+        available = source_exists(row["bundle_id"], row["version"])
+        auto_acquire = can_auto_acquire(row["bundle_id"])
         return {
             "job_id": row["id"], "app_id": row["app_id"], "name": row["name"],
             "bundle_id": row["bundle_id"], "version": row["version"],
             "country": row["country"], "created_at": row["created_at"],
             "state": state,
-            "progress": 100 if match else row["progress"],
+            "progress": 100 if match else (None if state == "waiting_for_source" else row["progress"]),
+            "source_available": available,
+            "auto_acquisition_available": auto_acquire,
             "result": match,
             "message": ("IPA đã có trong kho ERI." if match
-                        else row["message"] or "Chưa có nguồn IPA tương ứng trên máy chủ ERI."),
+                        else row["message"] or ("Đang tải IPA từ nguồn ERI." if available else
+                           "ERI sẽ tự lấy IPA từ tài khoản App Store có quyền." if auto_acquire else
+                           "Chưa cấu hình nguồn IPA cho phiên bản này.")),
         }
 
     @router.post("/api/v1/tools/ipa/decrypt/requests", status_code=201)
@@ -365,6 +400,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             raise HTTPException(404, "Không tìm thấy ứng dụng trên App Store")
         app_info = apps[0]
         chosen_version = payload.version or app_info["version"]
+        refresh_eri_sources()
         if not re.fullmatch(r"[A-Za-z0-9._+-]{1,60}", chosen_version):
             raise HTTPException(422, "Phiên bản không hợp lệ")
         with connection() as db:
@@ -375,7 +411,17 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 (customer["id"], app_info["bundle_id"], chosen_version),
             ).fetchone()
             if existing is not None:
-                # Retry/resume when an operator-approved source is now available.
+                # Explicit re-request retries a failed but newly actionable job.
+                if existing["state"] == "failed" and (
+                        source_exists(app_info["bundle_id"], chosen_version)
+                        or can_auto_acquire(app_info["bundle_id"])):
+                    db.execute(
+                        "UPDATE ipa_decrypt_requests SET state='waiting_for_source', "
+                        "progress=NULL,message='',updated_at=? WHERE id=?",
+                        (datetime.now(timezone.utc).isoformat(), existing["id"]))
+                    existing = db.execute(
+                        "SELECT * FROM ipa_decrypt_requests WHERE id=?",
+                        (existing["id"],)).fetchone()
                 schedule_pipeline(connection, upload_dir, existing["id"])
                 return {**job_payload(existing), "reused": True}
             current = db.execute(
@@ -388,9 +434,12 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             now = datetime.now(timezone.utc).isoformat()
             db.execute(
                 "INSERT INTO ipa_decrypt_requests(id,customer_id,app_id,bundle_id,name,"
-                "version,country,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                "version,country,created_at,estimated_size_bytes) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
                 (job_id, customer["id"], app_info["app_id"], app_info["bundle_id"],
-                 app_info["name"], chosen_version, app_info["country"], now)
+                 app_info["name"], chosen_version, app_info["country"], now,
+                 int(app_info["size_bytes"]) if str(
+                     app_info.get("size_bytes") or "").isdigit() else None)
             )
             row = db.execute("SELECT * FROM ipa_decrypt_requests WHERE id=?", (job_id,)).fetchone()
         schedule_pipeline(connection, upload_dir, job_id)
@@ -398,6 +447,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
 
     @router.get("/api/v1/tools/ipa/decrypt/requests")
     def list_requests(customer=Depends(require_customer)):
+        refresh_eri_sources()
         # User-scoped work history survives browser reloads and lost localStorage
         # as long as the configured database remains persistent.
         with connection() as db:
@@ -456,6 +506,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             ).fetchone()
         if row is None:
             raise HTTPException(404, "Không tìm thấy yêu cầu")
+        if row["state"] == "waiting_for_source":
+            refresh_eri_sources()
         if row["state"] not in ("completed", "failed"):
             schedule_pipeline(connection, upload_dir, job_id)
         return job_payload(row)

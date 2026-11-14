@@ -17,6 +17,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: JavaScript syntax checks
         run: |
           node --check web/eri-store/ipa-tools.js
@@ -30,4 +33,5 @@ jobs:
           python3 -m pip install -r backend/requirements.txt httpx
           cd backend
           python3 test_decrypt_catalog.py
+          python3 test_eri_source_feed.py
           python3 test_signing_jobs.py
