@@ -14,6 +14,7 @@
   let vaultTotal = 0;
   let activeJob = null;
   let pollInFlight = false;
+  let historyInFlight = false;
   let searchSerial = 0;
   let vaultSerial = 0;
 
@@ -237,6 +238,48 @@
       }
     }
   }
+  async function loadHistory() {
+    if (historyInFlight) return;
+    const grid = $("eri-decrypt-history-grid");
+    if (!grid) return;
+    if (!getToken()) {
+      grid.replaceChildren(card("p","small","Bạn cần đăng nhập ERI STORE để xem các yêu cầu IPA đã lưu."));
+      return;
+    }
+    historyInFlight = true;
+    grid.replaceChildren(card("p","small","Đang khôi phục lịch sử yêu cầu từ máy chủ..."));
+    try {
+      const data = await request("/api/v1/tools/ipa/decrypt/requests",{auth:true});
+      grid.replaceChildren();
+      if (!data.items?.length) {
+        grid.append(card("p","small","Bạn chưa có yêu cầu IPA nào."));
+        return;
+      }
+      for (const job of data.items) {
+        const node = card("article","eri-decrypt-card");
+        node.append(card("strong","",job.name || job.bundle_id));
+        node.append(card("p","small",(job.bundle_id||"") + " · v" +
+          (job.version||"—") + " · " + (job.country||"VN")));
+        const complete = job.state === "completed" && !!apiUrl(job.result?.download_path);
+        node.append(card("p",complete ? "eri-decrypt-available" : "eri-decrypt-unavailable",
+          complete ? "Đã có IPA hợp lệ trong kho — tải được ngay" :
+            "Đã lưu yêu cầu. Chưa có IPA được phép phân phối trên máy chủ."));
+        const actions = card("div","eri-decrypt-actions");
+        actions.append(button("Xem trạng thái",() => {
+          activeJob=job.job_id;
+          try {localStorage.setItem(ACTIVE_JOB,activeJob);}catch{}
+          renderJob(job);
+          $("eri-decrypt-request-section")?.scrollIntoView({behavior:"smooth",block:"center"});
+        }));
+        node.append(actions);
+        if (complete) installActions(node,job.result);
+        grid.append(node);
+      }
+    } catch (error) {
+      grid.replaceChildren(card("p","small",error.message));
+    } finally { historyInFlight=false; }
+  }
+
   async function createJob(target, country, version) {
     if (!getToken()) {
       notice("Đăng nhập ERI STORE trong tab Tài khoản để gửi yêu cầu IPA.", "error");
@@ -253,6 +296,7 @@
       activeJob = job.job_id;
       try {localStorage.setItem(ACTIVE_JOB,activeJob);} catch {}
       renderJob(job);
+      await loadHistory();
     } catch(error) { notice(error.message, "error"); }
   }
   function renderJob(job) {
@@ -280,6 +324,8 @@
     try {
       const result = await request("/api/v1/tools/ipa/decrypt/requests/" + activeJob,{auth:true});
       renderJob(result);
+      // Refresh history from the server after a completed request is observed.
+      if (result.state === "completed") loadHistory();
     } catch (error) {
       if (/không tìm thấy yêu cầu|404/.test(error.message)) {
         activeJob = null;
@@ -331,9 +377,14 @@
     $("eri-decrypt-next")?.addEventListener("click",()=>{if(vaultOffset+vaultLimit<vaultTotal){vaultOffset+=vaultLimit;loadVault();}});
     $("eri-decrypt-versions-close")?.addEventListener("click",()=>$("eri-decrypt-versions-section")?.classList.add("hidden"));
     loadVault();
+    loadHistory();
     if (activeJob && getToken()) refreshJob();
+    $("eri-decrypt-refresh-history")?.addEventListener("click",loadHistory);
     document.addEventListener("visibilitychange",() => {
-      if (document.visibilityState === "visible" && activeJob) refreshJob();
+      if (document.visibilityState === "visible") {
+        loadHistory();
+        if (activeJob) refreshJob();
+      }
     });
     setInterval(() => {
       if (activeJob && document.visibilityState === "visible" && !document.hidden) refreshJob();
