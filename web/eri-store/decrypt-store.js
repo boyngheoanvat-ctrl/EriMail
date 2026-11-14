@@ -102,12 +102,14 @@
     if (!url) return;
     const actions = card("div", "eri-decrypt-actions");
     actions.append(link("Tải IPA " + (item.size_bytes ? "(" + pretty(item.size_bytes) + ")" : ""), url, true));
-    const enc = encodeURIComponent(url);
-    actions.append(link("Mở bằng ESign", "esign://install?url=" + enc));
-    actions.append(link("TrollStore", "apple-magnifier://install?url=" + enc));
-    actions.append(link("Scarlet", "scarlet://install?url=" + enc));
-    actions.append(link("Feather", "feather://install?url=" + enc));
     parent.append(actions);
+    const enc = encodeURIComponent(url);
+    const sideload = card("div","eri-dec-sideload");
+    sideload.append(link("TrollStore", "apple-magnifier://install?url=" + enc));
+    sideload.append(link("ESign", "esign://install?url=" + enc));
+    sideload.append(link("Scarlet", "scarlet://install?url=" + enc));
+    sideload.append(link("Feather", "feather://install?url=" + enc));
+    parent.append(sideload);
     const foot = card("p", "small", "IPA có thể cần ký bằng chứng chỉ hợp lệ trước khi iOS cho phép cài. ESign / TrollStore / Feather phải có sẵn trên thiết bị.");
     parent.append(foot);
   }
@@ -128,6 +130,13 @@
   }
   function searchResult(item) {
     const root = card("article", "eri-decrypt-card");
+    const meta = card("div","eri-dec-app-meta");
+    meta.append(card("span","",item.genre || "App Store"));
+    meta.append(card("span","",item.country || "VN"));
+    if (item.size_bytes && Number(item.size_bytes) > 0)
+      meta.append(card("span","",pretty(item.size_bytes)));
+    if (item.cached?.download_path) meta.append(card("span","", "Có sẵn IPA"));
+    root.append(meta);
     const top = card("div", "eri-decrypt-card-top");
     icon(top, item.icon_url);
     const details = card("div", "eri-decrypt-details");
@@ -225,6 +234,7 @@
         "Chưa có IPA được cấp quyền phân phối và còn file trên máy chủ phù hợp bộ lọc này."));
       else for(const item of result.items) {
         const node = card("article","eri-decrypt-card");
+        node.append(card("div","eri-dec-vault-label","IPA đang có trong kho"));
         node.append(card("strong","",item.name || "IPA"));
         node.append(card("p","small",(item.bundle_id || "") + " · v" +
           (item.version || "—") + " · " + pretty(item.size_bytes)));
