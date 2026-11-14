@@ -6,6 +6,7 @@ SHA-256 and actual Mach-O encryption state, and publishes only verified files.
 It never calls another decrypt service or claims to remove FairPlay DRM.
 """
 import hashlib
+import json
 import ipaddress
 import os
 import re
@@ -26,6 +27,58 @@ MAX_BYTES = int(os.getenv("ERI_PIPELINE_MAX_IPA_BYTES", str(512 * 1024 * 1024)))
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="eri-ipa")
 _active = set()
 _guard = threading.Lock()
+_feed_lock = threading.Lock()
+_feed_last_check = 0.0
+FEED_MAX_BYTES = 1024 * 1024
+FEED_MIN_SECONDS = 60
+
+
+def feed_configured():
+    return bool(os.getenv("ERI_IPA_SOURCE_MANIFEST_URL", "").strip())
+
+
+def sync_source_feed(connection, force=False):
+    """Discover ERI-owned sources over allowlisted HTTPS. Never a decrypt API.
+
+    Only metadata with explicit distribution authorization is trusted.
+    """
+    global _feed_last_check
+    url = os.getenv("ERI_IPA_SOURCE_MANIFEST_URL", "").strip()
+    if not url:
+        return {"configured": False, "registered": 0}
+    with _feed_lock:
+        now = time.monotonic()
+        if not force and now - _feed_last_check < FEED_MIN_SECONDS:
+            return {"configured": True, "cached": True, "registered": 0}
+        _feed_last_check = now
+        validate_url(url)
+        opener = urllib.request.build_opener(_SafeRedirect())
+        request = urllib.request.Request(
+            url, headers={"Accept": "application/json",
+                          "User-Agent": "ERI-IPA-Worker/1.0"})
+        with opener.open(request, timeout=12) as response:
+            raw = response.read(FEED_MAX_BYTES + 1)
+        if len(raw) > FEED_MAX_BYTES:
+            raise ValueError("Danh mục nguồn IPA ERI vượt 1 MiB")
+        feed = json.loads(raw.decode("utf-8"))
+        sources = feed.get("items") if isinstance(feed, dict) else None
+        if not isinstance(sources, list) or len(sources) > 200:
+            raise ValueError("Danh mục IPA ERI không hợp lệ (tối đa 200 nguồn)")
+        registered = 0
+        for source in sources:
+            if not isinstance(source, dict) or source.get("distribution_authorized") is not True:
+                continue
+            try:
+                put_source(
+                    connection, name=source["name"], bundle_id=source["bundle_id"],
+                    version=source["version"], url=source["url"], sha256=source["sha256"]
+                )
+                registered += 1
+            except (KeyError, TypeError, ValueError):
+                continue
+        return {"configured": True, "registered": registered}
+
+
 
 
 def _now():
@@ -211,12 +264,19 @@ def _run(connection, upload_dir, job_id):
             with connection() as db:
                 # Reuse the same authorized file for all customers requesting this version.
                 existing = db.execute(
-                    "SELECT i.id FROM ipa i JOIN private_product_uploads p "
-                    "ON p.product_id=i.id AND p.kind='ipa' "
+                    "SELECT p.storage_name,p.size_bytes FROM ipa i "
+                    "JOIN private_product_uploads p ON p.product_id=i.id AND p.kind='ipa' "
                     "WHERE i.bundle_id=? COLLATE NOCASE AND i.version=? AND i.authorized=1 "
-                    "AND i.price_vnd=0 LIMIT 1",
-                    (row["bundle_id"], row["version"])
+                    "AND i.price_vnd=0 AND i.sha256=? AND p.sha256=? "
+                    "ORDER BY i.id DESC LIMIT 1",
+                    (row["bundle_id"], row["version"], digest, digest)
                 ).fetchone()
+                # A stale or different build must never discard a newly verified IPA.
+                if existing and not (
+                    (upload_dir / existing["storage_name"]).is_file()
+                    and (upload_dir / existing["storage_name"]).stat().st_size == size
+                ):
+                    existing = None
                 if not existing:
                     store_link = ("https://apps.apple.com/" + row["country"].lower()
                                   + "/app/id" + str(row["app_id"]))
