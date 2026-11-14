@@ -284,7 +284,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                         link = str(version.get("downloadURL", ""))
                         parts = urlsplit(link)
                         if (parts.scheme != "https" or parts.hostname != "github.com"
-                                or not re.fullmatch(r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[^?#]+\\.ipa", parts.path, re.I)):
+                                or not re.fullmatch(r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[^?#]+\.ipa", parts.path, re.I)):
                             continue
                         # HEAD checks reachability; final download remains at original publisher.
                         head = urllib.request.Request(link, method="HEAD",
