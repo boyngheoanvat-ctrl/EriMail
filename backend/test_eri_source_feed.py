@@ -88,7 +88,8 @@ with tempfile.TemporaryDirectory(prefix="eri-feed-test-") as root:
             json={"target": "com.eri.feed", "country": "vn"}, headers=auth)
         assert res.status_code == 201, res.text
         job = res.json()
-        assert job["source_available"] is True
+        assert job["source_available"] is True, (
+            {"job": job, "engine": client.get("/api/v1/tools/ipa/decrypt/engine").json()})
         assert job["job_id"]
         for _ in range(150):
             status = client.get(
