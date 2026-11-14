@@ -24,7 +24,7 @@ app = FastAPI(title="ERI NGUYEN API", version="0.1.0")
 # No wildcard CORS: native iOS clients do not require browser CORS.
 origins = [x.strip() for x in os.getenv("ERI_CORS_ORIGINS", "").split(",") if x.strip()]
 if origins:
-    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-ERI-Chunk-SHA256"], max_age=600)
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-ERI-Admin-Key", "X-ERI-Upload-Offset", "X-ERI-Chunk-SHA256"], max_age=600)
 
 @contextmanager
 def connection():
@@ -854,6 +854,7 @@ class EriChunkStart(BaseModel):
     issuer: str = Field(default="", max_length=160)
     authorized: bool = False
     fast: bool = False
+    verify_free_ipa: bool = False
 
 def _eri_paths(upload_id: str):
     if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
@@ -1073,6 +1074,18 @@ async def eri_finish_chunk_upload(upload_id: str):
                 digest.update(data)
         if meta["extension"] == ".ipa":
             version, bundle_id = _eri_ipa_properties(part)
+            # Verify IPA on the dedicated ERI import path before publishing.
+            if meta.get("verify_free_ipa") and meta["price_vnd"] == 0:
+                from ipa_tools import _inspect_archive
+                inspection = _inspect_archive(part)
+                app_info = inspection.get("app") or {}
+                if (inspection.get("zip_password_protected") or
+                        inspection.get("fairplay_encrypted") is not False or
+                        app_info.get("bundle_id") != bundle_id or
+                        app_info.get("version") != version):
+                    raise HTTPException(
+                        422, "IPA còn mã hóa, thiếu thông tin hoặc không xác minh được ứng dụng"
+                    )
         elif meta["extension"] == ".apk":
             try:
                 with zipfile.ZipFile(part) as archive:
