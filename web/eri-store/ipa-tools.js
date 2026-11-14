@@ -234,10 +234,9 @@
             download.rel = "noopener noreferrer";
             download.textContent = "Tải IPA từ kho ERI (v" + existingIPA.version + ")";
             actions.append(download);
-            /* IPA source unavailable: the user can launch a real ERI processing job. */
-           }
+          }
 
-           const decryptTab = document.querySelector('[data-kind="decrypt"]');
+          const decryptTab = document.querySelector('[data-kind="decrypt"]');
           if (decryptTab && $("eri-decrypt-query")) {
             const openDecrypt = createRequest => {
               const query = $("eri-decrypt-query");
