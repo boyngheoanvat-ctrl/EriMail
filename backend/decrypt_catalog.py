@@ -19,6 +19,10 @@ from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from eri_ipa_pipeline import (
+    setup as setup_pipeline, put_source, schedule as schedule_pipeline,
+    schedule_matching as schedule_matching_pipeline
+)
 
 REGIONS = ("vn", "us", "jp", "kr", "tw", "cn", "hk", "sg", "th", "gb")
 # Limit auto queries to three regions; Apple documents a ~20 calls/minute limit.
@@ -32,6 +36,15 @@ class IPARequest(BaseModel):
     target: str = Field(min_length=2, max_length=500)
     country: str = Field(default="auto", max_length=4)
     version: str = Field(default="", max_length=60)
+
+
+class AuthorizedIPASource(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    bundle_id: str = Field(min_length=3, max_length=255)
+    version: str = Field(min_length=1, max_length=60)
+    url: str = Field(min_length=12, max_length=1800)
+    sha256: str = Field(min_length=64, max_length=64)
+    distribution_authorized: bool = False
 
 
 def _region(value: str) -> str:
@@ -221,6 +234,7 @@ def _match_vault(items, bundle_id: str, version: str):
 
 def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_customer, require_admin=None):
     router = APIRouter()
+    setup_pipeline(connection)
 
     def decorate_with_vault(items):
         free = _all_free_ipa(connection, upload_dir, mod_file)
@@ -307,21 +321,30 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             "CREATE INDEX IF NOT EXISTS idx_ipa_decrypt_requests_app "
             "ON ipa_decrypt_requests(bundle_id, version, created_at)"
         )
+        columns = {x["name"] for x in db.execute("PRAGMA table_info(ipa_decrypt_requests)")}
+        for name, sql_type in (
+            ("state", "TEXT NOT NULL DEFAULT 'waiting_for_source'"),
+            ("progress", "INTEGER"),
+            ("message", "TEXT NOT NULL DEFAULT ''"),
+            ("updated_at", "TEXT"),
+        ):
+            if name not in columns:
+                db.execute("ALTER TABLE ipa_decrypt_requests ADD COLUMN " + name + " " + sql_type)
 
     def job_payload(row, free=None):
         if free is None:
             free = _all_free_ipa(connection, upload_dir, mod_file)
         match = _match_vault(free, row["bundle_id"], row["version"])
+        state = "completed" if match else row["state"] or "waiting_for_source"
         return {
             "job_id": row["id"], "app_id": row["app_id"], "name": row["name"],
             "bundle_id": row["bundle_id"], "version": row["version"],
             "country": row["country"], "created_at": row["created_at"],
-            "state": "completed" if match else "waiting_for_authorized_file",
-            "progress": 100 if match else 0,
+            "state": state,
+            "progress": 100 if match else row["progress"],
             "result": match,
-            "message": ("IPA hợp lệ đã có trong kho ERI." if match
-                        else "Đã lưu yêu cầu. Chờ quản trị viên cung cấp IPA có quyền phân phối; "
-                             "link App Store không tự cung cấp IPA đã giải mã."),
+            "message": ("IPA đã có trong kho ERI." if match
+                        else row["message"] or "Chưa có nguồn IPA tương ứng trên máy chủ ERI."),
         }
 
     @router.post("/api/v1/tools/ipa/decrypt/requests", status_code=201)
@@ -341,8 +364,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 (customer["id"], app_info["bundle_id"], chosen_version),
             ).fetchone()
             if existing is not None:
-                # Repeat taps and retry after a lost HTTP response must not
-                # fill the 30-request quota with duplicate tasks.
+                # Retry/resume when an operator-approved source is now available.
+                schedule_pipeline(connection, upload_dir, existing["id"])
                 return {**job_payload(existing), "reused": True}
             current = db.execute(
                 "SELECT COUNT(*) FROM ipa_decrypt_requests WHERE customer_id=?",
@@ -359,6 +382,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                  app_info["name"], chosen_version, app_info["country"], now)
             )
             row = db.execute("SELECT * FROM ipa_decrypt_requests WHERE id=?", (job_id,)).fetchone()
+        schedule_pipeline(connection, upload_dir, job_id)
         return job_payload(row)
 
     @router.get("/api/v1/tools/ipa/decrypt/requests")
@@ -371,9 +395,30 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 "ORDER BY created_at DESC LIMIT 30", (customer["id"],)
             ).fetchall()
         free = _all_free_ipa(connection, upload_dir, mod_file)
+        for row in rows:
+            if row["state"] not in ("completed", "failed"):
+                schedule_pipeline(connection, upload_dir, row["id"])
         return {"items": [job_payload(row, free) for row in rows], "total": len(rows)}
 
     if require_admin is not None:
+        @router.post("/api/v1/admin/decrypt/sources",
+                     dependencies=[Depends(require_admin)], status_code=201)
+        def register_source(payload: AuthorizedIPASource):
+            if not payload.distribution_authorized:
+                raise HTTPException(422, "Cần xác nhận quyền phân phối IPA")
+            try:
+                put_source(
+                    connection, name=payload.name, bundle_id=payload.bundle_id,
+                    version=payload.version, url=payload.url, sha256=payload.sha256
+                )
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+            schedule_matching_pipeline(
+                connection, upload_dir, payload.bundle_id, payload.version
+            )
+            return {"ok": True, "bundle_id": payload.bundle_id,
+                    "version": payload.version, "message": "Đã đăng ký nguồn IPA ERI"}
+
         @router.get("/api/v1/admin/decrypt/requests",
                     dependencies=[Depends(require_admin)])
         def admin_requests(limit: int = Query(default=50, ge=1, le=200)):
@@ -400,6 +445,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             ).fetchone()
         if row is None:
             raise HTTPException(404, "Không tìm thấy yêu cầu")
+        if row["state"] not in ("completed", "failed"):
+            schedule_pipeline(connection, upload_dir, job_id)
         return job_payload(row)
 
     app.include_router(router)
