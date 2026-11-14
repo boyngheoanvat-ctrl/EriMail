@@ -254,6 +254,42 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             item["source_available"] = source_exists(item["bundle_id"], item["version"])
         return items
 
+    @router.get("/api/v1/tools/ipa/decrypt/external")
+    def external_ipa(target: str = Query(min_length=12, max_length=500),
+                     country: str = "auto"):
+        """Read-only discovery. Never treat an upstream 200 as a verified IPA."""
+        safe_target = urlsplit(target)
+        if (safe_target.scheme != "https" or safe_target.hostname != "apps.apple.com"
+                or not re.search(r"/id[0-9]{6,15}(?:/|$)", safe_target.path)):
+            raise HTTPException(422, "Cần link ứng dụng HTTPS từ App Store")
+        region = _region(country)
+        endpoint = ("https://decrypt.160-191-242-70.sslip.io/api/decrypt/search?"
+                    + urlencode({"q": target, "country": region, "mode": "ios"}))
+        req = urllib.request.Request(endpoint, headers={
+            "Accept": "application/json", "User-Agent": "ERIStore/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=8) as response:
+                if response.status != 200:
+                    raise HTTPException(502, "Nguồn IPA bên ngoài không phản hồi thành công")
+                raw = response.read(256 * 1024 + 1)
+            if len(raw) > 256 * 1024:
+                raise HTTPException(502, "Phản hồi nguồn IPA quá lớn")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError("Expected JSON object")
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            raise HTTPException(503, "Chưa xác minh được nguồn IPA bên ngoài") from exc
+        entry = data.get("vault_entry")
+        if not isinstance(entry, dict):
+            entry = {}
+        # Only surface metadata; upstream file and redistribution rights are not verified.
+        return {"found": bool(entry), "download_ready": False,
+                "source": "ERI external discovery (unverified)",
+                "version": str(entry.get("version") or data.get("version") or "")[:60],
+                "notice": "Đã tìm thấy metadata" if entry else "Nguồn ngoài chưa có IPA xác nhận",
+                "verification": {"file_exists": False, "distribution_authorized": False,
+                                 "plaintext_verified": data.get("plaintext_verified") is True}}
+
     @router.get("/api/v1/tools/ipa/decrypt/search")
     def search(q: str = Query(min_length=2, max_length=500),
                country: str = "auto", limit: int = Query(default=15, ge=1, le=25)):
