@@ -514,6 +514,11 @@ private struct AdminHome: View {
                         AdminUploadView(kind: .apk).environmentObject(session)
                     } label: { Label("Nhập APK · FREE / BÁN", systemImage: "square.and.arrow.up") }
                 }
+                Section("ERI DECRYPT · Yêu cầu IPA") {
+                    NavigationLink {
+                        AdminDecryptWorkerView().environmentObject(session)
+                    } label: { Label("Nguồn IPA & Trạng thái Worker", systemImage: "cpu") }
+                }
                 Section("Đăng sản phẩm — giao sau khi khách mua") {
                     NavigationLink {
                         ManualListingView(kind: .certificate).environmentObject(session)
@@ -585,6 +590,176 @@ private struct AdminHome: View {
             .sheet(isPresented: $showLogin) { LoginView().environmentObject(session) }
             .onAppear { if !session.authenticated { showLogin = true } }
         }
+    }
+}
+
+
+// ERI ADMIN manages only ERI-owned authorized IPA sources; no FairPlay bypass.
+private struct AdminIPASource: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let bundle_id: String
+    let version: String
+    let state: String
+    let progress: Int
+    let message: String
+}
+private struct AdminIPARequest: Decodable, Identifiable {
+    let job_id: String
+    let name: String
+    let bundle_id: String
+    let version: String
+    let requester: String
+    let state: String
+    let progress: Int
+    let message: String
+    var id: String { job_id }
+}
+private struct AdminIPAWorkerInfo: Decodable {
+    let enabled: Bool
+    let source_hosts_configured: Bool
+}
+private struct AdminIPASourcePayload: Encodable {
+    let name: String
+    let bundle_id: String
+    let version: String
+    let download_url: String
+    let sha256: String
+    let authorized: Bool
+}
+private struct AdminDecryptWorkerView: View {
+    @EnvironmentObject private var session: AdminSession
+    @State private var sources: [AdminIPASource] = []
+    @State private var requests: [AdminIPARequest] = []
+    @State private var workerStatus: AdminIPAWorkerInfo?
+    @State private var appName = ""
+    @State private var bundleID = ""
+    @State private var version = ""
+    @State private var sourceURL = ""
+    @State private var sha256 = ""
+    @State private var hasRights = false
+    @State private var busy = false
+    @State private var status = ""
+
+    var body: some View {
+        Form {
+            Section("Máy chủ ERI") {
+                if let info = workerStatus {
+                    LabeledContent("Bộ xử lý", value: info.enabled ? "Đã bật" : "Chưa bật")
+                    LabeledContent("Nguồn HTTPS", value:
+                                    info.source_hosts_configured ? "Đã cấu hình" : "Chưa cấu hình")
+                } else {
+                    Text("Chưa lấy được trạng thái worker.").foregroundStyle(.secondary)
+                }
+                Button("Làm mới") { Task { await refresh() } }
+                    .disabled(busy)
+                if !status.isEmpty {
+                    Text(status).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            Section("Đăng ký nguồn IPA được cấp phép") {
+                TextField("Tên ứng dụng", text: $appName)
+                TextField("Bundle ID, ví dụ com.example.app", text: $bundleID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Phiên bản chính xác", text: $version)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("Nguồn IPA HTTPS đã cho phép", text: $sourceURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("SHA-256 (64 ký tự hex)", text: $sha256)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Toggle("Tôi có quyền cung cấp file IPA này", isOn: $hasRights)
+                Button(busy ? "Đang gửi..." : "Giao IPA cho Worker") {
+                    Task { await submit() }
+                }
+                .disabled(busy || !hasRights || appName.isEmpty || bundleID.isEmpty ||
+                          version.isEmpty || !sourceURL.hasPrefix("https://") || sha256.count != 64)
+                Text("Máy chủ chỉ chấp nhận host đã cho phép qua ERI_DECRYPT_SOURCE_HOSTS. Worker kiểm tra SHA-256, Bundle ID, phiên bản và Mach-O; không tự tải IPA FairPlay từ App Store.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Nguồn IPA đang xử lý") {
+                if sources.isEmpty {
+                    Text("Chưa có nguồn IPA nào.").foregroundStyle(.secondary)
+                }
+                ForEach(sources) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name + " · v" + item.version).font(.headline)
+                        Text(item.bundle_id).font(.caption2).foregroundStyle(.secondary)
+                        Text(item.state + " · " + String(item.progress) + "%")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ProgressView(value: Double(item.progress), total: 100)
+                        Text(item.message).font(.footnote)
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+            Section("Yêu cầu IPA của khách") {
+                if requests.isEmpty {
+                    Text("Chưa có yêu cầu IPA.").foregroundStyle(.secondary)
+                }
+                ForEach(requests) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name + " · v" + item.version).font(.headline)
+                        Text(item.requester + " · " + item.bundle_id)
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Text(item.state + " · " + String(item.progress) + "%")
+                            .font(.caption)
+                        Text(item.message).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+        .navigationTitle("ERI IPA Worker")
+        .task { await refresh() }
+    }
+
+    private func refresh() async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            async let workerData = session.send("/api/v1/admin/decrypt/worker")
+            async let sourcesData = session.send("/api/v1/admin/decrypt/sources")
+            async let requestsData = session.send("/api/v1/admin/decrypt/requests?limit=50")
+            let info = try await workerData
+            let sourceItems = try await sourcesData
+            let jobItems = try await requestsData
+            workerStatus = try JSONDecoder().decode(AdminIPAWorkerInfo.self, from: info)
+            sources = try JSONDecoder().decode(Envelope<AdminIPASource>.self, from: sourceItems).items
+            requests = try JSONDecoder().decode(Envelope<AdminIPARequest>.self, from: jobItems).items
+            status = ""
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    private func submit() async {
+        guard !busy else { return }
+        busy = true
+        do {
+            let payload = AdminIPASourcePayload(
+                name: appName.trimmingCharacters(in: .whitespacesAndNewlines),
+                bundle_id: bundleID.trimmingCharacters(in: .whitespacesAndNewlines),
+                version: version.trimmingCharacters(in: .whitespacesAndNewlines),
+                download_url: sourceURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                sha256: sha256.trimmingCharacters(in: .whitespacesAndNewlines),
+                authorized: hasRights
+            )
+            _ = try await session.send("/api/v1/admin/decrypt/sources", method: "POST",
+                                       data: JSONEncoder().encode(payload))
+            status = "Đã xếp nguồn vào hàng đợi. Kiểm tra tiến độ để xem kết quả."
+            sourceURL = ""
+            sha256 = ""
+            hasRights = false
+        } catch {
+            status = error.localizedDescription
+        }
+        busy = false
+        await refresh()
     }
 }
 
