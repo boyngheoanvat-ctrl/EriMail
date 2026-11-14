@@ -1469,3 +1469,8 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
 # The module performs a migration that only creates new tables.
 from udid_routes import install_udid_routes
 install_udid_routes(app, connection, require_customer, require_admin)
+
+# App Store search metadata, a real authorized-free IPA vault, available
+# versions and durable requests. No Apple DRM removal is claimed here.
+from decrypt_catalog import register_decrypt_catalog
+register_decrypt_catalog(app, connection, UPLOAD_DIR, _eri_mod_file, require_customer)
