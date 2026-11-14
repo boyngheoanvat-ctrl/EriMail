@@ -1,0 +1,150 @@
+name: ERI IPA Studio - ipatool and Signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_mode:
+        description: IPA source
+        type: choice
+        default: appstore
+        options: [appstore, release]
+        required: true
+      app_store_url:
+        description: App Store URL for ipatool
+        type: string
+        required: false
+      external_version_id:
+        description: External Version ID (optional)
+        type: string
+        required: false
+      release_tag:
+        description: GitHub Release tag for authorized IPA
+        type: string
+        required: false
+      release_asset:
+        description: Name of IPA in Release
+        type: string
+        required: false
+      confirm_rights:
+        description: I have permission to download, sign and distribute this IPA
+        type: boolean
+        required: true
+        default: false
+  pull_request:
+    paths: ['signing-worker/**', '.github/workflows/eri-ipatool-sign.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          python3 -m py_compile signing-worker/eri_ipatool_pipeline.py signing-worker/sign_worker.py
+          python3 -m unittest discover -s signing-worker -p test_eri_ipatool_pipeline.py -v
+
+  sign:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate request
+        shell: bash
+        env:
+          MODE: ${{ inputs.source_mode }}
+          STORE_URL: ${{ inputs.app_store_url }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_ASSET: ${{ inputs.release_asset }}
+          RIGHTS: ${{ inputs.confirm_rights }}
+        run: |
+          set -euo pipefail
+          [[ "$RIGHTS" == true ]] || { echo "::error::Rights confirmation required"; exit 1; }
+          if [[ "$MODE" == appstore ]]; then
+            [[ -n "$STORE_URL" ]] || { echo "::error::Missing App Store URL"; exit 1; }
+          elif [[ "$MODE" == release ]]; then
+            [[ "$RELEASE_TAG" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$ ]] || exit 1
+            [[ "$RELEASE_ASSET" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,150}\.ipa$ ]] || exit 1
+          else
+            exit 1
+          fi
+
+      - name: Prepare signing certificates (secrets only)
+        shell: bash
+        env:
+          CERT_B64: ${{ secrets.ERI_P12_BASE64 }}
+          PROFILE_B64: ${{ secrets.ERI_MOBILEPROVISION_BASE64 }}
+          ERI_P12_PASSWORD: ${{ secrets.ERI_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CERT_B64" && -n "$PROFILE_B64" && -n "$ERI_P12_PASSWORD" ]] || {
+            echo "::error::Missing certificate, mobileprovision or password secrets"; exit 1;
+          }
+          umask 077
+          mkdir -p "$RUNNER_TEMP/eri-private" "$RUNNER_TEMP/eri-input" "$RUNNER_TEMP/eri-output"
+          printf '%s' "$CERT_B64" | base64 -D > "$RUNNER_TEMP/eri-private/cert.p12"
+          printf '%s' "$PROFILE_B64" | base64 -D > "$RUNNER_TEMP/eri-private/cert.mobileprovision"
+          test -s "$RUNNER_TEMP/eri-private/cert.p12"
+          test -s "$RUNNER_TEMP/eri-private/cert.mobileprovision"
+
+      - name: Install ipatool
+        if: inputs.source_mode == 'appstore'
+        run: |
+          brew install ipatool
+          ipatool --version
+
+      - name: Get IPA from own GitHub Release
+        if: inputs.source_mode == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_ASSET: ${{ inputs.release_asset }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$RELEASE_ASSET" --dir "$RUNNER_TEMP/eri-input"
+          test -s "$RUNNER_TEMP/eri-input/$RELEASE_ASSET"
+
+      - name: Inspect IPA and sign on macOS
+        shell: bash
+        env:
+          MODE: ${{ inputs.source_mode }}
+          STORE_URL: ${{ inputs.app_store_url }}
+          VERSION_ID: ${{ inputs.external_version_id }}
+          RELEASE_ASSET: ${{ inputs.release_asset }}
+          ERI_APPLE_ID: ${{ secrets.ERI_APPLE_ID }}
+          ERI_APPLE_PASSWORD: ${{ secrets.ERI_APPLE_PASSWORD }}
+          ERI_APPLE_2FA_CODE: ${{ secrets.ERI_APPLE_2FA_CODE }}
+          ERI_IPATOOL_KEYCHAIN_PASSPHRASE: ${{ secrets.ERI_IPATOOL_KEYCHAIN_PASSPHRASE }}
+          ERI_P12_PASSWORD: ${{ secrets.ERI_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          set -- --p12 "$RUNNER_TEMP/eri-private/cert.p12" \
+            --mobileprovision "$RUNNER_TEMP/eri-private/cert.mobileprovision" \
+            --output "$RUNNER_TEMP/eri-output/ERI-signed.ipa"
+          if [[ "$MODE" == appstore ]]; then
+            set -- "$@" --app-store-url "$STORE_URL"
+            if [[ -n "$VERSION_ID" ]]; then set -- "$@" --external-version-id "$VERSION_ID"; fi
+          else
+            set -- "$@" --ipa "$RUNNER_TEMP/eri-input/$RELEASE_ASSET"
+          fi
+          python3 signing-worker/eri_ipatool_pipeline.py "$@"
+          unzip -tq "$RUNNER_TEMP/eri-output/ERI-signed.ipa"
+
+      - name: Upload signed IPA (one-day retention)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ERI-signed-IPA
+          path: ${{ runner.temp }}/eri-output/ERI-signed.ipa
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Remove temporary credentials and IPA
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/eri-private" "$RUNNER_TEMP/eri-input" "$RUNNER_TEMP/eri-output"
