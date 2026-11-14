@@ -24,10 +24,10 @@
     const heading = $("ipa-sign-progress-label");
     const note = $("ipa-sign-progress-stage");
     if (!panel || !bar || !percent || !heading || !note) return;
-    const value = Math.max(0, Math.min(100, Math.floor(100 * bytes / Math.max(total, 1))));
+    const value = Math.max(0, Math.min(100, Math.round(1000 * bytes / Math.max(total, 1)) / 10));
     panel.classList.remove("hidden");
     bar.value = value;
-    percent.textContent = value + "%";
+    percent.textContent = value.toFixed(1) + "%";
     heading.textContent = stage === "signing" ? "Đã tải đủ IPA — đang ký trên máy chủ" :
       stage === "complete" ? "Đã ký IPA thành công" :
       "Đang tải IPA lên máy chủ";
@@ -207,6 +207,9 @@
       }
       let received = new Set(job.received || []);
       const chunks = Math.ceil(file.size / job.chunk_bytes);
+      const confirmedBytes = () => Array.from(received).reduce((bytes, n) =>
+        bytes + Math.max(0, Math.min(job.chunk_bytes, file.size - n * job.chunk_bytes)), 0);
+      showProgress(confirmedBytes(), file.size, "uploading");
       for (let i=0;i<chunks;i++) {
         if (received.has(i)) continue;
         const slice = file.slice(i * job.chunk_bytes, Math.min(file.size,(i+1)*job.chunk_bytes));
@@ -224,7 +227,8 @@
           }
         }
         received.add(i);
-        const uploaded = Math.min(file.size,received.size * job.chunk_bytes);
+        // Count real acknowledged ranges; final chunk can be shorter than 2 MiB.
+        const uploaded = confirmedBytes();
         showProgress(uploaded, file.size, "uploading");
         status("Đã lưu lên máy chủ " + fmt(uploaded) + " / " + fmt(file.size) +
           " (phần " + (i+1) + "/" + chunks + "). Có thể tiếp tục nếu mạng ngắt.");
