@@ -369,38 +369,72 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 raise ValueError("Expected JSON object")
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
             raise HTTPException(503, "Chưa xác minh được nguồn IPA bên ngoài") from exc
-        entry = data.get("vault_entry")
-        if not isinstance(entry, dict):
-            entry = {}
-        # A third-party URL is not evidence that the IPA is decrypted or safe.
-        # Only expose the known download host and expected file path, never
-        # an arbitrary redirect/URL supplied by upstream JSON.
-        raw_url = str(entry.get("download_url") or entry.get("dl_url") or "")
-        parts = urlsplit(raw_url)
-        valid_url = (
-            parts.scheme == "https"
-            and parts.hostname == "160-191-242-70.sslip.io"
-            and parts.port in (None, 443)
-            and bool(re.fullmatch(r"/dl_dec/[A-Za-z0-9_-]{8,128}/[0-9]{8,15}/[A-Za-z0-9._%-]+[.]ipa", parts.path, re.I))
-            and not parts.username and not parts.password
-            and not parts.query and not parts.fragment
-        )
+        # F4 search returns {items:[{app_id/item_id, vault_cached:{dl_url}}]}.
+        # Older integrations also returned a top-level vault_entry.
+        # Match the EXACT Apple track ID: never show a download for another app.
+        requested_id = re.search(r"/id([0-9]{6,15})(?:/|$)", safe_target.path).group(1)
+        entries = data.get("items")
+        entry = {}
+        if isinstance(entries, list):
+            for candidate in entries[:100]:
+                if not isinstance(candidate, dict):
+                    continue
+                ids = (candidate.get("app_id"), candidate.get("item_id"),
+                       candidate.get("trackId"))
+                if any(str(value).removeprefix("id") == requested_id
+                       for value in ids if value is not None):
+                    entry = candidate
+                    break
+        elif isinstance(data.get("vault_entry"), dict):
+            entry = data["vault_entry"]
+
+        cached = entry.get("vault_cached")
+        if not isinstance(cached, dict):
+            cached = entry if entry is data.get("vault_entry") else {}
+        raw_url = str(cached.get("dl_url") or cached.get("download_url")
+                      or cached.get("dl_url") or "")
+        # F4's current download route is a relative /api/decrypt/download/<id>.
+        # Only resolve this strict route on F4's own origin. Never forward
+        # arbitrary upstream URLs or let upstream choose an external hostname.
+        current_path = r"/api/decrypt/download/[0-9a-fA-F]{32}"
+        legacy_path = (r"/dl_dec/[A-Za-z0-9_-]{8,128}/[0-9]{8,15}/"
+                       r"[A-Za-z0-9._%-]+[.]ipa")
+        origin = "https://decrypt.160-191-242-70.sslip.io"
+        download_url = None
+        if re.fullmatch(current_path, raw_url):
+            download_url = origin + raw_url
+        else:
+            parts = urlsplit(raw_url)
+            if (parts.scheme == "https"
+                    and parts.hostname in ("decrypt.160-191-242-70.sslip.io",
+                                           "160-191-242-70.sslip.io")
+                    and parts.port in (None, 443)
+                    and not parts.username and not parts.password
+                    and not parts.query and not parts.fragment
+                    and (re.fullmatch(current_path, parts.path)
+                         or re.fullmatch(legacy_path, parts.path))):
+                download_url = raw_url
+
+        size = cached.get("total_size") or cached.get("size_bytes")
+        if not isinstance(size, int) or size <= 0:
+            size = None
         return {
             "found": bool(entry),
-            "download_ready": bool(valid_url),
-            "download_url": raw_url if valid_url else None,
+            "download_ready": bool(download_url),
+            "download_url": download_url,
             "source": "F4TEAM (external)",
-            "title": str(entry.get("title") or "")[:160],
+            "title": str(entry.get("title") or entry.get("name") or "")[:160],
             "bundle_id": str(entry.get("bundle_id") or "")[:255],
-            "version": str(entry.get("version") or "")[:60],
-            "size_bytes": entry.get("total_size") if isinstance(entry.get("total_size"), int) else None,
-            "notice": ("Nguồn ngoài có đường dẫn IPA; ERI chưa kiểm định nội dung file."
-                       if valid_url else "Nguồn ngoài chưa trả đường dẫn IPA."),
+            "version": str(cached.get("version") or entry.get("version") or "")[:60],
+            "size_bytes": size,
+            "notice": ("F4TEAM trả link tải, ERI chưa kiểm định file hoặc quyền truy cập."
+                       if download_url else
+                       "F4TEAM chưa cung cấp link IPA cho đúng ứng dụng này."),
             "verification": {
                 "file_exists": False,
-                "distribution_authorized": True,
-                "plaintext_verified": entry.get("plaintext_verified") is True,
-                "account_data_stripped": entry.get("account_data_stripped") is True,
+                "distribution_authorized": False,
+                "plaintext_verified": False,
+                "account_data_stripped": False,
             },
         }
 
