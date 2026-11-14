@@ -97,90 +97,6 @@
       throw error;
     } finally { clearTimeout(timeout); }
   }
-  // F4 bridge only consumes a customer-provided public download URL locally.
-  // No requests to third-party job APIs, CSRF forwarding, session forwarding
-  // or proxying of private customer credentials are performed.
-  function safeF4IPA(raw) {
-    try {
-      const u = new URL(String(raw || ""));
-      if (u.protocol !== "https:" || u.hostname !== "160-191-242-70.sslip.io") return null;
-      if (!/^\/dl_dec\/[a-f0-9]{24}\/[0-9]{10}\/[^/?#]+\.ipa$/i.test(u.pathname)) return null;
-      if (u.username || u.password || u.search || u.hash) return null;
-      const expiration = Number(u.pathname.split("/")[3]);
-      if (!Number.isSafeInteger(expiration)) return null;
-      return {href:u.href, expiration};
-    } catch { return null; }
-  }
-  function importF4Response() {
-    const box = $("eri-dec-f4-input");
-    const out = $("eri-dec-f4-import-result");
-    if (!box || !out) return;
-    out.replaceChildren();
-    const input = box.value.trim();
-    if (!input) {
-      out.append(card("p","small","Dán link tải IPA hoặc JSON hoàn tất từ F4 trước."));
-      return;
-    }
-    let payload = {}, raw = input;
-    if (!input.startsWith("https://")) {
-      try {
-        const response = JSON.parse(input);
-        if (!response || typeof response !== "object" || Array.isArray(response))
-          throw new Error("Invalid JSON");
-        payload = response.job?.dl_url ? response.job :
-          response.result?.dl_url ? response.result : response;
-        if (payload.status !== "done" && response.status !== "done")
-          throw new Error("Tác vụ F4 chưa báo hoàn tất.");
-        raw = payload.dl_url || payload.download_url || "";
-      } catch(error) {
-        out.append(card("p","small", error instanceof SyntaxError
-          ? "Không đọc được JSON. Hãy dán riêng đối tượng phản hồi JSON hoặc link .ipa."
-          : error.message));
-        return;
-      }
-    }
-    const download = safeF4IPA(raw);
-    if (!download) {
-      out.append(card("p","small",
-        "Không tìm thấy link IPA F4 hợp lệ. Chỉ nhận HTTPS trên 160-191-242-70.sslip.io với đường dẫn /dl_dec/...ipa."));
-      return;
-    }
-    if (download.expiration * 1000 <= Date.now()) {
-      out.append(card("p","small","Link F4 này đã hết hạn theo dấu thời gian trong URL. Hãy lấy một link mới trên F4TEAM."));
-      return;
-    }
-    const name = String(payload.title || payload.out_filename || "IPA từ F4TEAM").slice(0,160);
-    const version = String(payload.version || "").slice(0,45);
-    const size = String(payload.size_human || "").slice(0,40);
-    const panel = card("div","eri-decrypt-card eri-dec-f4-result");
-    panel.append(card("strong","",name + (version ? " · v" + version : "")));
-    panel.append(card("p","small","F4 báo có liên kết IPA" + (size ? " (" + size + ")" : "") +
-      ". ERI chưa xác minh độc lập nội dung và trạng thái FairPlay của file."));
-    panel.append(card("p","small",
-      "Liên kết dự kiến hết hạn: " + new Date(download.expiration*1000).toLocaleString("vi-VN")));
-    const actions = card("div","eri-decrypt-actions");
-    const downloadLink = link("Tải IPA từ F4", download.href, true);
-    downloadLink.target = "_blank";
-    actions.append(downloadLink);
-    actions.append(button("Sao chép link IPA",async () => {
-      try {
-        await navigator.clipboard.writeText(download.href);
-        notice("Đã sao chép link IPA từ F4TEAM.", "success");
-      } catch { notice("Safari không cho phép sao chép tự động.", "error"); }
-    }));
-    panel.append(actions);
-    const installers = card("div","eri-dec-sideload");
-    const encoded = encodeURIComponent(download.href);
-    installers.append(link("TrollStore","apple-magnifier://install?url="+encoded));
-    installers.append(link("ESign","esign://install?url="+encoded));
-    installers.append(link("Scarlet","scarlet://install?url="+encoded));
-    installers.append(link("Feather","feather://install?url="+encoded));
-    panel.append(installers);
-    out.append(panel);
-    // Deliberately do not store the pasted JSON or F4 link. The signed
-    // download may expire and the payload may contain private metadata.
-  }
-
   // Compatibility while Render API is still on its old release.
   // Never invent IPA URLs: use only authorized FREE files returned by /mods.
   async function legacyVault(q = "", sort = "newest", offset = 0, limit = 24) {
@@ -573,34 +489,6 @@
         search(node.dataset.eriDecryptPreset,$("eri-decrypt-region").value);
       });
     });
-    // F4TEAM has not published a verified third-party API contract.
-    // Open its website directly instead of proxying protected endpoints,
-    // and copy only the public search term to ease the handoff.
-    async function copyExternalQuery() {
-      const q = ($("eri-decrypt-query")?.value || "").trim();
-      if (!q) {
-        notice("Nhập tên ứng dụng, Bundle ID hoặc link App Store trước khi sao chép.", "error");
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(q);
-        notice("Đã sao chép tên hoặc link. Bạn có thể dán vào ô tìm kiếm ở F4TEAM hoặc kho IPA ngoài.", "success");
-      } catch {
-        notice("Safari chưa cho phép sao chép tự động. Hãy chọn và sao chép nội dung trong ô tìm kiếm.", "error");
-        $("eri-decrypt-query")?.focus();
-      }
-    }
-    $("eri-decrypt-copy-query")?.addEventListener("click",copyExternalQuery);
-    $("eri-dec-f4-import-button")?.addEventListener("click",importF4Response);
-    for (const id of ["eri-decrypt-open-f4","eri-decrypt-open-public"]) {
-      $(id)?.addEventListener("click",() => {
-        const q = ($("eri-decrypt-query")?.value || "").trim();
-        if (q && navigator.clipboard?.writeText) {
-          // No await: allow the trusted external link to open on the same tap.
-          navigator.clipboard.writeText(q).catch(() => {});
-        }
-      });
-    }
     $("eri-decrypt-open-vault")?.addEventListener("click",() => {
       $("eri-decrypt-vault-section")?.scrollIntoView({behavior:"smooth",block:"start"});
       loadVault();
