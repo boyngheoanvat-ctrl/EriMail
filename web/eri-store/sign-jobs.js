@@ -2,7 +2,7 @@
 // Resumable 2-MiB signing uploads. Do not store P12, password, or customer keys
 // in IndexedDB/localStorage. The job ID is non-secret and scoped by server auth.
 (() => {
-  const API = "https://eri-api-dag8.onrender.com";
+  const API = "https://eri-ipa-preview-api.onrender.com";
   const TOKEN_KEY = "eri_store_buyer_token";
   const JOB_KEY = "eri_store_signing_job_v2";
   const $ = id => document.getElementById(id);
