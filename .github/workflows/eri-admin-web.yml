@@ -90,6 +90,9 @@ jobs:
       - name: Verify IPA website tools
         working-directory: backend
         run: python3 test_ipa_tools.py
+      - name: Validate Decrypt IPA catalog
+        working-directory: backend
+        run: python3 test_decrypt_catalog.py
       - name: Test FREE IPA APK downloads and lost-file handling
         working-directory: backend
         run: python3 test_mod_downloads.py
