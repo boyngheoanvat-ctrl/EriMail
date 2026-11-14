@@ -119,6 +119,13 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         assert found.json()["items"][0]["id"] == free_id
         assert found.json()["items"][0]["fairplay_verified"] is False
         assert found.json()["items"][0]["download_path"] == f"/api/v1/mods/{free_id}/download"
+        from fastapi import HTTPException
+        with patch.object(decrypt_catalog, "_apple_json",
+                          side_effect=HTTPException(503, "Apple offline")):
+            fallback = client.get(base + "/search", params={"q":"Football League","country":"vn"})
+        assert fallback.status_code == 200, fallback.text
+        assert fallback.json()["source"].startswith("ERI local vault")
+        assert fallback.json()["items"][0]["cached"]["id"] == free_id
         # User request persisted in SQLite and becomes completed only once
         # administrator-supplied authorized IPA exists.
         completed = client.get(base + "/requests/" + job_id,headers=auth).json()
