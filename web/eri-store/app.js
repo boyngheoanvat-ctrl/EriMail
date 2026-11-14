@@ -1,5 +1,5 @@
 "use strict";
-const API="https://eri-api-dag8.onrender.com";
+const API="https://eri-ipa-preview-api.onrender.com";
 const KINDS={
   mod:{endpoint:"mods",title:"Mod Game",icon:"🎮",type:"mod"},
   ai:{endpoint:"products",title:"AI Plus",icon:"✦",type:"ai"},
