@@ -257,52 +257,47 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
     @router.get("/api/v1/tools/ipa/decrypt/official")
     def official_ipa(bundle_id: str = Query(min_length=3, max_length=255)):
         """Discover original developer IPA links, without mirroring or repackaging."""
-        feeds = (
-            "https://raw.githubusercontent.com/mirazbakis/AltLoad/main/source.json",
-            "https://madeye.github.io/meow-ios/source.json",
-        )
-        for feed in feeds:
-            try:
-                req = urllib.request.Request(feed, headers={
-                    "Accept": "application/json", "User-Agent": "ERIStore/1.0"})
-                with urllib.request.urlopen(req, timeout=5) as response:
-                    raw = response.read(512 * 1024 + 1)
-                if len(raw) > 512 * 1024:
+        # Only explicitly mapped first-party publishers; never trust an arbitrary IPA mirror.
+        publishers = {
+            "com.rileytestut.delta": "rileytestut/Delta",
+            "com.utmapp.utm": "utmapp/UTM",
+        }
+        repo = publishers.get(bundle_id.casefold().strip())
+        if not repo:
+            return {"available": False, "notice": "Chưa có nguồn IPA chính chủ được xác minh cho ứng dụng này."}
+        endpoint = "https://api.github.com/repos/" + repo + "/releases?per_page=5"
+        try:
+            req = urllib.request.Request(endpoint, headers={
+                "Accept": "application/vnd.github+json", "User-Agent": "ERIStore/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as response:
+                raw = response.read(512 * 1024 + 1)
+            if len(raw) > 512 * 1024:
+                raise ValueError("GitHub response too large")
+            releases = json.loads(raw)
+            if not isinstance(releases, list):
+                raise ValueError("Unexpected releases payload")
+            for release in releases:
+                if not isinstance(release, dict) or release.get("draft"):
                     continue
-                parsed = json.loads(raw)
-                for app_item in parsed.get("apps", []):
-                    if not isinstance(app_item, dict):
+                for asset in release.get("assets", []):
+                    if not isinstance(asset, dict):
                         continue
-                    if str(app_item.get("bundleIdentifier", "")).casefold() != bundle_id.casefold():
+                    name = str(asset.get("name", ""))
+                    link = str(asset.get("browser_download_url", ""))
+                    parts = urlsplit(link)
+                    if (not name.lower().endswith(".ipa") or
+                        parts.scheme != "https" or parts.hostname != "github.com" or
+                        not parts.path.startswith("/" + repo + "/releases/download/") or
+                        not parts.path.lower().endswith(".ipa") or
+                        int(asset.get("size", 0) or 0) < 1024):
                         continue
-                    versions = app_item.get("versions", [])
-                    if not isinstance(versions, list):
-                        continue
-                    for version in versions:
-                        if not isinstance(version, dict):
-                            continue
-                        link = str(version.get("downloadURL", ""))
-                        parts = urlsplit(link)
-                        if (parts.scheme != "https" or parts.hostname != "github.com"
-                                or not re.fullmatch(r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/[^?#]+\.ipa", parts.path, re.I)):
-                            continue
-                        # HEAD checks reachability; final download remains at original publisher.
-                        head = urllib.request.Request(link, method="HEAD",
-                            headers={"User-Agent": "ERIStore/1.0"})
-                        try:
-                            with urllib.request.urlopen(head, timeout=7) as resp:
-                                if resp.status != 200:
-                                    continue
-                        except (urllib.error.URLError, TimeoutError, OSError):
-                            continue
-                        return {"available": True, "download_url": link,
-                                "name": str(app_item.get("name", ""))[:160],
-                                "version": str(version.get("version", ""))[:60],
-                                "source": "Original developer GitHub Release",
-                                "notice": "Tải từ tác giả; ERI không lưu trữ hoặc bán lại file."}
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError, TypeError):
-                continue
-        return {"available": False, "notice": "Chưa xác minh được IPA từ nhà phát triển."}
+                    return {"available": True, "download_url": link,
+                            "name": name[:160], "version": str(release.get("tag_name", ""))[:60],
+                            "source": "GitHub Releases · " + repo,
+                            "notice": "IPA công khai từ kho mã nguồn chính chủ; không lưu trữ lại."}
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, TypeError):
+            pass
+        return {"available": False, "notice": "Chưa tìm được bản IPA công khai từ nhà phát triển."}
 
     @router.get("/api/v1/tools/ipa/decrypt/external")
     def external_ipa(target: str = Query(min_length=12, max_length=500),
