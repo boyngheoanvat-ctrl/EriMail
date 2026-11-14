@@ -184,9 +184,12 @@
           new URLSearchParams({target:url,country:"auto"}));
         if (external.download_ready && external.download_url) {
           const parsed = new URL(external.download_url);
+          const f4DownloadPath = /^\\/api\\/decrypt\\/download\\/[a-f0-9]{32}$/i.test(parsed.pathname);
+          const f4LegacyPath = /^\\/dl_dec\\/[A-Za-z0-9_-]{8,128}\\/[0-9]{8,15}\\/[A-Za-z0-9._%-]+\\.ipa$/i.test(parsed.pathname);
           if (parsed.protocol === "https:" &&
-              parsed.hostname === "160-191-242-70.sslip.io" &&
-              parsed.pathname.startsWith("/dl_dec/") && parsed.pathname.toLowerCase().endsWith(".ipa")) {
+              ["decrypt.160-191-242-70.sslip.io", "160-191-242-70.sslip.io"].includes(parsed.hostname) &&
+              !parsed.username && !parsed.password && !parsed.search && !parsed.hash &&
+              (f4DownloadPath || f4LegacyPath)) {
             status.textContent = "F4TEAM có IPA v" + (external.version || item.version || "—") +
               " · Nguồn ngoài, ERI chưa kiểm định nội dung file.";
             root.append(link("Tải IPA từ F4TEAM" +
