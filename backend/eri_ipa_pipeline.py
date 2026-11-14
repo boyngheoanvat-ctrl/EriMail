@@ -14,6 +14,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -192,6 +193,14 @@ def _run(connection, upload_dir, job_id):
         _status(connection, job_id, "processing", 0, "Đang kết nối nguồn IPA ERI")
         size, digest = _download(connection, job_id, row["url"], partial, row["sha256"])
         _status(connection, job_id, "processing", 92, "Đang kiểm tra cấu trúc IPA")
+        # A ZIP header alone is not proof of a usable IPA. Check every member CRC
+        # before publishing the file; reject malformed or truncated archives.
+        try:
+            with zipfile.ZipFile(partial, "r") as archive:
+                if archive.testzip() is not None:
+                    raise ValueError("IPA có thành phần ZIP lỗi CRC")
+        except (zipfile.BadZipFile, EOFError) as exc:
+            raise ValueError("IPA không phải ZIP hợp lệ hoặc bị cắt cụt") from exc
         inspection = _inspect_archive(partial)
         meta = inspection.get("app") or {}
         if inspection.get("zip_password_protected"):
