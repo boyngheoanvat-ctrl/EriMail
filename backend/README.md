@@ -131,3 +131,49 @@ xác nhận nhận file, xác minh, tải được IPA. Không tải ứng dụn
 Việc deploy/restart có thể làm mất tài khoản, đơn hàng, dữ liệu IPA và lịch sử.
 Do đó các sửa đổi được chuẩn bị trên nhánh riêng, **không cập nhật site live**
 cho đến khi đã di chuyển dữ liệu sang lưu trữ bền vững và sao lưu thành công.
+
+## Chế độ tự lấy IPA qua ipatool (không cần đăng IPA thủ công)
+
+Cập nhật này bổ sung **nguồn tự động thứ hai** cho ERI IPA Worker.
+Nếu không có nguồn trong danh mục HTTPS, backend có thể chủ động gọi
+`ipatool download` để tải từ App Store bằng **Apple Account được phép**
+trên máy worker. Không dùng API của F4 hoặc dịch vụ giải mã thứ ba.
+
+Lưu ý: **`ipatool` chỉ lấy gói ứng dụng, không giải mã FairPlay**. Một IPA tải
+từ App Store còn `cryptid=1` không thể công bố như bản đã giải mã;
+worker kiểm tra Mach-O thật và trả lỗi rõ ràng thay vì hiển thị link giả.
+
+Yêu cầu máy worker:
+1. Có `ipatool` tương thích, tài khoản Apple đã đăng nhập bằng
+   `ipatool auth login` trực tiếp trên môi trường **riêng tư và có ổ lưu trữ bền vững**.
+   Không đưa Apple ID, mật khẩu hoặc keychain vào GitHub, website, Render env công khai.
+2. Ứng dụng thuộc quyền sở hữu và được **phép phân phối** dưới dạng IPA.
+   Cấu hình danh sách Bundle ID được phép tải/công bố; không tự động xuất IPA
+   của ứng dụng thương mại bên thứ ba nếu không có quyền phân phối.
+3. Ổ SQLite và `ERI_UPLOAD_DIR` cần lưu trữ bền vững để giữ file thật qua restart.
+
+Ví dụ cấu hình worker (chỉ thay bằng Bundle ID được cấp phép):
+
+```sh
+export ERI_IPATOOL_AUTO_DOWNLOAD=1
+export ERI_AUTO_IPA_BUNDLES=com.eri.first,com.eri.second
+export ERI_IPATOOL_BIN=/usr/local/bin/ipatool
+export ERI_IPATOOL_TIMEOUT_SEC=900
+export ERI_PIPELINE_MAX_IPA_BYTES=1073741824
+```
+
+Worker tự hoạt động khi khách tạo yêu cầu ở website. Tiến độ tải theo số
+byte thực tế đã ghi (ước tính phần trăm dựa trên `fileSizeBytes` App Store),
+sau đó kiểm tra SHA-256, Bundle ID, phiên bản, `cryptid=0` và tạo link tải
+`/api/v1/mods/{id}/download` **chỉ khi đã xác minh file**. Nếu ipatool không
+đăng nhập, không có quyền tải, hết thời gian, trả IPA sai phiên bản hoặc
+FairPlay còn mã hóa, job chuyển `failed` với nguyên nhân tương ứng.
+
+Đây không phải quy trình tự giải mã mọi game chỉ từ link App Store.
+Để lấy bản `cryptid=0` của một ứng dụng có bảo vệ FairPlay, cần thêm
+năng lực xử lý iOS hợp lệ, cùng quyền sử dụng/phân phối tương ứng; Render
+Linux hoặc GitHub Actions đơn lẻ không cung cấp năng lực đó.
+
+Kiểm thử không cần Apple ID hoặc mạng:
+`python backend/test_eri_ipatool_auto.py`.
+GitHub Actions: `.github/workflows/eri-ipa-worker-check.yml`.
