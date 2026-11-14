@@ -15,6 +15,7 @@
   let activeJob = null;
   let pollInFlight = false;
   let historyInFlight = false;
+  let historyQueued = false;
   let searchSerial = 0;
   let vaultSerial = 0;
 
@@ -239,7 +240,7 @@
     }
   }
   async function loadHistory() {
-    if (historyInFlight) return;
+    if (historyInFlight) { historyQueued = true; return; }
     const grid = $("eri-decrypt-history-grid");
     if (!grid) return;
     if (!getToken()) {
@@ -247,9 +248,11 @@
       return;
     }
     historyInFlight = true;
+    const startingToken = getToken();
     grid.replaceChildren(card("p","small","Đang khôi phục lịch sử yêu cầu từ máy chủ..."));
     try {
       const data = await request("/api/v1/tools/ipa/decrypt/requests",{auth:true});
+      if (startingToken !== getToken()) return; // Account changed mid-request.
       grid.replaceChildren();
       if (!data.items?.length) {
         grid.append(card("p","small","Bạn chưa có yêu cầu IPA nào."));
@@ -276,8 +279,11 @@
         grid.append(node);
       }
     } catch (error) {
-      grid.replaceChildren(card("p","small",error.message));
-    } finally { historyInFlight=false; }
+      if (startingToken === getToken()) grid.replaceChildren(card("p","small",error.message));
+    } finally {
+      historyInFlight = false;
+      if (historyQueued) { historyQueued = false; loadHistory(); }
+    }
   }
 
   async function createJob(target, country, version) {
@@ -381,8 +387,12 @@
     if (activeJob && getToken()) refreshJob();
     $("eri-decrypt-refresh-history")?.addEventListener("click",loadHistory);
     window.addEventListener("eri-store:session-changed", () => {
-      // Session keys are never persisted by this module; reload scoped history
-      // when the shopper signs in or out.
+      // Never leave a previous customer's requests visible after logout.
+      if (!getToken()) {
+        activeJob = null;
+        $("eri-decrypt-request-section")?.classList.add("hidden");
+        try {localStorage.removeItem(ACTIVE_JOB);}catch{}
+      }
       loadHistory();
       if (activeJob && getToken()) refreshJob();
     });
