@@ -173,7 +173,7 @@
         try {
           const official = await request("/api/v1/tools/ipa/decrypt/official?" +
             new URLSearchParams({bundle_id:item.bundle_id}));
-          if (official.available && /^https:\/\/github\\.com\//.test(official.download_url)) {
+          if (official.available && official.download_url.startsWith("https://github.com/")) {
             status.textContent = "Có IPA từ nhà phát triển · v" + (official.version || "—");
             root.append(link("Tải IPA từ nhà phát triển", official.download_url, true));
             return;
