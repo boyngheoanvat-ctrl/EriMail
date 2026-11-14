@@ -218,6 +218,16 @@ document.addEventListener("submit", function(event) {
       <div id="eri-decrypt-versions-grid" class="eri-decrypt-grid"></div>
     </section>
   </div>
+  <div class="ipa-tool-panel" id="eri-nonjb-panel">
+    <h3>Kiểm tra IPA cho iPhone chưa Jailbreak</h3>
+    <p>Chọn IPA bạn có quyền sử dụng. Hệ thống kiểm tra cấu trúc, CRC và FairPlay rồi cung cấp file tải thật. Để cài trên iPhone, cần ký bằng chứng chỉ và provisioning profile hợp lệ.</p>
+    <form id="eri-nonjb-form">
+      <label for="eri-nonjb-file">File IPA (tối đa 512 MB)</label>
+      <input id="eri-nonjb-file" name="ipa" type="file" accept=".ipa" required>
+      <button class="btn primary" type="submit">Kiểm tra và tạo link tải IPA</button>
+    </form>
+    <div id="eri-nonjb-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
+  </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>
     <p>Chọn IPA, chứng chỉ P12, hồ sơ mobileprovision và nhập mật khẩu P12. Tệp ký chỉ cài được trên các thiết bị mà chứng chỉ và hồ sơ của bạn cho phép.</p>
@@ -271,5 +281,6 @@ document.addEventListener("submit", function(event) {
     <div id="dialog-body"></div>
   </div>
 </div>
+<script defer src="/nonjb.js?v=20261115a"></script>
 </body>
 </html>
