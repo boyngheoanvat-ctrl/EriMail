@@ -86,13 +86,15 @@
       panel.classList.remove("hidden");
       bar.value = value;
       pct.textContent = value.toFixed(1) + "%";
-      label.textContent = stage === "complete" ? "Đã ký IPA" :
+      label.textContent = stage === "error" ? "Tải lên hoặc ký IPA thất bại" :
+        stage === "complete" ? "Đã ký IPA" :
         stage === "processing" ? "Đang ký IPA trên máy chủ" : "Đang gửi IPA qua HTTPS";
       note.textContent = stage === "uploading"
         ? "Đã truyền " + pretty(loaded) + " / " + pretty(total) +
           " qua HTTPS; chờ máy chủ xác nhận."
         : stage === "processing"
           ? "Đã truyền đủ file; máy chủ đang kiểm tra và ký số."
+          : stage === "error" ? "Tiến trình đã dừng. Có thể chọn lại và thử tiếp."
           : "File đã ký sẵn sàng để tải.";
     };
     updateLegacyProgress(0, ipa.size, "uploading");
@@ -113,6 +115,7 @@
       let response;
       try { response = JSON.parse(xhr.responseText || "{}"); } catch { response = {}; }
       if (xhr.status < 200 || xhr.status >= 300) {
+        updateLegacyProgress(ipa.size, ipa.size, "error");
         display(result, xhr.status === 401
           ? "Phiên đăng nhập đã hết hạn. Bạn hãy đăng nhập lại rồi bấm Ký; tệp đã chọn sẽ không bị xóa nếu không tải lại trang."
           : errorText(response) || "HTTP " + xhr.status, "error");
@@ -132,9 +135,18 @@
       const pwd = form.querySelector('input[name="password"]');
       if (pwd) pwd.value = "";
     };
-    xhr.onerror = () => display(result, "Không kết nối được máy chủ. Kiểm tra mạng và thử lại.", "error");
-    xhr.ontimeout = () => display(result, "Quá thời gian xử lý trên máy chủ. Tệp lớn có thể cần dịch vụ xử lý chuyên dụng.", "error");
-    xhr.onabort = () => display(result, "Yêu cầu đã bị hủy.", "error");
+    xhr.onerror = () => {
+      updateLegacyProgress(ipa.size, ipa.size, "error");
+      display(result, "Không kết nối được máy chủ. Kiểm tra mạng và thử lại.", "error");
+    };
+    xhr.ontimeout = () => {
+      updateLegacyProgress(ipa.size, ipa.size, "error");
+      display(result, "Quá thời gian xử lý trên máy chủ. Hãy dùng tính năng upload từng phần.", "error");
+    };
+    xhr.onabort = () => {
+      updateLegacyProgress(ipa.size, ipa.size, "error");
+      display(result, "Yêu cầu đã bị hủy.", "error");
+    };
     xhr.onloadend = () => { buttons.forEach(b => b.disabled = false); };
     display(result, "Đang kết nối máy chủ...");
     xhr.send(payload);
