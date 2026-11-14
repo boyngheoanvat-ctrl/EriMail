@@ -45,3 +45,37 @@ API order endpoints: `POST /api/v1/orders` (kind `ai` or `certificate`, product_
 Apple Search API chỉ cung cấp metadata, không tải hay giải mã FairPlay. Không sao chép IPA và API của website tham khảo.
 
 QUAN TRỌNG: Render Free đang sử dụng SQLite và file upload trên ổ tạm. Tác vụ có thể khôi phục sau khi đóng trình duyệt nhưng KHÔNG đảm bảo giữ dữ liệu qua deploy/restart. Trước khi deploy backend production, phải sao lưu hoặc chuyển toàn bộ SQLite và IPA sang dịch vụ lưu trữ bền vững. IPA chưa ký vẫn cần P12/mobileprovision hợp lệ trước khi cài iPhone.
+
+
+## Xử lý IPA độc lập (ERI IPA Worker)
+
+Máy chủ ERI có worker riêng, không gọi API của F4 hay dịch vụ giải mã bên thứ ba.
+Worker chỉ tải IPA từ nguồn HTTPS do chủ máy chủ **có quyền phân phối** đăng ký,
+kiểm tra SHA-256, cấu trúc `Payload/*.app`, Bundle ID, phiên bản và Mach-O
+`cryptid=0` trước khi công bố file tải thật trong kho ERI.
+
+**Giới hạn quan trọng:** Worker này không gỡ mã hóa FairPlay của ứng dụng App Store.
+Apple Search API trả metadata, không trả IPA đã giải mã. Với ứng dụng không có nguồn
+IPA đã được cấp quyền, trạng thái là `waiting_for_source` và KHÔNG hiển thị %
+xử lý giả. File nguồn còn FairPlay bị từ chối; không ký số được bằng cách
+đổi tên hay đóng gói lại. Các file IPA hợp lệ có thể ký qua mục Ký IPA trên web.
+
+Cấu hình máy chủ (không đưa khóa admin hoặc mật khẩu Apple vào trình duyệt):
+- `ERI_IPA_SOURCE_HOSTS`: danh sách tên miền HTTPS tin cậy được phép tải IPA,
+  cách nhau bằng dấu phẩy, ví dụ `files.example.org`. Không đặt tên miền F4.
+- `ERI_PIPELINE_MAX_IPA_BYTES`: kích thước tải tối đa (mặc định 536870912 byte).
+  Nâng giá trị chỉ khi có đủ bộ nhớ, ổ đĩa và giới hạn giải nén phù hợp.
+- `ERI_DB_PATH`, `ERI_UPLOAD_DIR`: phải trỏ tới **ổ lưu trữ bền vững** trên
+  môi trường sản xuất. Render Free dùng ổ tạm, không đảm bảo IPA qua restart.
+
+Đăng ký nguồn hợp lệ qua API Admin HTTPS:
+```sh
+curl -X POST https://eri-api-dag8.onrender.com/api/v1/admin/decrypt/sources \
+  -H "X-ERI-Admin-Key: $ERI_ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"name":"Ứng dụng ERI","bundle_id":"com.eri.demo","version":"1.0","url":"https://files.example.org/ERI-Demo.ipa","sha256":"<64 ký tự SHA-256>","distribution_authorized":true}'
+```
+
+Sau khi đăng ký, mọi yêu cầu trùng Bundle ID và phiên bản đang chờ sẽ
+được worker tự xử lý. Khách hàng không cần nhập chứng chỉ hoặc upload file tại
+màn hình tra cứu. Tiến trình lấy trực tiếp từ backend và tải IPA qua
+`/api/v1/mods/{id}/download` chỉ khi tệp đã được xác minh và thực sự tồn tại.
