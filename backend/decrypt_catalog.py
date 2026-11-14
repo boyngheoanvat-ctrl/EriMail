@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from eri_ipa_pipeline import (
     setup as setup_pipeline, put_source, schedule as schedule_pipeline,
     schedule_matching as schedule_matching_pipeline,
-    sync_source_feed, feed_configured
+    sync_source_feed, feed_configured, auto_download_enabled, can_auto_acquire
 )
 
 REGIONS = ("vn", "us", "jp", "kr", "tw", "cn", "hk", "sg", "th", "gb")
@@ -255,6 +255,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             "worker": "ERI authorized IPA pipeline",
             "source_feed_configured": feed_configured(),
             "registered_sources": registered,
+            "ipatool_auto_download_enabled": auto_download_enabled(),
+            "ipatool_auto_mode": "licensed_app_store_download_only",
             "fairplay_decrypt_available": False,
             "app_store_search": True,
             "ipa_download_requires_verified_source": True,
@@ -276,6 +278,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             item["cached"] = match
             item["ipa_available"] = match is not None
             item["source_available"] = source_exists(item["bundle_id"], item["version"])
+            item["auto_acquisition_available"] = can_auto_acquire(item["bundle_id"])
         return items
 
     @router.get("/api/v1/tools/ipa/decrypt/search")
@@ -372,6 +375,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         match = _match_vault(free, row["bundle_id"], row["version"])
         state = "completed" if match else row["state"] or "waiting_for_source"
         available = source_exists(row["bundle_id"], row["version"])
+        auto_acquire = can_auto_acquire(row["bundle_id"])
         return {
             "job_id": row["id"], "app_id": row["app_id"], "name": row["name"],
             "bundle_id": row["bundle_id"], "version": row["version"],
@@ -379,10 +383,12 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             "state": state,
             "progress": 100 if match else (None if state == "waiting_for_source" else row["progress"]),
             "source_available": available,
+            "auto_acquisition_available": auto_acquire,
             "result": match,
             "message": ("IPA đã có trong kho ERI." if match
-                        else row["message"] or ("Đang chuyển tới worker ERI." if available else
-                           "Chưa có nguồn IPA tương ứng trên máy chủ ERI.")),
+                        else row["message"] or ("Đang tải IPA từ nguồn ERI." if available else
+                           "ERI sẽ tự lấy IPA từ tài khoản App Store có quyền." if auto_acquire else
+                           "Chưa cấu hình nguồn IPA cho phiên bản này.")),
         }
 
     @router.post("/api/v1/tools/ipa/decrypt/requests", status_code=201)
@@ -403,7 +409,17 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 (customer["id"], app_info["bundle_id"], chosen_version),
             ).fetchone()
             if existing is not None:
-                # Retry/resume when an operator-approved source is now available.
+                # Explicit re-request retries a failed but newly actionable job.
+                if existing["state"] == "failed" and (
+                        source_exists(app_info["bundle_id"], chosen_version)
+                        or can_auto_acquire(app_info["bundle_id"])):
+                    db.execute(
+                        "UPDATE ipa_decrypt_requests SET state='waiting_for_source', "
+                        "progress=NULL,message='',updated_at=? WHERE id=?",
+                        (datetime.now(timezone.utc).isoformat(), existing["id"]))
+                    existing = db.execute(
+                        "SELECT * FROM ipa_decrypt_requests WHERE id=?",
+                        (existing["id"],)).fetchone()
                 schedule_pipeline(connection, upload_dir, existing["id"])
                 return {**job_payload(existing), "reused": True}
             current = db.execute(
