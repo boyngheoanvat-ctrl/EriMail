@@ -195,9 +195,8 @@
           const bundle = String(data.bundle_id || "Không rõ");
           const version = String(data.version || "Không rõ");
           display(appStoreResult, name + " · " + developer +
-            "\nBundle ID: " + bundle + " · Phiên bản: " + version +
-            "\n" + (data.message || "Link App Store không phải tệp IPA có thể tải về."), "success");
-          const actions = document.createElement("div");
+             "\nBundle ID: " + bundle + " · Phiên bản: " + version, "success");
+           const actions = document.createElement("div");
           actions.className = "ipa-tool-actions";
           // The Apple Lookup API is metadata-only. Cross-check our actual,
           // authorized FREE inventory before offering a downloadable IPA.
@@ -235,23 +234,10 @@
             download.rel = "noopener noreferrer";
             download.textContent = "Tải IPA từ kho ERI (v" + existingIPA.version + ")";
             actions.append(download);
-            if (String(existingIPA.version) !== version) {
-              const note = document.createElement("p");
-              note.className = "small";
-              note.textContent = "Kho ERI hiện có bản v" + existingIPA.version
-                + ", khác bản App Store v" + version + ".";
-              appStoreResult.append(note);
-            }
-          } else {
-            const note = document.createElement("p");
-            note.className = "small";
-            note.textContent = "Kho ERI chưa có IPA hợp lệ cho " + name + " (v" + version +
-              "). Bạn có thể gửi yêu cầu xử lý và theo dõi trạng thái. " +
-              "Link App Store không chứa IPA đã giải mã FairPlay.";
-            appStoreResult.append(note);
-          }
+            /* IPA source unavailable: the user can launch a real ERI processing job. */
+           }
 
-          const decryptTab = document.querySelector('[data-kind="decrypt"]');
+           const decryptTab = document.querySelector('[data-kind="decrypt"]');
           if (decryptTab && $("eri-decrypt-query")) {
             const openDecrypt = createRequest => {
               const query = $("eri-decrypt-query");
@@ -265,7 +251,7 @@
               const request = document.createElement("button");
               request.type = "button";
               request.className = "btn primary";
-              request.textContent = "Gửi yêu cầu xuất IPA";
+              request.textContent = "Xử lý IPA";
               request.addEventListener("click", () => openDecrypt(true));
               actions.append(request);
             }
