@@ -97,6 +97,41 @@
       throw error;
     } finally { clearTimeout(timeout); }
   }
+  // Compatibility while Render API is still on its old release.
+  // Never invent IPA URLs: use only authorized FREE files returned by /mods.
+  async function legacyVault(q = "", sort = "newest", offset = 0, limit = 24) {
+    const catalog = await request("/api/v1/mods");
+    const keyword = String(q).trim().toLocaleLowerCase("vi");
+    let items = (Array.isArray(catalog.items) ? catalog.items : [])
+      .filter(item => item.platform === "ipa" && Number(item.price_vnd) === 0
+        && !!apiUrl(item.download_path))
+      .filter(item => !keyword || [item.name, item.bundle_id]
+        .some(value => String(value || "").toLocaleLowerCase("vi").includes(keyword)));
+    if (sort === "title") items.sort((a,b) => String(a.name).localeCompare(String(b.name),"vi"));
+    else if (sort === "size_desc") items.sort((a,b) => Number(b.size_bytes||0)-Number(a.size_bytes||0));
+    else if (sort === "size_asc") items.sort((a,b) => Number(a.size_bytes||0)-Number(b.size_bytes||0));
+    else items.sort((a,b) => Number(b.id)-Number(a.id));
+    return {items:items.slice(offset,offset+limit),total:items.length};
+  }
+  async function legacySearch(q,country) {
+    if (!safeStoreLink(q)) throw new Error(
+      "Máy chủ ERI chưa cập nhật API tìm theo tên/Bundle ID. Bạn có thể tra cứu bằng link App Store, hoặc dùng kho IPA có sẵn.");
+    const [app, vault] = await Promise.all([
+      request("/api/v1/tools/ipa/appstore?url=" + encodeURIComponent(q)),
+      legacyVault("", "newest", 0, 100)
+    ]);
+    const cached = vault.items.find(item =>
+      String(item.bundle_id||"").toLowerCase() === String(app.bundle_id||"").toLowerCase()
+      && String(item.version) === String(app.version)) || null;
+    return {items:[{
+      app_id:Number(new URL(q).pathname.match(/id([0-9]+)/)?.[1]||0),
+      name:app.name,developer:app.developer,bundle_id:app.bundle_id,
+      version:app.version,country:(country === "auto" ? "VN" : country.toUpperCase()),
+      icon_url:app.icon_url||"",app_store_url:app.app_store_url||q,
+      cached,ipa_available:!!cached
+    }],total:1,source:"ERI legacy App Store Lookup + kho IPA có tệp thật"};
+  }
+
   function installActions(parent, item) {
     const url = apiUrl(item?.download_path);
     if (!url) return;
@@ -172,8 +207,14 @@
     const grid = $("eri-decrypt-results");
     if (grid) grid.replaceChildren();
     try {
-      const data = await request("/api/v1/tools/ipa/decrypt/search?" +
-        new URLSearchParams({q, country, limit:"15"}));
+      let data;
+      try {
+        data = await request("/api/v1/tools/ipa/decrypt/search?" +
+          new URLSearchParams({q, country, limit:"15"}));
+      } catch (error) {
+        if (!/HTTP 404/.test(error.message)) throw error;
+        data = await legacySearch(q,country);
+      }
       if (serial !== searchSerial) return;
       if (!data.items?.length) {
         notice("Không tìm thấy ứng dụng phù hợp ở khu vực đã chọn.", "error");
@@ -223,8 +264,14 @@
     const grid = $("eri-decrypt-vault-grid");
     if (grid) grid.replaceChildren(card("p", "small", "Đang tải kho IPA..."));
     try {
-      const result = await request("/api/v1/tools/ipa/decrypt/vault?" +
-        new URLSearchParams({q,sort,limit:String(vaultLimit),offset:String(vaultOffset)}));
+      let result;
+      try {
+        result = await request("/api/v1/tools/ipa/decrypt/vault?" +
+          new URLSearchParams({q,sort,limit:String(vaultLimit),offset:String(vaultOffset)}));
+      } catch(error) {
+        if (!/HTTP 404/.test(error.message)) throw error;
+        result = await legacyVault(q,sort,vaultOffset,vaultLimit);
+      }
       if (serial !== vaultSerial) return;
       vaultTotal = Number(result.total) || 0;
       text("eri-decrypt-vault-count", vaultTotal + " IPA");
@@ -318,7 +365,11 @@
       try {localStorage.setItem(ACTIVE_JOB,activeJob);} catch {}
       renderJob(job);
       await loadHistory();
-    } catch(error) { notice(error.message, "error"); }
+    } catch(error) {
+      notice(/HTTP 404/.test(error.message)
+        ? "Máy chủ ERI chưa cập nhật tính năng gửi yêu cầu IPA. Bộ tra cứu và kho IPA vẫn sử dụng được; cần cập nhật backend để lưu yêu cầu."
+        : error.message, "error");
+    }
   }
   function renderJob(job) {
     const section = $("eri-decrypt-request-section");
