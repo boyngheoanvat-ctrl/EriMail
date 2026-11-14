@@ -27,17 +27,17 @@ assert 'status("Đã nhận " + pct + "%' in chunks
 assert 'percentage + "% · "' in tools
 assert 'received.size * job.chunk_bytes' not in chunks
 
-assert 'Gửi yêu cầu xuất IPA' in tools
+assert 'Xử lý IPA' in tools
 assert 'if (createRequest) $("eri-decrypt-direct-request")?.click();' in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
 assert "eri-store-v24" in service
-assert "?v=20261115p1" in html
+assert "?v=20261115p2" in html
 assert "eri-decrypt-open-f4" not in html
 assert "eri-dec-f4-import" not in html
 
 # No bogus IPA URL from App Store link is ever generated.
 assert not re.search(r'ipa.*download.*apps\.apple\.com', tools, re.I)
-assert 'Link App Store không chứa IPA đã giải mã FairPlay' in tools
+assert 'Link App Store không chứa IPA đã giải mã FairPlay' not in tools
 
 print("ERI STORE: precise progress, cache-bust, backend vault lookup and IPA request UI OK")
