@@ -19,6 +19,7 @@ from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from ipa_verified_worker import source_state, verified_products
 
 REGIONS = ("vn", "us", "jp", "kr", "tw", "cn", "hk", "sg", "th", "gb")
 # Limit auto queries to three regions; Apple documents a ~20 calls/minute limit.
@@ -196,6 +197,7 @@ def _all_free_ipa(connection, upload_dir, mod_file, q: str = "", limit: int = 50
             (pattern, pattern, limit),
         ).fetchall()
     items = []
+    inspected_ids = verified_products(connection)
     for row in rows:
         if mod_file(row) is None:
             continue
@@ -204,8 +206,8 @@ def _all_free_ipa(connection, upload_dir, mod_file, q: str = "", limit: int = 50
             "bundle_id": row["bundle_id"], "description": row["description"],
             "size_bytes": row["size_bytes"], "created_at": row["created_at"],
             "download_path": "/api/v1/mods/" + str(row["id"]) + "/download",
-            # Uploaded and authorized does NOT automatically mean FairPlay-decrypted.
-            "fairplay_verified": False,
+            # Mark verified only when the independent worker actually inspected Mach-O.
+            "fairplay_verified": row["id"] in inspected_ids,
         })
     return items
 
@@ -312,16 +314,20 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         if free is None:
             free = _all_free_ipa(connection, upload_dir, mod_file)
         match = _match_vault(free, row["bundle_id"], row["version"])
+        source = None if match else source_state(connection, row["bundle_id"], row["version"])
+        allowed_states = ("queued", "processing", "failed")
+        status = source["state"] if source and source["state"] in allowed_states else ""
         return {
             "job_id": row["id"], "app_id": row["app_id"], "name": row["name"],
             "bundle_id": row["bundle_id"], "version": row["version"],
             "country": row["country"], "created_at": row["created_at"],
-            "state": "completed" if match else "waiting_for_authorized_file",
-            "progress": 100 if match else 0,
+            "state": "completed" if match else (status or "waiting_for_authorized_file"),
+            "progress": 100 if match else (int(source["progress"]) if status == "processing" else 0),
             "result": match,
-            "message": ("IPA hợp lệ đã có trong kho ERI." if match
-                        else "Đã lưu yêu cầu. Chờ quản trị viên cung cấp IPA có quyền phân phối; "
-                             "link App Store không tự cung cấp IPA đã giải mã."),
+            "message": ("IPA đã có file thật trong kho ERI." if match else
+                        source["message"] if status else
+                        "Đã lưu yêu cầu. Chưa có nguồn IPA được ERI cấp phép; "
+                        "Apple Search API không cung cấp IPA đã giải mã."),
         }
 
     @router.post("/api/v1/tools/ipa/decrypt/requests", status_code=201)
