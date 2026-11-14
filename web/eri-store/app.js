@@ -270,7 +270,7 @@ async function restoreSession(){
 }
 function signOut(clear=true){
   const oldToken=state.token;
-  state.token="";state.buyer=null;state.remembered=false;localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);updateHeader();
+  state.token="";state.buyer=null;state.remembered=false;localStorage.removeItem(TOKEN_KEY);sessionStorage.removeItem(TOKEN_KEY);updateHeader();window.dispatchEvent(new Event("eri-store:session-changed"));
   if(clear&&oldToken){
     fetch(API+"/api/v1/auth/logout",{method:"POST",headers:{Authorization:"Bearer "+oldToken}}).catch(()=>{});
   }
@@ -324,6 +324,7 @@ function authModal(register=false){
       if(!result.token||!result.customer)throw new Error("Phản hồi đăng nhập chưa đúng định dạng.");
       state.token=result.token;state.buyer=result.customer;
       saveAccountOnDevice(rememberBox.checked);updateHeader();
+      window.dispatchEvent(new Event("eri-store:session-changed"));
       closeDialog();if(state.view==="account")showProfile();
       if(state.pending){const previous=state.pending;state.pending=null;await buy(previous.id,previous.kind)}
     }catch(err){failure.textContent=errorMessage(err)}finally{submit.disabled=false}
