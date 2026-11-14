@@ -72,15 +72,43 @@
     const buttons = Array.from(form.querySelectorAll("button"));
     buttons.forEach(b => b.disabled = true);
     const payload = new FormData(form);
+    // Compatibility for a legacy HTTPS upload. Real-time bytes are browser
+    // transmission progress, not confirmation of server-side signing.
+    const updateLegacyProgress = (loaded, total, stage) => {
+      const panel = $("ipa-sign-progress");
+      const bar = $("ipa-sign-progress-bar");
+      const pct = $("ipa-sign-progress-percent");
+      const label = $("ipa-sign-progress-label");
+      const note = $("ipa-sign-progress-stage");
+      if (!panel || !bar || !pct || !label || !note) return;
+      const value = total > 0
+        ? Math.round(Math.max(0, Math.min(1, loaded / total)) * 1000) / 10 : 0;
+      panel.classList.remove("hidden");
+      bar.value = value;
+      pct.textContent = value.toFixed(1) + "%";
+      label.textContent = stage === "complete" ? "Đã ký IPA" :
+        stage === "processing" ? "Đang ký IPA trên máy chủ" : "Đang gửi IPA qua HTTPS";
+      note.textContent = stage === "uploading"
+        ? "Đã truyền " + pretty(loaded) + " / " + pretty(total) +
+          " qua HTTPS; chờ máy chủ xác nhận."
+        : stage === "processing"
+          ? "Đã truyền đủ file; máy chủ đang kiểm tra và ký số."
+          : "File đã ký sẵn sàng để tải.";
+    };
+    updateLegacyProgress(0, ipa.size, "uploading");
     const xhr = new XMLHttpRequest();
     xhr.open("POST", API + endpoint, true);
     xhr.timeout = 600000;
     xhr.setRequestHeader("Authorization", "Bearer " + token);
     xhr.upload.onprogress = ev => {
-      const progress = ev.lengthComputable ? pretty(ev.loaded) + " / " + pretty(ev.total) : pretty(ev.loaded);
-      display(result, "Đang gửi file qua HTTPS: " + progress);
+      const total = ev.lengthComputable ? ev.total : ipa.size;
+      updateLegacyProgress(ev.loaded, total, "uploading");
+      display(result, "Đang gửi file qua HTTPS: " + pretty(ev.loaded) + " / " + pretty(total));
     };
-    xhr.upload.onload = () => display(result, "Đã gửi tệp; máy chủ đang kiểm tra và xử lý...");
+    xhr.upload.onload = () => {
+      updateLegacyProgress(ipa.size, ipa.size, "processing");
+      display(result, "Đã gửi file; máy chủ đang kiểm tra và ký số...");
+    };
     xhr.onload = () => {
       let response;
       try { response = JSON.parse(xhr.responseText || "{}"); } catch { response = {}; }
@@ -98,6 +126,7 @@
         }
         return;
       }
+      updateLegacyProgress(ipa.size, ipa.size, "complete");
       display(result, response.message || "IPA đã được ký.", "success");
       makeDownload(response, result);
       const pwd = form.querySelector('input[name="password"]');
@@ -189,24 +218,35 @@
           } else {
             const note = document.createElement("p");
             note.className = "small";
-            note.textContent = "Kho ERI chưa có IPA miễn phí có tệp thật cho Bundle ID này. "
-              + "Bạn có thể yêu cầu bản IPA được phép phân phối trong mục Decrypt IPA.";
+            note.textContent = "Kho ERI chưa có IPA hợp lệ cho " + name + " (v" + version +
+              "). Bạn có thể gửi yêu cầu xử lý và theo dõi trạng thái. " +
+              "Link App Store không chứa IPA đã giải mã FairPlay.";
             appStoreResult.append(note);
           }
 
           const decryptTab = document.querySelector('[data-kind="decrypt"]');
           if (decryptTab && $("eri-decrypt-query")) {
-            const browse = document.createElement("button");
-            browse.type = "button";
-            browse.className = "btn outline";
-            browse.textContent = "Xem kho IPA / chọn phiên bản";
-            browse.addEventListener("click", () => {
+            const openDecrypt = createRequest => {
               const query = $("eri-decrypt-query");
               query.value = link;
               query.dispatchEvent(new Event("input", {bubbles: true}));
               decryptTab.click();
-              $("eri-decrypt-search-form")?.requestSubmit();
-            });
+              if (createRequest) $("eri-decrypt-direct-request")?.click();
+              else $("eri-decrypt-search-form")?.requestSubmit();
+            };
+            if (!existingIPA) {
+              const request = document.createElement("button");
+              request.type = "button";
+              request.className = "btn primary";
+              request.textContent = "Gửi yêu cầu xuất IPA";
+              request.addEventListener("click", () => openDecrypt(true));
+              actions.append(request);
+            }
+            const browse = document.createElement("button");
+            browse.type = "button";
+            browse.className = "btn outline";
+            browse.textContent = "Kho IPA / chọn phiên bản";
+            browse.addEventListener("click", () => openDecrypt(false));
             actions.append(browse);
           }
           if (typeof data.app_store_url === "string") {
