@@ -33,3 +33,15 @@ Set `ERI_PAYMENT_MODE=static_momo` (default). The iOS app generates the static M
 For a later bank-account QR integration, set `ERI_PAYMENT_MODE=bank` plus `ERI_BANK_BIN`, `ERI_BANK_ACCOUNT`, and `ERI_BANK_NAME`. Avoid placing admin keys in the iOS binary.
 
 API order endpoints: `POST /api/v1/orders` (kind `ai` or `certificate`, product_id), `GET /api/v1/orders/{id}`, `GET /api/v1/admin/orders`. Product fulfillment and payment reconciliation are not automated.
+
+## ERI Decrypt IPA: API và dữ liệu thực tế
+
+- GET /api/v1/tools/ipa/decrypt/search: tìm theo tên, Bundle ID hoặc App Store URL; chọn một trong 10 vùng, Auto tìm song song VN/US/JP.
+- GET /api/v1/tools/ipa/decrypt/vault: chỉ hiển thị IPA miễn phí được phép phân phối và còn file, sử dụng endpoint tải /api/v1/mods/{id}/download.
+- GET /api/v1/tools/ipa/decrypt/versions: phiên bản hiện tại của Apple và các phiên bản thực sự có trong kho ERI.
+- POST /api/v1/tools/ipa/decrypt/requests: tạo yêu cầu theo tài khoản (Bearer token), lưu vào SQLite.
+- GET /api/v1/tools/ipa/decrypt/requests/{job_id}: 0% nếu chưa có IPA, 100% chỉ khi có file thật và quyền tải.
+
+Apple Search API chỉ cung cấp metadata, không tải hay giải mã FairPlay. Không sao chép IPA và API của website tham khảo.
+
+QUAN TRỌNG: Render Free đang sử dụng SQLite và file upload trên ổ tạm. Tác vụ có thể khôi phục sau khi đóng trình duyệt nhưng KHÔNG đảm bảo giữ dữ liệu qua deploy/restart. Trước khi deploy backend production, phải sao lưu hoặc chuyển toàn bộ SQLite và IPA sang dịch vụ lưu trữ bền vững. IPA chưa ký vẫn cần P12/mobileprovision hợp lệ trước khi cài iPhone.
