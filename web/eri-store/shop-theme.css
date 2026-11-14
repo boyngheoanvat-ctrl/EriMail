@@ -533,3 +533,33 @@ body.shop-v2{
  .shop-v2 .eri-dec .eri-decrypt-filter {grid-template-columns:minmax(0,1fr) auto;gap:7px}
  .shop-v2 .eri-dec .eri-decrypt-filter input {grid-column:1/-1}
 }
+
+
+.shop-v2 .eri-dec .eri-decrypt-card[hidden]{display:none!important}
+.shop-v2 .eri-dec .eri-dec-sideload {
+ display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;
+ margin-top:8px;
+}
+.shop-v2 .eri-dec .eri-dec-sideload .btn {
+ padding:6px 4px;min-width:0;min-height:29px;
+ text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+ font-size:10px;font-weight:750;border-radius:8px;
+}
+.shop-v2 .eri-dec .eri-decrypt-card .eri-dec-vault-label {
+ color:var(--dec-good);font-size:11px;font-weight:750;
+ margin:4px 0;letter-spacing:.2px;
+}
+.shop-v2 .eri-dec .eri-dec-app-meta {
+ display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:11px;
+}
+.shop-v2 .eri-dec .eri-dec-app-meta>span {
+ font-size:10px;background:var(--dec-panel);
+ border:1px solid var(--dec-border);border-radius:5px;color:var(--dec-sub);
+ padding:3px 6px;white-space:nowrap;
+}
+@media(max-width:480px) {
+ .shop-v2 .eri-dec .eri-dec-topbar {align-items:flex-start}
+ .shop-v2 .eri-dec .eri-dec-brand strong {font-size:14px}
+ .shop-v2 .eri-dec .eri-dec-count-pill {padding:6px}
+ .shop-v2 .eri-dec .eri-dec-sideload .btn {font-size:10px;padding:6px 2px}
+}
