@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'apps/ERIAdmin/**'
       - 'web/eri-store/decrypt-store.js'
       - '.github/workflows/eri-verified-worker.yml'
   push:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'apps/ERIAdmin/**'
       - 'web/eri-store/decrypt-store.js'
       - '.github/workflows/eri-verified-worker.yml'
   workflow_dispatch:
@@ -40,3 +42,64 @@ jobs:
       - name: Authorized worker and Mach-O verification tests
         working-directory: backend
         run: python test_ipa_verified_worker.py
+
+  build-admin:
+    name: Compile ERI ADMIN source with IPA worker controls
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate ERI ADMIN
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p admin-build/Sources
+          cp apps/ERIAdmin/ERIAdminApp.swift admin-build/Sources/App.swift
+          cp apps/ERIAdmin/ERIBackgroundUploader.swift admin-build/Sources/ERIBackgroundUploader.swift
+          cat > admin-build/project.yml <<'EOF'
+          name: ERIAdmin
+          options:
+            deploymentTarget:
+              iOS: '16.0'
+          targets:
+            ERIAdmin:
+              type: application
+              platform: iOS
+              sources: [Sources]
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.eringuyen.admin
+                  PRODUCT_NAME: ERIAdmin
+                  INFOPLIST_KEY_CFBundleDisplayName: 'ERI ADMIN'
+                  GENERATE_INFOPLIST_FILE: YES
+                  INFOPLIST_KEY_UILaunchScreen_Generation: YES
+                  CODE_SIGNING_ALLOWED: NO
+                  CODE_SIGNING_REQUIRED: NO
+          EOF
+          (cd admin-build && xcodegen generate)
+      - name: Compile and build unsigned ERI ADMIN
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc -frontend -parse admin-build/Sources/App.swift
+          xcrun swiftc -frontend -parse admin-build/Sources/ERIBackgroundUploader.swift
+          cd admin-build
+          xcodebuild -project ERIAdmin.xcodeproj -scheme ERIAdmin \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath derived CODE_SIGNING_ALLOWED=NO build
+      - name: Package unsigned ERI ADMIN IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p payload/Payload
+          cp -R admin-build/derived/Build/Products/Release-iphoneos/ERIAdmin.app payload/Payload/
+          (cd payload && zip -qry ../ERIAdmin-unsigned.ipa Payload)
+          unzip -tq ERIAdmin-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERIAdmin-DecryptionWorker-unsigned-IPA
+          path: ERIAdmin-unsigned.ipa
+          retention-days: 14
+          if-no-files-found: error
