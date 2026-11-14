@@ -167,6 +167,14 @@
         </div>
         <p class="small">Hai website này hoạt động độc lập với ERI; tải và xử lý trên hệ thống của họ, không chuyển tài khoản, chứng chỉ hoặc mật khẩu của bạn. F4TEAM có thể thay đổi địa chỉ và yêu cầu đăng nhập riêng.</p>
       </div>
+      <details class="eri-dec-f4-import">
+        <summary>Đã có kết quả F4? Lấy link IPA về ERI</summary>
+        <p class="small">Dán JSON phản hồi hoàn tất hoặc link IPA từ F4TEAM. ERI chỉ đọc dữ liệu trên iPhone, không gửi JSON, cookie hay CSRF của F4 lên máy chủ.</p>
+        <label class="field" for="eri-dec-f4-input">Kết quả F4 hoặc đường dẫn .ipa</label>
+        <textarea id="eri-dec-f4-input" rows="3" maxlength="35000" spellcheck="false" placeholder='Dán JSON có "dl_url" hoặc https://160-191-242-70.sslip.io/dl_dec/...ipa'></textarea>
+        <button class="btn primary" type="button" id="eri-dec-f4-import-button">Hiển thị IPA từ F4</button>
+        <div id="eri-dec-f4-import-result" role="status" aria-live="polite"></div>
+      </details>
       <div class="eri-decrypt-preset" aria-label="Tìm kiếm nhanh">
         <span>Phổ biến:</span>
         <button type="button" data-eri-decrypt-preset="Liên Quân Mobile">Liên Quân</button>
