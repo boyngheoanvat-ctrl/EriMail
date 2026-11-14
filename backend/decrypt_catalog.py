@@ -233,9 +233,27 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
     @router.get("/api/v1/tools/ipa/decrypt/search")
     def search(q: str = Query(min_length=2, max_length=500),
                country: str = "auto", limit: int = Query(default=15, ge=1, le=25)):
-        items = _search_apps(q, country, limit)
-        return {"items": decorate_with_vault(items), "total": len(items),
-                "source": "Apple Search API + authorized ERI IPA inventory"}
+        try:
+            items = _search_apps(q, country, limit)
+            return {"items": decorate_with_vault(items), "total": len(items),
+                    "source": "Apple Search API + authorized ERI IPA inventory"}
+        except HTTPException as exc:
+            # A licensed IPA can still be downloaded if Apple metadata is down.
+            kind, value, _ = _parse_target(q)
+            if kind == "id":
+                raise exc
+            matches = _all_free_ipa(connection, upload_dir, mod_file, q=value, limit=300)
+            if not matches:
+                raise exc
+            local = [{
+                "app_id": 0, "name": item["name"], "developer": "Kho ERI",
+                "bundle_id": item["bundle_id"], "version": item["version"],
+                "country": "ERI", "app_store_url": "", "icon_url": "",
+                "genre": "", "price": 0, "size_bytes": item["size_bytes"],
+                "cached": item, "ipa_available": True,
+            } for item in matches[:limit]]
+            return {"items": local, "total": len(local),
+                    "source": "ERI local vault; Apple metadata unavailable"}
 
     @router.get("/api/v1/tools/ipa/decrypt/vault")
     def vault(q: str = Query(default="", max_length=100),
