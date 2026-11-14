@@ -14,6 +14,8 @@
   let vaultTotal = 0;
   let activeJob = null;
   let pollInFlight = false;
+  let activeJobState = "waiting_for_source";
+  let lastWaitingCheck = 0;
   let historyInFlight = false;
   let historyQueued = false;
   let searchSerial = 0;
@@ -388,6 +390,7 @@
     }
   }
   function renderJob(job) {
+    activeJobState = job.state || "waiting_for_source";
     const section = $("eri-decrypt-request-section");
     section?.classList.remove("hidden");
     const ready = job.state === "completed" && !!apiUrl(job.result?.download_path);
@@ -401,12 +404,15 @@
       String(Math.round(pct)) + "%");
     const bar = $("eri-decrypt-job-progress");
     if (bar) {
-      bar.hidden = pct === null;
-      bar.style.display = pct === null ? "none" : "";
-      bar.value = pct === null ? 0 : pct;
+      // Indeterminate animation while a real worker runs without byte totals.
+      // Never show a made-up percentage for requests with no IPA source.
+      bar.hidden = pct === null && !processing;
+      bar.style.display = bar.hidden ? "none" : "";
+      if (pct === null) bar.removeAttribute("value");
+      else bar.value = pct;
     }
     const stateName = ready ? "Hoàn tất" : processing ? "Đang xử lý" :
-      job.state === "failed" ? "Thất bại" : "Chưa có nguồn IPA";
+      job.state === "failed" ? "Thất bại" : "Đang chờ nguồn IPA";
     text("eri-decrypt-job-stage",(job.name || "Ứng dụng") +
       " · v" + (job.version || "—") + " · " + stateName +
       (job.message ? "\n" + job.message : ""));
@@ -424,7 +430,7 @@
     } else if (processing) {
       notice("Máy chủ ERI đang xử lý IPA.", "info");
     } else {
-      notice("Yêu cầu đã lưu · Chưa có nguồn IPA để xử lý.", "info");
+      notice("Đã lưu yêu cầu. File chưa được tạo; hệ thống sẽ kiểm tra nguồn IPA ERI.", "info");
     }
   }
   async function refreshJob() {
@@ -540,8 +546,18 @@
       }
     });
     setInterval(() => {
-      if (activeJob && document.visibilityState === "visible" && !document.hidden) refreshJob();
+      if (!activeJob || document.hidden || !getToken()) return;
+      if (activeJobState === "processing") refreshJob();
     },4000);
+    // Waiting requests can become actionable when ERI publishes a new source.
+    // Poll slowly to avoid overloading the API or suggesting fake progress.
+    setInterval(() => {
+      if (!activeJob || document.hidden || !getToken()) return;
+      if (activeJobState === "waiting_for_source" && Date.now() - lastWaitingCheck >= 29000) {
+        lastWaitingCheck = Date.now();
+        refreshJob();
+      }
+    },30000);
   }
   document.addEventListener("DOMContentLoaded",init);
 })();
