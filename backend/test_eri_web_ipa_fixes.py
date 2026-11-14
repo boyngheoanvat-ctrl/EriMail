@@ -28,7 +28,10 @@ assert 'Gửi yêu cầu xuất IPA' in tools
 assert 'if (createRequest) $("eri-decrypt-direct-request")?.click();' in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v22" in service
+assert "eri-store-v23" in service
+assert "?v=20261114b" in html
+assert "eri-decrypt-open-f4" not in html
+assert "eri-dec-f4-import" not in html
 
 # No bogus IPA URL from App Store link is ever generated.
 assert not re.search(r'ipa.*download.*apps\.apple\.com', tools, re.I)
