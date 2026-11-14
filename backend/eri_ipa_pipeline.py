@@ -11,6 +11,8 @@ import ipaddress
 import os
 import re
 import secrets
+import shutil
+import subprocess
 import threading
 import time
 import urllib.error
@@ -31,6 +33,24 @@ _feed_lock = threading.Lock()
 _feed_last_check = 0.0
 FEED_MAX_BYTES = 1024 * 1024
 FEED_MIN_SECONDS = 60
+
+
+def auto_download_enabled():
+    """Enable on-demand App Store acquisition ONLY for explicitly permitted apps.
+
+    ipatool authenticates with Apple's store; it does NOT remove FairPlay.
+    Credentials belong in a dedicated, persistent private worker profile.
+    """
+    return os.getenv("ERI_IPATOOL_AUTO_DOWNLOAD", "").strip() == "1"
+
+
+def can_auto_acquire(bundle_id):
+    if not auto_download_enabled():
+        return False
+    permitted = {item.strip().casefold() for item in
+                 os.getenv("ERI_AUTO_IPA_BUNDLES", "").split(",") if item.strip()}
+    return (bundle_id or "").casefold() in permitted and bool(
+        shutil.which(os.getenv("ERI_IPATOOL_BIN", "ipatool")))
 
 
 def feed_configured():
@@ -160,14 +180,17 @@ def _status(connection, job_id, state, progress, message):
 
 
 def schedule(connection, upload_dir, job_id):
-    """Only schedule jobs with an approved source; avoid a fake waiting queue."""
+    """Schedule either approved ERI-hosted IPA or permitted authenticated ipatool."""
     with connection() as db:
         row = db.execute(
-            "SELECT r.id,r.state FROM ipa_decrypt_requests r "
-            "JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id COLLATE NOCASE "
-            "AND s.version=r.version WHERE r.id=?", (job_id,)
+            "SELECT r.id,r.state,r.bundle_id,s.url AS source_url "
+            "FROM ipa_decrypt_requests r LEFT JOIN ipa_decrypt_sources s "
+            "ON s.bundle_id=r.bundle_id COLLATE NOCASE AND s.version=r.version "
+            "WHERE r.id=?", (job_id,)
         ).fetchone()
     if row is None or row["state"] == "completed":
+        return False
+    if not row["source_url"] and not can_auto_acquire(row["bundle_id"]):
         return False
     with _guard:
         if job_id in _active:
@@ -230,29 +253,87 @@ def _download(connection, job_id, url, target, expected_sha):
     return count, checksum.hexdigest()
 
 
+def _acquire_with_ipatool(connection, job_id, app_id, target):
+    """Fetch an app already licensed to the worker Apple Account.
+
+    This is acquisition, not decryption. Do not add --purchase (no accidental
+    purchase/consent). Authentication is provisioned outside the website.
+    """
+    binary = os.getenv("ERI_IPATOOL_BIN", "ipatool")
+    executable = shutil.which(binary)
+    if not executable:
+        raise ValueError("Máy chủ ERI chưa cài ipatool")
+    if not isinstance(app_id, int) or app_id <= 0:
+        raise ValueError("App Store ID không hợp lệ")
+    command = [executable, "--non-interactive", "download", "--app-id",
+               str(app_id), "--platform", "iphone", "--output", str(target)]
+    timeout = min(3600, max(60, int(os.getenv("ERI_IPATOOL_TIMEOUT_SEC", "900"))))
+    _status(connection, job_id, "processing", None,
+            "ERI đang tải IPA bằng tài khoản App Store đã cấp quyền")
+    proc = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            close_fds=True)
+    try:
+        deadline = time.monotonic() + timeout
+        while proc.poll() is None:
+            if time.monotonic() >= deadline:
+                raise ValueError("Quá thời gian tải IPA từ App Store")
+            if target.exists() and target.stat().st_size > MAX_BYTES:
+                raise ValueError("IPA vượt dung lượng tối đa cho phép")
+            time.sleep(0.5)
+        if proc.returncode != 0:
+            raise ValueError(
+                "ipatool không tải được IPA; kiểm tra đăng nhập Apple Account, "
+                "quyền sở hữu ứng dụng hoặc phiên bản App Store")
+        if not target.is_file() or target.stat().st_size == 0:
+            raise ValueError("ipatool không tạo ra tệp IPA")
+        if target.stat().st_size > MAX_BYTES:
+            raise ValueError("IPA vượt dung lượng tối đa cho phép")
+        digest = hashlib.sha256()
+        with target.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return target.stat().st_size, digest.hexdigest()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=10)
+
+
 def _run(connection, upload_dir, job_id):
     partial = None
     try:
         with connection() as db:
             row = db.execute(
                 "SELECT r.id,r.app_id,r.country,r.bundle_id,r.version,"
-                "s.name,s.url,s.sha256 FROM ipa_decrypt_requests r "
-                "JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id COLLATE NOCASE "
+                "COALESCE(s.name,r.name) AS name,s.url,s.sha256 "
+                "FROM ipa_decrypt_requests r "
+                "LEFT JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id COLLATE NOCASE "
                 "AND s.version=r.version WHERE r.id=?", (job_id,)
             ).fetchone()
         if row is None:
             return
         upload_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         partial = upload_dir / ("." + secrets.token_hex(16) + ".ipa.partial")
-        _status(connection, job_id, "processing", 0, "Đang kết nối nguồn IPA ERI")
-        size, digest = _download(connection, job_id, row["url"], partial, row["sha256"])
-        _status(connection, job_id, "processing", 92, "Đang kiểm tra cấu trúc IPA")
+        if row["url"]:
+            _status(connection, job_id, "processing", 0, "Đang kết nối nguồn IPA ERI")
+            size, digest = _download(connection, job_id, row["url"], partial, row["sha256"])
+        elif can_auto_acquire(row["bundle_id"]):
+            size, digest = _acquire_with_ipatool(
+                connection, job_id, row["app_id"], partial)
+        else:
+            _status(connection, job_id, "waiting_for_source", None,
+                    "ERI chưa có nguồn IPA có quyền phân phối")
+            return
+        _status(connection, job_id, "processing", 92, "Đang xác minh cấu trúc IPA")
         inspection = _inspect_archive(partial)
         meta = inspection.get("app") or {}
         if inspection.get("zip_password_protected"):
             raise ValueError("IPA có mật khẩu ZIP; cần nguồn không khóa")
         if inspection.get("fairplay_encrypted") is not False:
-            raise ValueError("IPA còn mã hóa FairPlay hoặc không xác minh được Mach-O")
+            raise ValueError(
+                "IPA tải về vẫn mã hóa FairPlay hoặc không xác minh được cryptid=0. "
+                "ipatool chỉ tải tệp; chưa có worker iOS giải mã được cấp quyền")
         if meta.get("bundle_id", "").casefold() != row["bundle_id"].casefold():
             raise ValueError("Bundle ID bên trong IPA không trùng yêu cầu")
         if meta.get("version") != row["version"]:
