@@ -195,6 +195,39 @@
     root.append(actions);
     return root;
   }
+  // Public discovery metadata only. Never treat catalog matches as downloadable IPA.
+  let publicCatalogPromise = null;
+  function publicCatalog() {
+    if (!publicCatalogPromise) publicCatalogPromise = fetch(
+      "https://cdn.decrypt.day/resources/apps/indexed.json",
+      {mode:"cors",cache:"default"}
+    ).then(r => { if (!r.ok) throw new Error("Danh mục ứng dụng chưa sẵn sàng."); return r.json(); })
+      .then(rows => { if (!Array.isArray(rows)) throw new Error("Danh mục không hợp lệ."); return rows; })
+      .catch(error => { publicCatalogPromise = null; throw error; });
+    return publicCatalogPromise;
+  }
+  function fold(value) {
+    return String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"")
+      .replace(/đ/g,"d").replace(/Đ/g,"D").toLowerCase();
+  }
+  async function catalogSearch(q,country) {
+    const rows = await publicCatalog();
+    const needle = fold(q).trim();
+    const id = String(q).match(/(?:^|\\/)id(\\d{6,12})|^(\\d{6,12})$/)?.[1] ||
+      String(q).match(/(?:^|\\/)id(\\d{6,12})|^(\\d{6,12})$/)?.[2];
+    const matches = rows.filter(x => id ? String(x.i) === "id"+id :
+      [x.n,x.p,x.i,...(Array.isArray(x.t)?x.t:[])].some(v=>fold(v).includes(needle)))
+      .slice(0,15);
+    return {items:matches.map(x=>({
+      app_id:Number(String(x.i||"").replace(/^id/,""))||0,
+      name:x.n||"Ứng dụng",developer:x.p||"",version:x.v||"",
+      country:country==="auto"?"VN":country.toUpperCase(),
+      app_store_url:"https://apps.apple.com/app/"+x.i,
+      genre:Array.isArray(x.t)?(x.t.find(t=>/games/i.test(t))||x.t[0]||"App Store"):"App Store",
+      cached:null,ipa_available:false
+    })),total:matches.length,source:"Public catalog metadata — IPA not verified"};
+  }
+
   async function search(q, country) {
     const serial = ++searchSerial;
     const buttonNode = $("eri-decrypt-search-button");
@@ -210,8 +243,11 @@
         data = await request("/api/v1/tools/ipa/decrypt/search?" +
           new URLSearchParams({q, country, limit:"15"}));
       } catch (error) {
-        if (!/HTTP 404/.test(error.message)) throw error;
-        data = await legacySearch(q,country);
+        try { data = await catalogSearch(q,country); }
+        catch (catalogError) {
+          if (!/HTTP 404/.test(error.message)) throw error;
+          data = await legacySearch(q,country);
+        }
       }
       if (serial !== searchSerial) return;
       if (!data.items?.length) {
