@@ -339,7 +339,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                                       "source_available": True})
         if app["version"] not in seen:
             versions_list.insert(0, {"version": app["version"], "cached": None,
-                                     "source": "Apple current version metadata"})
+                                     "source": "Apple current version metadata",
+                                     "auto_acquisition_available": can_auto_acquire(app["bundle_id"])})
         return {"app": app, "versions": versions_list,
                 "notice": "Apple Search API không công bố lịch sử mọi phiên bản; chỉ hiện bản hiện tại và bản đã có trong kho ERI."}
 
@@ -363,6 +364,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         for name, sql_type in (
             ("state", "TEXT NOT NULL DEFAULT 'waiting_for_source'"),
             ("progress", "INTEGER"),
+            ("estimated_size_bytes", "INTEGER"),
             ("message", "TEXT NOT NULL DEFAULT ''"),
             ("updated_at", "TEXT"),
         ):
@@ -432,9 +434,12 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             now = datetime.now(timezone.utc).isoformat()
             db.execute(
                 "INSERT INTO ipa_decrypt_requests(id,customer_id,app_id,bundle_id,name,"
-                "version,country,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                "version,country,created_at,estimated_size_bytes) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
                 (job_id, customer["id"], app_info["app_id"], app_info["bundle_id"],
-                 app_info["name"], chosen_version, app_info["country"], now)
+                 app_info["name"], chosen_version, app_info["country"], now,
+                 int(app_info["size_bytes"]) if str(
+                     app_info.get("size_bytes") or "").isdigit() else None)
             )
             row = db.execute("SELECT * FROM ipa_decrypt_requests WHERE id=?", (job_id,)).fetchone()
         schedule_pipeline(connection, upload_dir, job_id)
