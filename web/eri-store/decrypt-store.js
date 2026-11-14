@@ -145,8 +145,6 @@
     sideload.append(link("Scarlet", "scarlet://install?url=" + enc));
     sideload.append(link("Feather", "feather://install?url=" + enc));
     parent.append(sideload);
-    const foot = card("p", "small", "IPA có thể cần ký bằng chứng chỉ hợp lệ trước khi iOS cho phép cài. ESign / TrollStore / Feather phải có sẵn trên thiết bị.");
-    parent.append(foot);
   }
   function icon(parent, url) {
     if (typeof url !== "string") return;
@@ -183,12 +181,11 @@
     root.append(top);
     const actions = card("div", "eri-decrypt-actions");
     if (item.cached?.download_path) {
-      root.append(card("div", "eri-decrypt-available", "Đã có IPA được phép phân phối trong kho ERI"));
+      root.append(card("div", "eri-decrypt-available", "IPA sẵn sàng"));
       installActions(root, item.cached);
     } else {
-      root.append(card("div", "eri-decrypt-unavailable",
-        "Chưa có IPA bản này trong kho ERI. Link App Store chỉ chứa thông tin ứng dụng."));
-      actions.append(button("Yêu cầu IPA", () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
+      root.append(card("div", "eri-decrypt-unavailable", "Chưa có IPA"));
+      actions.append(button("Xử lý IPA", () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
     }
     if (Number(item.app_id) > 0)
       actions.append(button("Chọn phiên bản", () => loadVersions(item), false));
@@ -220,10 +217,7 @@
         notice("Không tìm thấy ứng dụng phù hợp ở khu vực đã chọn.", "error");
         return;
       }
-      notice("Đã tìm thấy " + data.items.length + " ứng dụng. " +
-        (String(data.source || "").startsWith("ERI local vault")
-          ? "Đang hiển thị kho ERI vì Apple tạm thời không phản hồi."
-          : "File tải chỉ hiện khi thực sự có trong kho ERI."), "success");
+      notice("Đã tìm thấy " + data.items.length + " ứng dụng.", "success");
       data.items.forEach(item => grid?.append(searchResult(item)));
       section?.scrollIntoView({behavior:"smooth",block:"nearest"});
     } catch (error) {
@@ -268,9 +262,9 @@
         node.dataset.version = entry.version || "";
         node.append(card("strong", "", "Phiên bản " + (entry.version || "—")));
         node.append(card("p", "small", entry.source === "ERI authorized library"
-          ? "Đã có file ở kho ERI." : "Apple chỉ xác nhận thông tin phiên bản này, không cung cấp IPA."));
+          ? "Sẵn sàng tải." : "Chưa có IPA."));
         if (entry.cached?.download_path) installActions(node, entry.cached);
-        else node.append(button("Yêu cầu IPA bản này", () =>
+        else node.append(button("Xử lý bản này", () =>
           createJob(item.app_store_url || String(item.app_id), item.country, entry.version), true));
         grid?.append(node);
       }
@@ -348,8 +342,10 @@
           (job.version||"—") + " · " + (job.country||"VN")));
         const complete = job.state === "completed" && !!apiUrl(job.result?.download_path);
         node.append(card("p",complete ? "eri-decrypt-available" : "eri-decrypt-unavailable",
-          complete ? "Đã có IPA hợp lệ trong kho — tải được ngay" :
-            "Đã lưu yêu cầu. Chưa có IPA được phép phân phối trên máy chủ."));
+          complete ? "Sẵn sàng tải IPA" :
+            job.state === "processing" ? ("Đang xử lý" +
+              (Number.isFinite(Number(job.progress)) && job.progress !== null ? " · " + job.progress + "%" : "")) :
+              job.state === "failed" ? "Xử lý thất bại" : "Chưa có nguồn IPA"));
         const actions = card("div","eri-decrypt-actions");
         actions.append(button("Xem trạng thái",() => {
           activeJob=job.job_id;
@@ -377,7 +373,7 @@
         button("Đăng nhập", () => document.querySelector('[data-view="account"]')?.click(), true));
       return;
     }
-    notice("Đang lưu yêu cầu IPA...");
+    notice("Đang gửi yêu cầu xử lý...");
     try {
       const job = await request("/api/v1/tools/ipa/decrypt/requests", {
         auth:true, body:{target,country:country?.toLowerCase()||"auto",version:version||""}
@@ -387,42 +383,46 @@
       renderJob(job);
       await loadHistory();
     } catch(error) {
-      notice(/HTTP 404/.test(error.message)
-        ? "Máy chủ ERI chưa cập nhật tính năng gửi yêu cầu IPA. Bộ tra cứu và kho IPA vẫn sử dụng được; cần cập nhật backend để lưu yêu cầu."
-        : error.message, "error");
+      notice(error.message, "error");
     }
   }
   function renderJob(job) {
     const section = $("eri-decrypt-request-section");
     section?.classList.remove("hidden");
-    const ready = job.state === "completed" && !!job.result?.download_path;
-    const processing = ["processing", "running", "decrypting", "uploading"].includes(job.state);
-    const actual = Number(job.progress);
-    const validProgress = processing && job.progress != null && Number.isFinite(actual) && actual >= 0 && actual < 100;
-    const pct = ready ? 100 : validProgress ? actual : null;
-    text("eri-decrypt-job-pct",pct === null ? "Đang chờ IPA" : pct.toFixed(1).replace(/\.0$/, "") + "%");
+    const ready = job.state === "completed" && !!apiUrl(job.result?.download_path);
+    const processing = job.state === "processing";
+    const value = Number(job.progress);
+    const measured = processing && job.progress != null &&
+      Number.isFinite(value) && value >= 0 && value <= 99;
+    const pct = ready ? 100 : measured ? value : null;
+    text("eri-decrypt-job-pct", pct === null ?
+      (processing ? "Đang xử lý" : job.state === "failed" ? "Lỗi" : "Chưa có nguồn") :
+      String(Math.round(pct)) + "%");
     const bar = $("eri-decrypt-job-progress");
     if (bar) {
-      // Native indeterminate bar is truthful when the server has no progress
-      // measurement yet. Never animate arbitrary percentages.
-      if (pct === null) bar.removeAttribute("value");
-      else bar.value = pct;
+      bar.hidden = pct === null;
+      bar.value = pct === null ? 0 : pct;
     }
-    const stageName = ready ? "Hoàn tất" :
-      processing ? "Máy chủ đang xử lý" :
-      job.state === "failed" ? "Xử lý thất bại" : "Chờ nguồn IPA hợp lệ";
+    const stateName = ready ? "Hoàn tất" : processing ? "Đang xử lý" :
+      job.state === "failed" ? "Thất bại" : "Chưa có nguồn IPA";
     text("eri-decrypt-job-stage",(job.name || "Ứng dụng") +
-      " · v" + (job.version || "—") + " · " + stageName +
-      "\n" + (job.message || ""));
+      " · v" + (job.version || "—") + " · " + stateName +
+      (job.message ? "\n" + job.message : ""));
     const controls = $("eri-decrypt-job-actions");
     if (controls) controls.replaceChildren();
     if (ready) {
       if (controls) installActions(controls,job.result);
-      notice("ERI đã có file thật, bạn có thể tải IPA.", "success");
+      notice("IPA sẵn sàng tải.", "success");
+    } else if (job.state === "failed") {
+      if (controls) {
+        controls.append(button("Thử lại", () =>
+          createJob(job.bundle_id,job.country,job.version)));
+      }
+      notice("Xử lý IPA thất bại.", "error");
+    } else if (processing) {
+      notice("Máy chủ ERI đang xử lý IPA.", "info");
     } else {
-      if (controls) controls.append(button("Cập nhật trạng thái",refreshJob));
-      notice(job.state === "failed" ? "Yêu cầu xử lý thất bại. Xem thông báo bên trên." :
-        "Yêu cầu đã lưu. Chưa có file để tải; trang sẽ kiểm tra định kỳ khi bạn đang mở.",job.state === "failed" ? "error" : "info");
+      notice("Chưa có nguồn IPA cho phiên bản này.", "info");
     }
   }
   async function refreshJob() {
@@ -539,7 +539,7 @@
     });
     setInterval(() => {
       if (activeJob && document.visibilityState === "visible" && !document.hidden) refreshJob();
-    },15000);
+    },4000);
   }
   document.addEventListener("DOMContentLoaded",init);
 })();
