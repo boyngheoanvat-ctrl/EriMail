@@ -1474,3 +1474,7 @@ install_udid_routes(app, connection, require_customer, require_admin)
 # versions and durable requests. No Apple DRM removal is claimed here.
 from decrypt_catalog import register_decrypt_catalog
 register_decrypt_catalog(app, connection, UPLOAD_DIR, _eri_mod_file, require_customer, require_admin)
+
+# ERI-owned authorized IPA source processor. Independent of F4 / Apple DRM.
+from ipa_verified_worker import register_ipa_verified_worker
+register_ipa_verified_worker(app, connection, UPLOAD_DIR, require_admin)
