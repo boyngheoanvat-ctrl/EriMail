@@ -178,7 +178,25 @@
           }
         } catch (_) {}
       }
-      status.textContent = "Chưa có IPA công khai chính chủ được xác minh cho ứng dụng này.";
+      // Read-only upstream catalog lookup through ERI backend (no CSRF/session leakage).
+      try {
+        const external = await request("/api/v1/tools/ipa/decrypt/external?" +
+          new URLSearchParams({target:url,country:"auto"}));
+        if (external.download_ready && external.download_url) {
+          const parsed = new URL(external.download_url);
+          if (parsed.protocol === "https:" &&
+              parsed.hostname === "160-191-242-70.sslip.io" &&
+              /^\\/dl_dec\\/[A-Za-z0-9_-]{8,128}\\/[0-9]{8,15}\\/[A-Za-z0-9._%-]+\\.ipa$/i.test(parsed.pathname)) {
+            status.textContent = "F4TEAM có IPA v" + (external.version || item.version || "—") +
+              " · Nguồn ngoài, ERI chưa kiểm định nội dung file.";
+            root.append(link("Tải IPA từ F4TEAM" +
+              (external.size_bytes ? " (" + pretty(external.size_bytes) + ")" : ""),
+              parsed.href,true));
+            return;
+          }
+        }
+      } catch (_) {}
+      status.textContent = "Chưa có IPA được xác minh trong kho ERI hoặc nguồn F4TEAM.";
     } catch (_) {
       status.textContent = "Không thể kiểm tra nguồn IPA lúc này.";
     }
