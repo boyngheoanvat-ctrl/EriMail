@@ -185,7 +185,8 @@
       installActions(root, item.cached);
     } else {
       root.append(card("div", "eri-decrypt-unavailable", "Chưa có IPA"));
-      actions.append(button("Xử lý IPA", () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
+      actions.append(button(item.source_available ? "Xử lý IPA" : "Yêu cầu IPA",
+        () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
     }
     if (Number(item.app_id) > 0)
       actions.append(button("Chọn phiên bản", () => loadVersions(item), false));
@@ -264,7 +265,7 @@
         node.append(card("p", "small", entry.source === "ERI authorized library"
           ? "Sẵn sàng tải." : "Chưa có IPA."));
         if (entry.cached?.download_path) installActions(node, entry.cached);
-        else node.append(button("Xử lý bản này", () =>
+        else node.append(button(entry.source_available ? "Xử lý bản này" : "Yêu cầu bản này", () =>
           createJob(item.app_store_url || String(item.app_id), item.country, entry.version), true));
         grid?.append(node);
       }
@@ -423,7 +424,7 @@
     } else if (processing) {
       notice("Máy chủ ERI đang xử lý IPA.", "info");
     } else {
-      notice("Chưa có nguồn IPA cho phiên bản này.", "info");
+      notice("Yêu cầu đã lưu · Chưa có nguồn IPA để xử lý.", "info");
     }
   }
   async function refreshJob() {
