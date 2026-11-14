@@ -126,7 +126,7 @@ function udidAddSafariHelp(container,url){
       "Dùng Safari trên chính iPhone/iPad cần đăng ký UDID. Nếu đang ở trình duyệt trong ứng dụng khác, hãy mở bằng Safari."));
     if(standalone){
       const action=element("a","btn outline","Mở SHOP MOD BY ERI NGUYỄN bằng Safari");
-      action.href="https://eri-store-web.onrender.com/";
+      action.href="https://eri-ipa-preview-web.onrender.com/";
       action.target="_blank";
       action.rel="noopener noreferrer";
       container.append(action);
