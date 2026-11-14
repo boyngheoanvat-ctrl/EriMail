@@ -169,6 +169,17 @@
     try {
       const result = await request("/api/v1/tools/ipa/decrypt/external?" +
         new URLSearchParams({target:url,country:"auto"}));
+      if (item.bundle_id) {
+        try {
+          const official = await request("/api/v1/tools/ipa/decrypt/official?" +
+            new URLSearchParams({bundle_id:item.bundle_id}));
+          if (official.available && /^https:\/\/github\\.com\//.test(official.download_url)) {
+            status.textContent = "Có IPA từ nhà phát triển · v" + (official.version || "—");
+            root.append(link("Tải IPA từ nhà phát triển", official.download_url, true));
+            return;
+          }
+        } catch (_) {}
+      }
       status.textContent = result.found
         ? "Nguồn ERI có thông tin IPA, nhưng file và quyền tải chưa được xác minh."
         : "Nguồn ERI chưa xác nhận có IPA tải được.";
