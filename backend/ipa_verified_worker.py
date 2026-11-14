@@ -231,11 +231,15 @@ def process_next_source(connection, upload_dir):
         with connection() as db:
             # Avoid publishing a duplicate if an admin fulfilled it in parallel.
             existed = db.execute(
-                "SELECT i.id FROM ipa i JOIN private_product_uploads p ON "
+                "SELECT i.id,p.storage_name,p.size_bytes FROM ipa i JOIN private_product_uploads p ON "
                 "p.product_id=i.id AND p.kind='ipa' "
                 "WHERE i.bundle_id=? AND i.version=? AND i.authorized=1 AND i.price_vnd=0 "
                 "AND i.platform='ipa' LIMIT 1",
                 (row["bundle_id"], row["version"])).fetchone()
+            if existed:
+                old_path = upload_dir / existed["storage_name"]
+                if not old_path.is_file() or old_path.stat().st_size != existed["size_bytes"]:
+                    existed = None
             if existed:
                 product_id = existed["id"]
             else:
