@@ -14,7 +14,8 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
 <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/shop-theme.css">
-<script defer src="/app.js"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js"></script><script defer src="/sign-jobs.js"></script>
+<script defer src="/app.js"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js"></script>
+<script defer src="/decrypt-store.js"></script><script defer src="/sign-jobs.js"></script>
 <title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
 </head>
 <body class="shop-v2">
@@ -121,18 +122,80 @@
     </div>
   </div>
    <div id="ipa-decrypt-panel" class="ipa-tool-panel" role="tabpanel">
-    <h3>Decrypt IPA · Nhập link App Store</h3>
-    <p>Dán link App Store để tìm tên ứng dụng, phiên bản và Bundle ID. <strong>Apple không cung cấp IPA đã giải mã qua link App Store.</strong> Nếu bạn có tệp IPA được phép sử dụng, có thể kiểm tra mã hóa hoặc gỡ mật khẩu ZIP ở phần bên dưới.</p>
-    <form id="ipa-appstore-form" autocomplete="on">
-      <label class="field">Link ứng dụng trên App Store
-        <input type="url" name="appstore_url" required inputmode="url" spellcheck="false"
-          placeholder="https://apps.apple.com/vn/app/football-league-2026/id6447961802?l=vi"
-          maxlength="500">
-      </label>
-      <div class="ipa-tool-actions"><button class="btn primary" type="submit">Tra cứu ứng dụng</button></div>
+    <h3>Decrypt IPA · App Store &amp; kho IPA ERI</h3>
+    <p>Tìm ứng dụng theo tên, Bundle ID hoặc link Apple. Chọn bản đã có trong kho ERI để tải; nếu chưa có, gửi yêu cầu và theo dõi trên tài khoản.</p>
+    <form id="eri-decrypt-search-form" autocomplete="on">
+      <div class="eri-decrypt-search-row">
+        <label class="field">Khu vực App Store
+          <select id="eri-decrypt-region" name="country" aria-label="Chọn quốc gia App Store">
+            <option value="auto">Tự động (VN/US/JP)</option>
+            <option value="vn">Việt Nam (VN)</option>
+            <option value="us">Hoa Kỳ (US)</option>
+            <option value="jp">Nhật Bản (JP)</option>
+            <option value="kr">Hàn Quốc (KR)</option>
+            <option value="tw">Đài Loan (TW)</option>
+            <option value="cn">Trung Quốc (CN)</option>
+            <option value="hk">Hồng Kông (HK)</option>
+            <option value="sg">Singapore (SG)</option>
+            <option value="th">Thái Lan (TH)</option>
+            <option value="gb">Anh Quốc (GB)</option>
+          </select>
+        </label>
+        <label class="field">Tên ứng dụng, Bundle ID hoặc link App Store
+          <input type="text" id="eri-decrypt-query" name="query" required maxlength="500"
+            spellcheck="false" placeholder="Tên game / com.xxx.app / https://apps.apple.com/...">
+        </label>
+      </div>
+      <div class="ipa-tool-actions eri-decrypt-buttons">
+        <button class="btn primary" type="submit" id="eri-decrypt-search-button">Tìm App Store</button>
+        <button class="btn outline" type="button" id="eri-decrypt-open-vault">Kho IPA có sẵn</button>
+      </div>
+      <div class="eri-decrypt-preset" aria-label="Tìm kiếm nhanh">
+        <span>Phổ biến:</span>
+        <button type="button" data-eri-decrypt-preset="Liên Quân Mobile">Liên Quân</button>
+        <button type="button" data-eri-decrypt-preset="Free Fire">Free Fire</button>
+        <button type="button" data-eri-decrypt-preset="Roblox">Roblox</button>
+        <button type="button" data-eri-decrypt-preset="CapCut">CapCut</button>
+      </div>
     </form>
-    <div id="ipa-appstore-result" class="ipa-tool-result" role="status" aria-live="polite"></div>
-    <p class="small">Nếu tệp IPA không có sẵn trên máy chủ, không thể tạo tệp tải hoặc cài trực tiếp từ đường dẫn App Store.</p>
+    <div id="eri-decrypt-notice" class="ipa-tool-result" role="status" aria-live="polite"></div>
+    <section id="eri-decrypt-result-section" class="eri-decrypt-section hidden" aria-label="Kết quả App Store">
+      <h4>Kết quả trên App Store</h4>
+      <div id="eri-decrypt-results" class="eri-decrypt-grid"></div>
+    </section>
+    <section id="eri-decrypt-request-section" class="eri-decrypt-section hidden" aria-label="Tiến độ yêu cầu IPA">
+      <div class="eri-decrypt-heading"><h4>Yêu cầu IPA của bạn</h4><span id="eri-decrypt-job-pct">0%</span></div>
+      <progress id="eri-decrypt-job-progress" max="100" value="0"></progress>
+      <p id="eri-decrypt-job-stage" class="small"></p>
+      <div id="eri-decrypt-job-actions" class="eri-decrypt-actions"></div>
+    </section>
+    <section id="eri-decrypt-vault-section" class="eri-decrypt-section" aria-label="Kho IPA ERI">
+      <div class="eri-decrypt-heading"><h4>Kho IPA đã có trên ERI</h4><span class="eri-decrypt-count" id="eri-decrypt-vault-count">—</span></div>
+      <p class="small">Chỉ hiển thị IPA miễn phí được quản trị viên xác nhận quyền phân phối và còn file trên máy chủ. Trạng thái FairPlay không được mặc định coi là đã giải mã.</p>
+      <div class="eri-decrypt-filter">
+        <input type="search" id="eri-decrypt-vault-filter" placeholder="Lọc tên ứng dụng hoặc Bundle ID" aria-label="Lọc kho IPA">
+        <select id="eri-decrypt-vault-sort" aria-label="Sắp xếp kho IPA">
+          <option value="newest">Mới đăng nhất</option>
+          <option value="size_desc">Dung lượng giảm dần</option>
+          <option value="size_asc">Dung lượng tăng dần</option>
+          <option value="title">Tên A–Z</option>
+        </select>
+      </div>
+      <div id="eri-decrypt-vault-grid" class="eri-decrypt-grid"></div>
+      <div class="ipa-tool-actions eri-decrypt-pager">
+        <button type="button" class="btn outline" id="eri-decrypt-previous">Trang trước</button>
+        <span id="eri-decrypt-page-label">Trang 1</span>
+        <button type="button" class="btn outline" id="eri-decrypt-next">Trang sau</button>
+      </div>
+    </section>
+    <section id="eri-decrypt-versions-section" class="eri-decrypt-section hidden" aria-label="Chọn phiên bản IPA">
+      <div class="eri-decrypt-heading">
+        <h4 id="eri-decrypt-versions-title">Chọn phiên bản</h4>
+        <button class="btn outline" type="button" id="eri-decrypt-versions-close">Đóng</button>
+      </div>
+      <div id="eri-decrypt-versions-grid" class="eri-decrypt-grid"></div>
+      <p class="small">Apple không công bố công khai lịch sử mọi bản IPA. Chỉ hiển thị bản hiện tại và các phiên bản thực sự có trong kho ERI.</p>
+    </section>
   </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>
