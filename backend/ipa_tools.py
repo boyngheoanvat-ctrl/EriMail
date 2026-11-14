@@ -19,6 +19,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 from urllib.parse import quote, urlencode, urlsplit
 from pathlib import Path
 
@@ -404,7 +405,7 @@ def register_ipa_tools(app, require_customer):
                                     with source.open(member, pwd=password.encode("utf-8")) as reader:
                                         with dest.open(clone, "w", force_zip64=True) as writer:
                                             shutil.copyfileobj(reader, writer, 1024 * 1024)
-                        except (RuntimeError, NotImplementedError, ValueError, OSError, zipfile.BadZipFile):
+                        except (RuntimeError, NotImplementedError, ValueError, OSError, zipfile.BadZipFile, zlib.error):
                             raise HTTPException(422, "Không giải mã được ZIP: sai mật khẩu hoặc định dạng ZIP không được hỗ trợ.")
                 with zipfile.ZipFile(output_path) as check:
                     _validate_ipa(check)
