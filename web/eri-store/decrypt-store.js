@@ -239,8 +239,29 @@
     if ($("eri-decrypt-version-filter")) $("eri-decrypt-version-filter").value = "";
     notice("Đang kiểm tra những phiên bản có thể xác nhận...");
     try {
-      const data = await request("/api/v1/tools/ipa/decrypt/versions?" +
-        new URLSearchParams({target:item.app_store_url || String(item.app_id), country:item.country.toLowerCase()}));
+      let data;
+      try {
+        data = await request("/api/v1/tools/ipa/decrypt/versions?" +
+          new URLSearchParams({target:item.app_store_url || String(item.app_id), country:item.country.toLowerCase()}));
+      } catch (error) {
+        if (!/HTTP 404/.test(error.message)) throw error;
+        // Legacy API cannot discover historical Apple versions. Show current
+        // metadata (if available) and actual versions already on the ERI API.
+        const vault = await legacyVault("", "newest", 0, 100);
+        let app = item;
+        if (!app.bundle_id && safeStoreLink(item.app_store_url)) {
+          const oldLookup = await legacySearch(item.app_store_url, item.country.toLowerCase());
+          app = oldLookup.items[0] || item;
+        }
+        const matched = vault.items.filter(x =>
+          x.bundle_id && app.bundle_id && x.bundle_id.toLowerCase() === app.bundle_id.toLowerCase());
+        const versions = matched.map(x => ({
+          version:x.version, cached:x, source:"ERI authorized library"
+        }));
+        if (app.version && !versions.some(x => x.version === app.version))
+          versions.unshift({version:app.version,cached:null,source:"Apple current version metadata"});
+        data = {versions,notice:"Máy chủ đang dùng API cũ. Chỉ hiển thị phiên bản hiện tại và những IPA có tệp thật trong kho ERI."};
+      }
       const entries = Array.isArray(data.versions) ? data.versions : [];
       for (const entry of entries) {
         const node = card("article","eri-decrypt-card");
