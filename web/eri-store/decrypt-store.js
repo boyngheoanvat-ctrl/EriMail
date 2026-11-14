@@ -398,7 +398,7 @@
     const ready = job.state === "completed" && !!job.result?.download_path;
     const processing = ["processing", "running", "decrypting", "uploading"].includes(job.state);
     const actual = Number(job.progress);
-    const validProgress = processing && Number.isFinite(actual) && actual >= 0 && actual < 100;
+    const validProgress = processing && job.progress != null && Number.isFinite(actual) && actual >= 0 && actual < 100;
     const pct = ready ? 100 : validProgress ? actual : null;
     text("eri-decrypt-job-pct",pct === null ? "Đang chờ IPA" : pct.toFixed(1).replace(/\.0$/, "") + "%");
     const bar = $("eri-decrypt-job-progress");
