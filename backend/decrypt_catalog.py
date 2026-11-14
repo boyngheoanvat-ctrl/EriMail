@@ -254,6 +254,51 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             item["source_available"] = source_exists(item["bundle_id"], item["version"])
         return items
 
+    @router.post("/api/v1/admin/decrypt/sync-manifest",
+                 dependencies=[Depends(require_admin)] if require_admin is not None else [])
+    def sync_manifest():
+        """Synchronize a publisher-authorized IPA catalog without manual uploads.
+
+        ERI_IPA_MANIFEST_URL must be a HTTPS URL on ERI_IPA_SOURCE_HOSTS.
+        Each entry needs name, bundle_id, version, url, sha256, and
+        distribution_authorized=true. Downloads still pass worker validation.
+        """
+        if require_admin is None:
+            raise HTTPException(503, "Chưa cấu hình quản trị viên")
+        from eri_ipa_pipeline import validate_url, _SafeRedirect
+        import os
+        manifest_url = os.getenv("ERI_IPA_MANIFEST_URL", "").strip()
+        if not manifest_url:
+            raise HTTPException(503, "Chưa cấu hình ERI_IPA_MANIFEST_URL")
+        try:
+            validate_url(manifest_url)
+            opener = urllib.request.build_opener(_SafeRedirect())
+            with opener.open(urllib.request.Request(manifest_url, headers={
+                "Accept": "application/json", "User-Agent": "ERIStore-Manifest/1.0"
+            }), timeout=15) as response:
+                raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise ValueError("Manifest quá lớn")
+            payload = json.loads(raw)
+            items = payload.get("items") if isinstance(payload, dict) else None
+            if not isinstance(items, list) or len(items) > 1000:
+                raise ValueError("Manifest cần items là danh sách tối đa 1000 nguồn")
+        except (ValueError, OSError, urllib.error.URLError, TimeoutError) as exc:
+            raise HTTPException(422, "Không tải được manifest IPA hợp lệ") from exc
+        added, rejected = 0, []
+        for index, item in enumerate(items):
+            try:
+                if not isinstance(item, dict) or item.get("distribution_authorized") is not True:
+                    raise ValueError("Nguồn chưa xác nhận quyền phân phối")
+                put_source(connection, name=item["name"], bundle_id=item["bundle_id"],
+                           version=item["version"], url=item["url"], sha256=item["sha256"])
+                schedule_matching_pipeline(connection, upload_dir, item["bundle_id"], item["version"])
+                added += 1
+            except (ValueError, KeyError, TypeError) as exc:
+                rejected.append({"index": index, "reason": str(exc)[:120]})
+        return {"registered": added, "rejected": rejected[:25],
+                "message": "Đã đồng bộ nguồn IPA hợp lệ; tác vụ yêu cầu tương ứng được xếp xử lý."}
+
     @router.get("/api/v1/tools/ipa/decrypt/official")
     def official_ipa(bundle_id: str = Query(min_length=3, max_length=255)):
         """Discover original developer IPA links, without mirroring or repackaging."""
