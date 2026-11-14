@@ -306,6 +306,29 @@ def _eri_mod_file(row):
     return path
 
 
+@app.get("/api/v1/admin/ipa/storage-status", dependencies=[Depends(require_admin)])
+def ipa_storage_status():
+    """Admin-only integrity report for the self-hosted IPA vault."""
+    with connection() as db:
+        rows = db.execute(
+            "SELECT i.id,i.name,i.version,i.platform,p.storage_name,p.size_bytes "
+            "FROM ipa i LEFT JOIN private_product_uploads p "
+            "ON p.product_id=i.id AND p.kind=i.platform "
+            "WHERE i.platform='ipa' AND i.authorized=1 ORDER BY i.id DESC"
+        ).fetchall()
+    ready, missing = [], []
+    for row in rows:
+        item = {"id": row["id"], "name": row["name"], "version": row["version"]}
+        if row["storage_name"] and _eri_mod_file(row):
+            ready.append(item)
+        else:
+            missing.append(item)
+    return {"storage_dir_configured": bool(os.getenv("ERI_UPLOAD_DIR")),
+            "total": len(rows), "ready": len(ready), "missing": len(missing),
+            "missing_items": missing[:100],
+            "notice": "Kho IPA chỉ có thể tải những file thực sự tồn tại trên máy chủ."}
+
+
 @app.get("/api/v1/mods")
 def public_mod_catalog():
     with connection() as db:
