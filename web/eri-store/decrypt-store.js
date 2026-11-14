@@ -348,8 +348,8 @@
           (job.version||"—") + " · " + (job.country||"VN")));
         const complete = job.state === "completed" && !!apiUrl(job.result?.download_path);
         node.append(card("p",complete ? "eri-decrypt-available" : "eri-decrypt-unavailable",
-          complete ? "Đã có IPA hợp lệ trong kho — tải được ngay" :
-            "Đã lưu yêu cầu. Chưa có IPA được phép phân phối trên máy chủ."));
+          complete ? "Đã có IPA thật trong kho — tải được ngay" :
+            (job.message || "Đã lưu yêu cầu. Chưa có IPA được phép phân phối.")));
         const actions = card("div","eri-decrypt-actions");
         actions.append(button("Xem trạng thái",() => {
           activeJob=job.job_id;
@@ -395,20 +395,27 @@
   function renderJob(job) {
     const section = $("eri-decrypt-request-section");
     section?.classList.remove("hidden");
-    const pct = job.state === "completed" && job.result?.download_path ? 100 : 0;
+    const complete = job.state === "completed" && !!apiUrl(job.result?.download_path);
+    const pct = complete ? 100 : (job.state === "processing" ?
+      Math.max(0,Math.min(95,Number(job.progress) || 0)) : 0);
     text("eri-decrypt-job-pct",pct + "%");
     const bar = $("eri-decrypt-job-progress");
     if (bar) bar.value = pct;
+    const label = {queued:"Đã xếp hàng",processing:"Worker đang xử lý",
+      failed:"Xử lý thất bại",waiting_for_authorized_file:"Chờ nguồn IPA được cấp phép"};
     text("eri-decrypt-job-stage",(job.name || "Ứng dụng") +
-      " · v" + (job.version || "—") + "\n" + (job.message || ""));
+      " · v" + (job.version || "—") + " · " +
+      (complete ? "Hoàn tất" : (label[job.state] || "Đang chờ")) +
+      "\n" + (job.message || ""));
     const controls = $("eri-decrypt-job-actions");
     if (controls) controls.replaceChildren();
-    if (pct === 100) {
+    if (complete) {
       if (controls) installActions(controls,job.result);
       notice("Kho ERI đã có file thật cho yêu cầu này.", "success");
     } else {
       if (controls) controls.append(button("Kiểm tra lại",refreshJob));
-      notice("Yêu cầu đã lưu. Bạn có thể đóng trang và mở lại để xem trạng thái.", "info");
+      notice(job.state === "failed" ? "Worker không xử lý được IPA này. Xem lỗi trên màn hình." :
+        "Yêu cầu đã lưu. Mở lại trang để theo dõi trạng thái thực tế.", job.state === "failed" ? "error" : "info");
     }
   }
   async function refreshJob() {
