@@ -380,6 +380,12 @@
     loadHistory();
     if (activeJob && getToken()) refreshJob();
     $("eri-decrypt-refresh-history")?.addEventListener("click",loadHistory);
+    window.addEventListener("eri-store:session-changed", () => {
+      // Session keys are never persisted by this module; reload scoped history
+      // when the shopper signs in or out.
+      loadHistory();
+      if (activeJob && getToken()) refreshJob();
+    });
     document.addEventListener("visibilitychange",() => {
       if (document.visibilityState === "visible") {
         loadHistory();
