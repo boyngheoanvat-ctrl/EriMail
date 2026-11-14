@@ -5,6 +5,7 @@ The public library exposes ONLY explicitly authorized, free IPA files already
 present in this installation. No fake cryptid=0 claims or fake progress.
 """
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 import re
 import secrets
@@ -21,7 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from eri_ipa_pipeline import (
     setup as setup_pipeline, put_source, schedule as schedule_pipeline,
-    schedule_matching as schedule_matching_pipeline
+    schedule_matching as schedule_matching_pipeline,
+    sync_source_feed, feed_configured
 )
 
 REGIONS = ("vn", "us", "jp", "kr", "tw", "cn", "hk", "sg", "th", "gb")
@@ -236,6 +238,28 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
     router = APIRouter()
     setup_pipeline(connection)
 
+    def refresh_eri_sources():
+        # Optional, allowlisted ERI-owned source manifest. This is not an
+        # App Store IPA URL, FairPlay bypass, or third-party decrypt API.
+        if feed_configured():
+            try:
+                sync_source_feed(connection, upload_dir)
+            except Exception as exc:
+                logging.warning("ERI IPA source feed unavailable (%s)", type(exc).__name__)
+
+    @router.get("/api/v1/tools/ipa/decrypt/engine")
+    def engine_status():
+        with connection() as db:
+            registered = db.execute("SELECT COUNT(*) FROM ipa_decrypt_sources").fetchone()[0]
+        return {
+            "worker": "ERI authorized IPA pipeline",
+            "source_feed_configured": feed_configured(),
+            "registered_sources": registered,
+            "fairplay_decrypt_available": False,
+            "app_store_search": True,
+            "ipa_download_requires_verified_source": True,
+        }
+
     def source_exists(bundle_id: str, version: str) -> bool:
         if not bundle_id or not version:
             return False
@@ -347,15 +371,18 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             free = _all_free_ipa(connection, upload_dir, mod_file)
         match = _match_vault(free, row["bundle_id"], row["version"])
         state = "completed" if match else row["state"] or "waiting_for_source"
+        available = source_exists(row["bundle_id"], row["version"])
         return {
             "job_id": row["id"], "app_id": row["app_id"], "name": row["name"],
             "bundle_id": row["bundle_id"], "version": row["version"],
             "country": row["country"], "created_at": row["created_at"],
             "state": state,
-            "progress": 100 if match else row["progress"],
+            "progress": 100 if match else (None if state == "waiting_for_source" else row["progress"]),
+            "source_available": available,
             "result": match,
             "message": ("IPA đã có trong kho ERI." if match
-                        else row["message"] or "Chưa có nguồn IPA tương ứng trên máy chủ ERI."),
+                        else row["message"] or ("Đang chuyển tới worker ERI." if available else
+                           "Chưa có nguồn IPA tương ứng trên máy chủ ERI.")),
         }
 
     @router.post("/api/v1/tools/ipa/decrypt/requests", status_code=201)
@@ -365,6 +392,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             raise HTTPException(404, "Không tìm thấy ứng dụng trên App Store")
         app_info = apps[0]
         chosen_version = payload.version or app_info["version"]
+        refresh_eri_sources()
         if not re.fullmatch(r"[A-Za-z0-9._+-]{1,60}", chosen_version):
             raise HTTPException(422, "Phiên bản không hợp lệ")
         with connection() as db:
@@ -398,6 +426,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
 
     @router.get("/api/v1/tools/ipa/decrypt/requests")
     def list_requests(customer=Depends(require_customer)):
+        refresh_eri_sources()
         # User-scoped work history survives browser reloads and lost localStorage
         # as long as the configured database remains persistent.
         with connection() as db:
@@ -456,6 +485,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             ).fetchone()
         if row is None:
             raise HTTPException(404, "Không tìm thấy yêu cầu")
+        if row["state"] == "waiting_for_source":
+            refresh_eri_sources()
         if row["state"] not in ("completed", "failed"):
             schedule_pipeline(connection, upload_dir, job_id)
         return job_payload(row)
