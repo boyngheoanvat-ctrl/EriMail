@@ -79,3 +79,32 @@ Sau khi đăng ký, mọi yêu cầu trùng Bundle ID và phiên bản đang ch�
 được worker tự xử lý. Khách hàng không cần nhập chứng chỉ hoặc upload file tại
 màn hình tra cứu. Tiến trình lấy trực tiếp từ backend và tải IPA qua
 `/api/v1/mods/{id}/download` chỉ khi tệp đã được xác minh và thực sự tồn tại.
+
+## ERI IPA ADMIN trên iPhone
+
+Sau khi triển khai bản GitHub mới lên cả `eri-store-web` và `eri-api-dag8`,
+mở **https://eri-store-web.onrender.com/ipa-admin.html** bằng Safari.
+
+1. Nhập `ERI_ADMIN_KEY` từ cấu hình bí mật trên Render (không dán vào GitHub).
+2. Chọn IPA do bạn sở hữu hoặc được phép phân phối, nhập tên và xác nhận quyền.
+3. Bấm **Tải lên và xác minh**. File được truyền thành các phần 4 MiB, mỗi phần
+   xác minh SHA-256, hiển thị % đã được máy chủ xác nhận. Nếu ngắt kết nối,
+   chọn lại cùng file và bấm tiếp tục; khóa admin không lưu trong localStorage.
+4. Backend kiểm tra `Info.plist`, Bundle ID, phiên bản và Mach-O. IPA còn
+   FairPlay hoặc không xác minh được sẽ bị từ chối, không được công bố là
+   đã giải mã. IPA đã kiểm tra được lưu vào kho và có liên kết tải thực.
+5. Phần **Yêu cầu IPA** phía dưới cho biết người dùng nào đang chờ
+   nguồn và phiên bản nào đã sẵn sàng.
+
+Nếu dùng trường **Nhập IPA từ nguồn HTTPS** thay vì upload, cấu hình
+`ERI_IPA_SOURCE_HOSTS` bằng tên miền lưu trữ IPA do bạn kiểm soát và
+đăng ký SHA-256 chính xác. Worker không tự giải mã FairPlay và không lấy
+file từ Apple Search API.
+
+**Quan trọng về triển khai:** Hiện cả hai dịch vụ Render được cài
+`autoDeploy=yes`, nhưng kết quả kiểm tra ngày 15/11/2026 cho thấy bản
+deploy live chưa đồng bộ với nhánh `main`. Không vội deploy API khi SQLite
+và file IPA vẫn ở ổ tạm: redeploy có thể làm mất tài khoản, đơn hàng, phiên
+tải và dữ liệu kho. Sao lưu hoặc chuyển sang lưu trữ bền vững trước khi
+chuyển sang bản live. Nếu chỉ cập nhật giao diện có thể deploy dịch vụ
+`eri-store-web` riêng; API cần cùng phiên bản để nhận endpoint mới.
