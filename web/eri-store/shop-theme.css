@@ -563,3 +563,26 @@ body.shop-v2{
  .shop-v2 .eri-dec .eri-dec-count-pill {padding:6px}
  .shop-v2 .eri-dec .eri-dec-sideload .btn {font-size:10px;padding:6px 2px}
 }
+
+
+/* External IPA provider handoff: these are links, not ERI-hosted downloads. */
+.shop-v2 .eri-dec .eri-decrypt-external {
+  margin:12px 0 14px;padding:12px 13px;
+  border:1px dashed var(--dec-border);border-radius:12px;
+  background:var(--dec-panel2);
+}
+.shop-v2 .eri-dec .eri-decrypt-external-title {
+  margin:0 0 9px!important;font-size:12px!important;
+  color:var(--dec-text)!important;font-weight:800;
+}
+.shop-v2 .eri-dec .eri-decrypt-external-actions {
+  display:flex;gap:7px;flex-wrap:wrap;
+}
+.shop-v2 .eri-dec .eri-decrypt-external-actions .btn {
+  flex:1 1 150px;display:inline-flex;justify-content:center;align-items:center;
+  text-align:center;min-height:36px;
+}
+.shop-v2 .eri-dec .eri-decrypt-external>.small {
+  color:var(--dec-muted);font-size:10.5px;line-height:1.55;
+  margin:9px 0 0;
+}
