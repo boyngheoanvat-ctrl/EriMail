@@ -80,31 +80,54 @@ Sau khi đăng ký, mọi yêu cầu trùng Bundle ID và phiên bản đang ch�
 màn hình tra cứu. Tiến trình lấy trực tiếp từ backend và tải IPA qua
 `/api/v1/mods/{id}/download` chỉ khi tệp đã được xác minh và thực sự tồn tại.
 
-## ERI IPA ADMIN trên iPhone
+## Tự động xử lý từ nguồn IPA ERI (không cần trang Admin IPA)
 
-Sau khi triển khai bản GitHub mới lên cả `eri-store-web` và `eri-api-dag8`,
-mở **https://eri-store-web.onrender.com/ipa-admin.html** bằng Safari.
+Có thể bỏ hoàn toàn trang quản trị IPA thủ công. Worker ERI nhận danh mục
+nguồn từ một tệp JSON được lưu tại tên miền HTTPS do ERI kiểm soát. Khi khách
+gửi yêu cầu hoặc kiểm tra trạng thái, backend tự cập nhật danh mục (tối đa
+một lần/phút), tải IPA tương ứng, xác minh SHA-256, Bundle ID, phiên bản,
+cấu trúc ZIP và Mach-O không còn FairPlay, sau đó đưa file thực vào kho và
+trả link tải.
 
-1. Nhập `ERI_ADMIN_KEY` từ cấu hình bí mật trên Render (không dán vào GitHub).
-2. Chọn IPA do bạn sở hữu hoặc được phép phân phối, nhập tên và xác nhận quyền.
-3. Bấm **Tải lên và xác minh**. File được truyền thành các phần 4 MiB, mỗi phần
-   xác minh SHA-256, hiển thị % đã được máy chủ xác nhận. Nếu ngắt kết nối,
-   chọn lại cùng file và bấm tiếp tục; khóa admin không lưu trong localStorage.
-4. Backend kiểm tra `Info.plist`, Bundle ID, phiên bản và Mach-O. IPA còn
-   FairPlay hoặc không xác minh được sẽ bị từ chối, không được công bố là
-   đã giải mã. IPA đã kiểm tra được lưu vào kho và có liên kết tải thực.
-5. Phần **Yêu cầu IPA** phía dưới cho biết người dùng nào đang chờ
-   nguồn và phiên bản nào đã sẵn sàng.
+Cấu hình Render **eri-api-dag8** trong phần Environment:
+- `ERI_IPA_SOURCE_HOSTS=files.eri.example` (thay bằng hostname lưu trữ ERI).
+- `ERI_IPA_SOURCE_MANIFEST_URL=https://files.eri.example/ipa-sources.json`
+- `ERI_PIPELINE_MAX_IPA_BYTES` tùy kích thước IPA, mặc định 512 MiB.
+- `ERI_DB_PATH` và `ERI_UPLOAD_DIR` phải nằm trên ổ lưu trữ bền vững.
 
-Nếu dùng trường **Nhập IPA từ nguồn HTTPS** thay vì upload, cấu hình
-`ERI_IPA_SOURCE_HOSTS` bằng tên miền lưu trữ IPA do bạn kiểm soát và
-đăng ký SHA-256 chính xác. Worker không tự giải mã FairPlay và không lấy
-file từ Apple Search API.
+Ví dụ nội dung `ipa-sources.json` (thay URL và SHA bằng file thật mà
+ERI sở hữu / có quyền phân phối):
 
-**Quan trọng về triển khai:** Hiện cả hai dịch vụ Render được cài
-`autoDeploy=yes`, nhưng kết quả kiểm tra ngày 15/11/2026 cho thấy bản
-deploy live chưa đồng bộ với nhánh `main`. Không vội deploy API khi SQLite
-và file IPA vẫn ở ổ tạm: redeploy có thể làm mất tài khoản, đơn hàng, phiên
-tải và dữ liệu kho. Sao lưu hoặc chuyển sang lưu trữ bền vững trước khi
-chuyển sang bản live. Nếu chỉ cập nhật giao diện có thể deploy dịch vụ
-`eri-store-web` riêng; API cần cùng phiên bản để nhận endpoint mới.
+```json
+{
+  "items": [
+    {
+      "name": "Ứng dụng ERI",
+      "bundle_id": "com.eri.demo",
+      "version": "1.0",
+      "url": "https://files.eri.example/ERI-Demo.ipa",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "distribution_authorized": true
+    }
+  ]
+}
+```
+
+- Nếu `distribution_authorized` không phải `true`, worker bỏ qua.
+- Nguồn phải là HTTPS trên hostname đã cho phép; URL chuyển hướng cũng bị
+  kiểm tra. Không dùng URL của F4 hay dịch vụ giải mã bên ngoài.
+- File chưa có nguồn không được đánh dấu đang chạy hoặc 100%. App Store
+  Search API chỉ cung cấp tên, Bundle ID và metadata; không cung cấp IPA
+  giải mã. `ipatool` cũng không tự gỡ FairPlay.
+- `GET /api/v1/tools/ipa/decrypt/engine` báo trạng thái cấu hình nguồn,
+  số phiên bản đã đăng ký và xác nhận rõ FairPlay decrypt không khả dụng.
+- Không đưa khóa Apple ID, mật khẩu P12 hoặc chứng chỉ riêng vào nguồn JSON.
+
+**Kiểm thử:** `python backend/test_eri_source_feed.py` (cần cài
+`backend/requirements.txt`, `httpx`), giả lập nguồn ERI độc lập và
+xác nhận nhận file, xác minh, tải được IPA. Không tải ứng dụng App Store thật.
+
+**Lưu ý triển khai:** Render Free hiện lưu SQLite và tệp IPA trên ổ tạm.
+Việc deploy/restart có thể làm mất tài khoản, đơn hàng, dữ liệu IPA và lịch sử.
+Do đó các sửa đổi được chuẩn bị trên nhánh riêng, **không cập nhật site live**
+cho đến khi đã di chuyển dữ liệu sang lưu trữ bền vững và sao lưu thành công.
