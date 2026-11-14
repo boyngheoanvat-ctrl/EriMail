@@ -1,7 +1,7 @@
 "use strict";
 // ERI STORE IPA utilities. Inputs are sent only after the user chooses an action.
 (() => {
-  const API = "https://eri-api-dag8.onrender.com";
+  const API = "https://eri-ipa-preview-api.onrender.com";
   const TOKEN_KEY = "eri_store_buyer_token";
   const APPSTORE_DRAFT = "eri_store_appstore_draft_v1";
   const MAX_IPA = 512 * 1024 * 1024;
