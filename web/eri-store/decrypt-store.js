@@ -184,8 +184,8 @@
           new URLSearchParams({target:url,country:"auto"}));
         if (external.download_ready && external.download_url) {
           const parsed = new URL(external.download_url);
-          const f4DownloadPath = /^\\/api\\/decrypt\\/download\\/[a-f0-9]{32}$/i.test(parsed.pathname);
-          const f4LegacyPath = /^\\/dl_dec\\/[A-Za-z0-9_-]{8,128}\\/[0-9]{8,15}\\/[A-Za-z0-9._%-]+\\.ipa$/i.test(parsed.pathname);
+          const f4DownloadPath = /^\/api\/decrypt\/download\/[a-f0-9]{32}$/i.test(parsed.pathname);
+          const f4LegacyPath = /^\/dl_dec\/[A-Za-z0-9_-]{8,128}\/[0-9]{8,15}\/[A-Za-z0-9._%-]+\.ipa$/i.test(parsed.pathname);
           if (parsed.protocol === "https:" &&
               ["decrypt.160-191-242-70.sslip.io", "160-191-242-70.sslip.io"].includes(parsed.hostname) &&
               !parsed.username && !parsed.password && !parsed.search && !parsed.hash &&
