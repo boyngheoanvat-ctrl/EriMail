@@ -489,6 +489,33 @@
         search(node.dataset.eriDecryptPreset,$("eri-decrypt-region").value);
       });
     });
+    // F4TEAM has not published a verified third-party API contract.
+    // Open its website directly instead of proxying protected endpoints,
+    // and copy only the public search term to ease the handoff.
+    async function copyExternalQuery() {
+      const q = ($("eri-decrypt-query")?.value || "").trim();
+      if (!q) {
+        notice("Nhập tên ứng dụng, Bundle ID hoặc link App Store trước khi sao chép.", "error");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(q);
+        notice("Đã sao chép tên hoặc link. Bạn có thể dán vào ô tìm kiếm ở F4TEAM hoặc kho IPA ngoài.", "success");
+      } catch {
+        notice("Safari chưa cho phép sao chép tự động. Hãy chọn và sao chép nội dung trong ô tìm kiếm.", "error");
+        $("eri-decrypt-query")?.focus();
+      }
+    }
+    $("eri-decrypt-copy-query")?.addEventListener("click",copyExternalQuery);
+    for (const id of ["eri-decrypt-open-f4","eri-decrypt-open-public"]) {
+      $(id)?.addEventListener("click",() => {
+        const q = ($("eri-decrypt-query")?.value || "").trim();
+        if (q && navigator.clipboard?.writeText) {
+          // No await: allow the trusted external link to open on the same tap.
+          navigator.clipboard.writeText(q).catch(() => {});
+        }
+      });
+    }
     $("eri-decrypt-open-vault")?.addEventListener("click",() => {
       $("eri-decrypt-vault-section")?.scrollIntoView({behavior:"smooth",block:"start"});
       loadVault();
