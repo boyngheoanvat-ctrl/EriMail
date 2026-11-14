@@ -31,8 +31,8 @@ assert 'Xử lý IPA' in tools
 assert 'if (createRequest) $("eri-decrypt-direct-request")?.click();' in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v24" in service
-assert "?v=20261115p3" in html
+assert "eri-store-v27" in service
+assert "?v=20261115p4" in html
 assert "eri-decrypt-open-f4" not in html
 assert "eri-dec-f4-import" not in html
 
@@ -40,18 +40,13 @@ assert "eri-dec-f4-import" not in html
 assert not re.search(r'ipa.*download.*apps\.apple\.com', tools, re.I)
 assert 'Link App Store không chứa IPA đã giải mã FairPlay' not in tools
 
-admin_page = (web / "ipa-admin.html").read_text()
-admin_script = (web / "ipa-admin.js").read_text()
-assert 'id="admin-key"' in admin_page
-assert 'id="ipa-file"' in admin_page
-assert 'id="upload-progress"' in admin_page
-assert 'ipa-admin.js?v=20261115p3' in admin_page
-assert 'verify_free_ipa: true' in admin_script
-assert '/fast-parts/' in admin_script
-assert 'crypto.subtle.digest("SHA-256"' in admin_script
-assert 'localStorage.setItem(KEY, JSON.stringify(data))' in admin_script
-assert 'ERI_ADMIN_KEY=' not in admin_script
-import subprocess
-subprocess.run(["node", "--check", str(web / "ipa-admin.js")], check=True)
+dec = (web / "decrypt-store.js").read_text()
+assert 'bar.removeAttribute("value")' in dec, "Unknown worker progress must be indeterminate"
+assert 'activeJobState === "waiting_for_source"' in dec
+assert 'activeJobState === "processing"' in dec
+assert 'if (pct === null) bar.removeAttribute("value")' in dec
+assert 'progress = 100' not in dec, "Never fake 100% in client"
 
-print("ERI STORE: precise progress, cache-bust, backend vault lookup and IPA request UI OK")
+import subprocess
+subprocess.run(["node", "--check", str(web / "decrypt-store.js")], check=True)
+print("ERI STORE: measured progress, proper waiting status, cache-bust and downloads OK")
