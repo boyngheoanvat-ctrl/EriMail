@@ -158,23 +158,7 @@
         <button class="btn outline" type="button" id="eri-decrypt-direct-request">♢ Gửi yêu cầu IPA</button>
         <button class="btn outline" type="button" id="eri-decrypt-open-vault">Kho IPA có sẵn</button>
       </div>
-      <div class="eri-decrypt-external" aria-label="Kho IPA bên ngoài">
-        <p class="eri-decrypt-external-title">Nguồn IPA ngoài ERI</p>
-        <div class="eri-decrypt-external-actions">
-          <a id="eri-decrypt-open-f4" class="btn outline" href="https://decrypt.160-191-242-70.sslip.io/" target="_blank" rel="noopener noreferrer">Mở F4TEAM</a>
-          <a id="eri-decrypt-open-public" class="btn outline" href="https://decrypt.stream/" target="_blank" rel="noopener noreferrer">Kho IPA công khai khác</a>
-          <button id="eri-decrypt-copy-query" class="btn outline" type="button">Sao chép tên / link</button>
-        </div>
-        <p class="small">Hai website này hoạt động độc lập với ERI; tải và xử lý trên hệ thống của họ, không chuyển tài khoản, chứng chỉ hoặc mật khẩu của bạn. F4TEAM có thể thay đổi địa chỉ và yêu cầu đăng nhập riêng.</p>
-      </div>
-      <details class="eri-dec-f4-import">
-        <summary>Đã có kết quả F4? Lấy link IPA về ERI</summary>
-        <p class="small">Dán JSON phản hồi hoàn tất hoặc link IPA từ F4TEAM. ERI chỉ đọc dữ liệu trên iPhone, không gửi JSON, cookie hay CSRF của F4 lên máy chủ.</p>
-        <label class="field" for="eri-dec-f4-input">Kết quả F4 hoặc đường dẫn .ipa</label>
-        <textarea id="eri-dec-f4-input" rows="3" maxlength="35000" spellcheck="false" placeholder='Dán JSON có "dl_url" hoặc https://160-191-242-70.sslip.io/dl_dec/...ipa'></textarea>
-        <button class="btn primary" type="button" id="eri-dec-f4-import-button">Hiển thị IPA từ F4</button>
-        <div id="eri-dec-f4-import-result" role="status" aria-live="polite"></div>
-      </details>
+      <p class="eri-dec-disclaimer">ERI hoạt động độc lập: tìm thông tin App Store, gửi yêu cầu xử lý và chỉ cung cấp liên kết tải khi máy chủ ERI đã lưu tệp IPA hợp lệ được phép phân phối.</p>
       <div class="eri-decrypt-preset" aria-label="Tìm kiếm nhanh">
         <span>Phổ biến:</span>
         <button type="button" data-eri-decrypt-preset="Liên Quân Mobile">Liên Quân</button>
@@ -193,8 +177,8 @@
       <div id="eri-decrypt-results" class="eri-decrypt-grid"></div>
     </section>
     <section id="eri-decrypt-request-section" class="eri-decrypt-section hidden" aria-label="Tiến độ yêu cầu IPA">
-      <div class="eri-decrypt-heading"><h4>Tiến trình IPA trên máy chủ</h4><span id="eri-decrypt-job-pct">0%</span></div>
-      <progress id="eri-decrypt-job-progress" max="100" value="0"></progress>
+      <div class="eri-decrypt-heading"><h4>Tiến trình IPA trên máy chủ</h4><span id="eri-decrypt-job-pct">Đang chờ</span></div>
+      <progress id="eri-decrypt-job-progress" max="100" aria-label="Tiến độ xử lý IPA thực tế"></progress>
       <p id="eri-decrypt-job-stage" class="small"></p>
       <div id="eri-decrypt-job-actions" class="eri-decrypt-actions"></div>
     </section>
