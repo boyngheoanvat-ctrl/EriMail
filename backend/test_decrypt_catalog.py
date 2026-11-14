@@ -179,4 +179,6 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
     import sys
     subprocess.run([sys.executable, str(Path(__file__).with_name("test_eri_ipa_pipeline.py"))],
                    check=True)
+    subprocess.run([sys.executable, str(Path(__file__).with_name("test_eri_admin_import.py"))],
+                   check=True)
 
