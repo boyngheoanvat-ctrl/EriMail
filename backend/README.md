@@ -45,3 +45,29 @@ API order endpoints: `POST /api/v1/orders` (kind `ai` or `certificate`, product_
 Apple Search API chỉ cung cấp metadata, không tải hay giải mã FairPlay. Không sao chép IPA và API của website tham khảo.
 
 QUAN TRỌNG: Render Free đang sử dụng SQLite và file upload trên ổ tạm. Tác vụ có thể khôi phục sau khi đóng trình duyệt nhưng KHÔNG đảm bảo giữ dữ liệu qua deploy/restart. Trước khi deploy backend production, phải sao lưu hoặc chuyển toàn bộ SQLite và IPA sang dịch vụ lưu trữ bền vững. IPA chưa ký vẫn cần P12/mobileprovision hợp lệ trước khi cài iPhone.
+
+## ERI authorized IPA worker — independent backend
+
+Implemented in ipa_verified_worker.py and registered from app.py. It consumes an **admin-approved licensed IPA HTTPS source**, downloads the real IPA, checks SHA-256, Bundle ID, exact version, and Mach-O encryption commands, then publishes a verified file to the existing ERI catalog.
+
+**This is not a FairPlay decrypter.** An App Store URL or public Apple Search API metadata cannot produce the binary. A protected Mach-O (cryptid != 0) is rejected, not modified. iTunesMetadata.plist and SC_Info account metadata are rejected. An authorized source/device exporter must supply the IPA. Do not use F4 or an untrusted external IPA source.
+
+### Environment settings (server-side only)
+
+- ERI_DECRYPT_WORKER_ENABLED=1: runs the worker within the current ERI FastAPI web service. Default 0 (disabled).
+- ERI_DECRYPT_SOURCE_HOSTS=ipa.example.org: comma-separated own HTTPS hosts. Without a configured allowlist the API refuses new sources.
+- ERI_UPLOAD_DIR=/data/eri-private-uploads and ERI_DB_PATH=/data/eri.sqlite3: example paths when a persistent disk is actually attached. Merely setting the paths without mounting a disk is not sufficient.
+- ERI_ADMIN_KEY: existing long server-side secret, never embed into website/IPA.
+
+### Admin workflow
+
+1. Customers find apps using GET /api/v1/tools/ipa/decrypt/search and submit POST /api/v1/tools/ipa/decrypt/requests after ERI STORE login.
+2. Using ERI ADMIN IPA or an authenticated admin HTTP client, POST /api/v1/admin/decrypt/sources with JSON fields: name, bundle_id, version, download_url, sha256 (64 hexadecimal chars), authorized:true.
+3. Worker accepts allowlisted HTTPS hosts only, refuses redirects, downloads at most 512 MiB, checks file hash and Mach-O, then saves a real file into the ERI vault. It does not bypass DRM.
+4. Clients poll GET /api/v1/tools/ipa/decrypt/requests/{job_id}: waiting_for_authorized_file, queued, processing, failed or completed. Only completed jobs with a physically present authorized file return a downloadable path.
+
+Admin diagnostics: GET /api/v1/admin/decrypt/worker and GET /api/v1/admin/decrypt/sources, both requiring X-ERI-Admin-Key. Signed source URLs are never returned in these listings.
+
+CI/tests from backend directory: python test_decrypt_catalog.py && python test_ipa_verified_worker.py
+
+**Important production constraint:** The existing Render Free backend has ephemeral SQLite and upload storage. Deploy/restart can lose customers, orders and IPA files. Free web services also may suspend processing when idle. Do not merge/deploy production until a verified backup and durable storage solution are in place. A persistent disk or managed database plus object storage and an always-on worker may require a paid plan. Check available plans and obtain approval before provisioning billed resources.
