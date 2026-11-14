@@ -240,8 +240,8 @@
   async function catalogSearch(q,country) {
     const rows = await publicCatalog();
     const needle = fold(q).trim();
-    const id = String(q).match(/(?:^|\\/)id(\\d{6,12})|^(\\d{6,12})$/)?.[1] ||
-      String(q).match(/(?:^|\\/)id(\\d{6,12})|^(\\d{6,12})$/)?.[2];
+    const id = String(q).match(/id([0-9]{6,15})/)?.[1] ||
+      String(q).match(/^([0-9]{6,15})$/)?.[1];
     const matches = rows.filter(x => id ? String(x.i) === "id"+id :
       [x.n,x.p,x.i,...(Array.isArray(x.t)?x.t:[])].some(v=>fold(v).includes(needle)))
       .slice(0,15);
