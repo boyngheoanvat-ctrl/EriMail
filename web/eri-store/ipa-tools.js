@@ -196,17 +196,31 @@
 
           const decryptTab = document.querySelector('[data-kind="decrypt"]');
           if (decryptTab && $("eri-decrypt-query")) {
-            const browse = document.createElement("button");
-            browse.type = "button";
-            browse.className = "btn outline";
-            browse.textContent = "Xem kho IPA / chọn phiên bản";
-            browse.addEventListener("click", () => {
+            const openDecrypt = submitJob => {
               const query = $("eri-decrypt-query");
               query.value = link;
               query.dispatchEvent(new Event("input", {bubbles: true}));
               decryptTab.click();
-              $("eri-decrypt-search-form")?.requestSubmit();
-            });
+              if (submitJob) {
+                // The ERI API saves a request. It does not currently decrypt FairPlay.
+                $("eri-decrypt-direct-request")?.click();
+              } else {
+                $("eri-decrypt-search-form")?.requestSubmit();
+              }
+            };
+            if (!existingIPA) {
+              const requestButton = document.createElement("button");
+              requestButton.type = "button";
+              requestButton.className = "btn primary";
+              requestButton.textContent = "Gửi yêu cầu IPA về ERI";
+              requestButton.addEventListener("click", () => openDecrypt(true));
+              actions.append(requestButton);
+            }
+            const browse = document.createElement("button");
+            browse.type = "button";
+            browse.className = "btn outline";
+            browse.textContent = "Xem kho IPA / chọn phiên bản";
+            browse.addEventListener("click", () => openDecrypt(false));
             actions.append(browse);
           }
           if (typeof data.app_store_url === "string") {
