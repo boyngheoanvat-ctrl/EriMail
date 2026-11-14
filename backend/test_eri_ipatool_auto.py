@@ -106,7 +106,8 @@ with tempfile.TemporaryDirectory(prefix="eri-auto-ipatool-") as root:
         assert good["progress"] == 100
         assert good["result"]["download_path"]
         actual = client.get(good["result"]["download_path"])
-        assert actual.status_code == 200 and actual.content == make_ipa("com.eri.auto")
+        assert actual.status_code == 200, actual.status_code
+        assert actual.content == base64.b64decode(os.environ["ERI_TEST_PLAIN"])
 
         bad = run_request("com.eri.encrypted")
         assert bad["state"] == "failed", bad
