@@ -2,7 +2,7 @@
 // ERI STORE App Store discovery and authorized IPA vault.
 // Never claim to decrypt Apple's FairPlay DRM from public metadata.
 (() => {
-  const API = "https://eri-api-dag8.onrender.com";
+  const API = "https://eri-ipa-preview-api.onrender.com";
   const TOKEN = "eri_store_buyer_token";
   const QUERY_DRAFT = "eri.decrypt.query.v1";
   const REGION_DRAFT = "eri.decrypt.region.v1";
