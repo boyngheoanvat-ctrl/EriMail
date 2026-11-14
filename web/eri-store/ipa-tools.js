@@ -102,8 +102,12 @@
     xhr.open("POST", API + endpoint, true);
     xhr.timeout = 600000;
     xhr.setRequestHeader("Authorization", "Bearer " + token);
+    let uploadedBytes = 0;
+    let uploadTotal = ipa.size;
     xhr.upload.onprogress = ev => {
       const total = ev.lengthComputable ? ev.total : ipa.size;
+      uploadedBytes = ev.loaded;
+      uploadTotal = total;
       updateLegacyProgress(ev.loaded, total, "uploading");
       display(result, "Đang gửi file qua HTTPS: " + pretty(ev.loaded) + " / " + pretty(total));
     };
@@ -115,7 +119,7 @@
       let response;
       try { response = JSON.parse(xhr.responseText || "{}"); } catch { response = {}; }
       if (xhr.status < 200 || xhr.status >= 300) {
-        updateLegacyProgress(ipa.size, ipa.size, "error");
+        updateLegacyProgress(uploadedBytes, uploadTotal, "error");
         display(result, xhr.status === 401
           ? "Phiên đăng nhập đã hết hạn. Bạn hãy đăng nhập lại rồi bấm Ký; tệp đã chọn sẽ không bị xóa nếu không tải lại trang."
           : errorText(response) || "HTTP " + xhr.status, "error");
@@ -136,15 +140,15 @@
       if (pwd) pwd.value = "";
     };
     xhr.onerror = () => {
-      updateLegacyProgress(ipa.size, ipa.size, "error");
+      updateLegacyProgress(uploadedBytes, uploadTotal, "error");
       display(result, "Không kết nối được máy chủ. Kiểm tra mạng và thử lại.", "error");
     };
     xhr.ontimeout = () => {
-      updateLegacyProgress(ipa.size, ipa.size, "error");
+      updateLegacyProgress(uploadedBytes, uploadTotal, "error");
       display(result, "Quá thời gian xử lý trên máy chủ. Hãy dùng tính năng upload từng phần.", "error");
     };
     xhr.onabort = () => {
-      updateLegacyProgress(ipa.size, ipa.size, "error");
+      updateLegacyProgress(uploadedBytes, uploadTotal, "error");
       display(result, "Yêu cầu đã bị hủy.", "error");
     };
     xhr.onloadend = () => { buttons.forEach(b => b.disabled = false); };
