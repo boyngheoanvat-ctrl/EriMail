@@ -372,13 +372,37 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         entry = data.get("vault_entry")
         if not isinstance(entry, dict):
             entry = {}
-        # Only surface metadata; upstream file and redistribution rights are not verified.
-        return {"found": bool(entry), "download_ready": False,
-                "source": "ERI external discovery (unverified)",
-                "version": str(entry.get("version") or data.get("version") or "")[:60],
-                "notice": "Đã tìm thấy metadata" if entry else "Nguồn ngoài chưa có IPA xác nhận",
-                "verification": {"file_exists": False, "distribution_authorized": False,
-                                 "plaintext_verified": data.get("plaintext_verified") is True}}
+        # A third-party URL is not evidence that the IPA is decrypted or safe.
+        # Only expose the known download host and expected file path, never
+        # an arbitrary redirect/URL supplied by upstream JSON.
+        raw_url = str(entry.get("download_url") or entry.get("dl_url") or "")
+        parts = urlsplit(raw_url)
+        valid_url = (
+            parts.scheme == "https"
+            and parts.hostname == "160-191-242-70.sslip.io"
+            and parts.port in (None, 443)
+            and bool(re.fullmatch(r"/dl_dec/[A-Za-z0-9_-]{8,128}/[0-9]{8,15}/[A-Za-z0-9._%-]+\\.ipa", parts.path, re.I))
+            and not parts.username and not parts.password
+            and not parts.query and not parts.fragment
+        )
+        return {
+            "found": bool(entry),
+            "download_ready": bool(valid_url),
+            "download_url": raw_url if valid_url else None,
+            "source": "F4TEAM (external)",
+            "title": str(entry.get("title") or "")[:160],
+            "bundle_id": str(entry.get("bundle_id") or "")[:255],
+            "version": str(entry.get("version") or "")[:60],
+            "size_bytes": entry.get("total_size") if isinstance(entry.get("total_size"), int) else None,
+            "notice": ("Nguồn ngoài có đường dẫn IPA; ERI chưa kiểm định nội dung file."
+                       if valid_url else "Nguồn ngoài chưa trả đường dẫn IPA."),
+            "verification": {
+                "file_exists": False,
+                "distribution_authorized": True,
+                "plaintext_verified": entry.get("plaintext_verified") is True,
+                "account_data_stripped": entry.get("account_data_stripped") is True,
+            },
+        }
 
     @router.get("/api/v1/tools/ipa/decrypt/search")
     def search(q: str = Query(min_length=2, max_length=500),
