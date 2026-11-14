@@ -174,3 +174,9 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         assert stale["progress"] is None and stale["result"] is None
 
     print("Apple regions/search/versions, real free vault, durable jobs and isolation: OK")
+    # Exercise the independent worker in a fresh process with its own isolated DB.
+    import subprocess
+    import sys
+    subprocess.run([sys.executable, str(Path(__file__).with_name("test_eri_ipa_pipeline.py"))],
+                   check=True)
+
