@@ -96,7 +96,12 @@ def sync_source_feed(connection, upload_dir=None, force=False):
                 registered += 1
                 if upload_dir is not None:
                     schedule_matching(connection, upload_dir, source["bundle_id"], source["version"])
-            except (AttributeError, KeyError, TypeError, ValueError):
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                # Publish only authorized, structurally valid manifest entries.
+                # Keep the reason in logs for debugging, without printing source URLs.
+                import logging
+                logging.warning("ERI source feed skipped item: %s (%s)",
+                                type(exc).__name__, str(exc)[:120])
                 continue
         return {"configured": True, "registered": registered}
 
