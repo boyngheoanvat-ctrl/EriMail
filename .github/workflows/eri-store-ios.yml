@@ -1,0 +1,96 @@
+name: Build ERI STORE iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ERIStore/**'
+      - '.github/workflows/eri-store-ios.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eri-store-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  store-ios-ipa:
+    name: Build ERI STORE unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate ERI STORE Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s apps/ERIStore/ERIStoreApp.swift
+          grep -q '@main' apps/ERIStore/ERIStoreApp.swift
+          mkdir -p build-eri-store/Sources
+          cp apps/ERIStore/ERIStoreApp.swift build-eri-store/Sources/ERIStoreApp.swift
+          cat > build-eri-store/project.yml <<'EOF'
+          name: ERIStore
+          options:
+            deploymentTarget:
+              iOS: '16.0'
+          targets:
+            ERIStore:
+              type: application
+              platform: iOS
+              sources: [Sources]
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.eringuyen.store
+                  PRODUCT_NAME: ERIStore
+                  INFOPLIST_KEY_CFBundleDisplayName: 'ERI STORE'
+                  GENERATE_INFOPLIST_FILE: YES
+                  INFOPLIST_KEY_UILaunchScreen_Generation: YES
+                  SWIFT_VERSION: '5.0'
+                  TARGETED_DEVICE_FAMILY: '1,2'
+                  CODE_SIGNING_ALLOWED: NO
+                  CODE_SIGNING_REQUIRED: NO
+          EOF
+          cd build-eri-store
+          xcodegen generate
+
+      - name: Compile ERI STORE for iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc -frontend -parse build-eri-store/Sources/ERIStoreApp.swift
+          cd build-eri-store
+          xcodebuild -project ERIStore.xcodeproj -scheme ERIStore -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath derived CODE_SIGNING_ALLOWED=NO build
+
+      - name: Package and verify ERI STORE IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app='build-eri-store/derived/Build/Products/Release-iphoneos/ERIStore.app'
+          test -d "$app"
+          test -s "$app/ERIStore"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" = 'com.eringuyen.store'
+          file "$app/ERIStore" | grep -q 'Mach-O'
+          mkdir -p ipa-package/Payload
+          cp -R "$app" ipa-package/Payload/
+          (cd ipa-package && zip -qry ../ERIStore-unsigned.ipa Payload)
+          test -s ERIStore-unsigned.ipa
+          unzip -tq ERIStore-unsigned.ipa
+          unzip -Z1 ERIStore-unsigned.ipa | grep -q '^Payload/ERIStore.app/ERIStore$'
+          ls -lh ERIStore-unsigned.ipa
+
+      - name: Upload ERI STORE IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ERIStore-unsigned-IPA
+          path: ERIStore-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
