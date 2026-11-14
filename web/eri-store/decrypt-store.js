@@ -143,7 +143,8 @@
         "Chưa có IPA bản này trong kho ERI. Link App Store chỉ chứa thông tin ứng dụng."));
       actions.append(button("Yêu cầu IPA", () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
     }
-    actions.append(button("Chọn phiên bản", () => loadVersions(item), false));
+    if (Number(item.app_id) > 0)
+      actions.append(button("Chọn phiên bản", () => loadVersions(item), false));
     const store = safeStoreLink(item.app_store_url);
     if (store) actions.append(link("App Store", store));
     root.append(actions);
@@ -166,7 +167,10 @@
         notice("Không tìm thấy ứng dụng phù hợp ở khu vực đã chọn.", "error");
         return;
       }
-      notice("Đã tìm thấy " + data.items.length + " ứng dụng. File tải chỉ hiện khi thực sự có trong kho ERI.", "success");
+      notice("Đã tìm thấy " + data.items.length + " ứng dụng. " +
+        (String(data.source || "").startsWith("ERI local vault")
+          ? "Đang hiển thị kho ERI vì Apple tạm thời không phản hồi."
+          : "File tải chỉ hiện khi thực sự có trong kho ERI."), "success");
       data.items.forEach(item => grid?.append(searchResult(item)));
       section?.scrollIntoView({behavior:"smooth",block:"nearest"});
     } catch (error) {
