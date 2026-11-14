@@ -219,7 +219,7 @@ def _match_vault(items, bundle_id: str, version: str):
     return found[0] if found else None
 
 
-def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_customer):
+def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_customer, require_admin=None):
     router = APIRouter()
 
     def decorate_with_vault(items):
@@ -303,6 +303,10 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             "CREATE INDEX IF NOT EXISTS idx_ipa_decrypt_requests_customer "
             "ON ipa_decrypt_requests(customer_id, created_at)"
         )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ipa_decrypt_requests_app "
+            "ON ipa_decrypt_requests(bundle_id, version, created_at)"
+        )
 
     def job_payload(row):
         free = _all_free_ipa(connection, upload_dir, mod_file)
@@ -329,6 +333,16 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         if not re.fullmatch(r"[A-Za-z0-9._+-]{1,60}", chosen_version):
             raise HTTPException(422, "Phiên bản không hợp lệ")
         with connection() as db:
+            existing = db.execute(
+                "SELECT * FROM ipa_decrypt_requests "
+                "WHERE customer_id=? AND bundle_id=? AND version=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (customer["id"], app_info["bundle_id"], chosen_version),
+            ).fetchone()
+            if existing is not None:
+                # Repeat taps and retry after a lost HTTP response must not
+                # fill the 30-request quota with duplicate tasks.
+                return {**job_payload(existing), "reused": True}
             current = db.execute(
                 "SELECT COUNT(*) FROM ipa_decrypt_requests WHERE customer_id=?",
                 (customer["id"],)
@@ -345,6 +359,32 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             )
             row = db.execute("SELECT * FROM ipa_decrypt_requests WHERE id=?", (job_id,)).fetchone()
         return job_payload(row)
+
+    @router.get("/api/v1/tools/ipa/decrypt/requests")
+    def list_requests(customer=Depends(require_customer)):
+        # User-scoped work history survives browser reloads and lost localStorage
+        # as long as the configured database remains persistent.
+        with connection() as db:
+            rows = db.execute(
+                "SELECT * FROM ipa_decrypt_requests WHERE customer_id=? "
+                "ORDER BY created_at DESC LIMIT 30", (customer["id"],)
+            ).fetchall()
+        return {"items": [job_payload(row) for row in rows], "total": len(rows)}
+
+    if require_admin is not None:
+        @router.get("/api/v1/admin/decrypt/requests",
+                    dependencies=[Depends(require_admin)])
+        def admin_requests(limit: int = Query(default=50, ge=1, le=200)):
+            with connection() as db:
+                rows = db.execute(
+                    "SELECT r.*,c.username FROM ipa_decrypt_requests r "
+                    "JOIN customers c ON c.id=r.customer_id "
+                    "ORDER BY r.created_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+            return {"items": [
+                {**job_payload(row), "requester": row["username"]}
+                for row in rows
+            ], "total": len(rows)}
 
     @router.get("/api/v1/tools/ipa/decrypt/requests/{job_id}")
     def get_request(job_id: str, customer=Depends(require_customer)):
