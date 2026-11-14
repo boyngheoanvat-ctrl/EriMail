@@ -586,3 +586,28 @@ body.shop-v2{
   color:var(--dec-muted);font-size:10.5px;line-height:1.55;
   margin:9px 0 0;
 }
+
+
+/* Import one already-completed F4TEAM result without relaying authentication. */
+.shop-v2 .eri-dec .eri-dec-f4-import {
+ margin:12px 0;padding:11px 12px;border:1px solid var(--dec-border);
+ border-radius:11px;background:var(--dec-panel2);color:var(--dec-sub);
+}
+.shop-v2 .eri-dec .eri-dec-f4-import summary {
+ cursor:pointer;font-size:12px;font-weight:800;color:var(--dec-text);
+}
+.shop-v2 .eri-dec .eri-dec-f4-import .small {
+ font-size:11px;color:var(--dec-sub);margin:8px 0;line-height:1.5;
+}
+.shop-v2 .eri-dec .eri-dec-f4-import .field {
+ display:block;font-size:11px;color:var(--dec-sub);margin:7px 0;
+}
+.shop-v2 .eri-dec #eri-dec-f4-input {
+ display:block;box-sizing:border-box;width:100%;min-height:87px;
+ resize:vertical;overflow-wrap:anywhere;background:var(--dec-panel);
+ color:var(--dec-text);border:1px solid var(--dec-border);
+ border-radius:9px;padding:9px 10px;font-family:inherit;font-size:12px;
+}
+.shop-v2 .eri-dec #eri-dec-f4-import-button {margin:9px 0 0}
+.shop-v2 .eri-dec #eri-dec-f4-import-result {margin-top:10px}
+.shop-v2 .eri-dec .eri-dec-f4-result {box-shadow:none}
