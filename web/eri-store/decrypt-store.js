@@ -186,8 +186,10 @@
       root.append(card("div", "eri-decrypt-available", "IPA sẵn sàng"));
       installActions(root, item.cached);
     } else {
-      root.append(card("div", "eri-decrypt-unavailable", "Chưa có IPA"));
-      actions.append(button(item.source_available ? "Xử lý IPA" : "Yêu cầu IPA",
+      root.append(card("div", "eri-decrypt-unavailable",
+        item.auto_acquisition_available ? "Sẵn sàng tự lấy gói App Store" : "Chưa có IPA"));
+      actions.append(button(item.source_available ? "Xử lý IPA" :
+        item.auto_acquisition_available ? "Tự lấy IPA" : "Yêu cầu IPA",
         () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
     }
     if (Number(item.app_id) > 0)
@@ -267,7 +269,8 @@
         node.append(card("p", "small", entry.source === "ERI authorized library"
           ? "Sẵn sàng tải." : "Chưa có IPA."));
         if (entry.cached?.download_path) installActions(node, entry.cached);
-        else node.append(button(entry.source_available ? "Xử lý bản này" : "Yêu cầu bản này", () =>
+        else node.append(button(entry.source_available ? "Xử lý bản này" :
+          entry.auto_acquisition_available ? "Tự lấy bản này" : "Yêu cầu bản này", () =>
           createJob(item.app_store_url || String(item.app_id), item.country, entry.version), true));
         grid?.append(node);
       }
@@ -411,7 +414,7 @@
       if (pct === null) bar.removeAttribute("value");
       else bar.value = pct;
     }
-    const stateName = ready ? "Hoàn tất" : processing ? "Đang xử lý" :
+    const stateName = ready ? "Hoàn tất" : processing ? "Đang tải / xác minh IPA" :
       job.state === "failed" ? "Thất bại" : "Đang chờ nguồn IPA";
     text("eri-decrypt-job-stage",(job.name || "Ứng dụng") +
       " · v" + (job.version || "—") + " · " + stateName +
@@ -426,11 +429,13 @@
         controls.append(button("Thử lại", () =>
           createJob(job.bundle_id,job.country,job.version)));
       }
-      notice("Xử lý IPA thất bại.", "error");
+      notice(job.message || "Xử lý IPA thất bại.", "error");
     } else if (processing) {
-      notice("Máy chủ ERI đang xử lý IPA.", "info");
+      notice(job.message || "Máy chủ ERI đang tải và kiểm tra IPA.", "info");
     } else {
-      notice("Đã lưu yêu cầu. File chưa được tạo; hệ thống sẽ kiểm tra nguồn IPA ERI.", "info");
+      notice(job.auto_acquisition_available ?
+        "ERI đang khởi tạo yêu cầu tự lấy IPA từ App Store." :
+        "Chưa có nguồn IPA phù hợp với ứng dụng này.", "info");
     }
   }
   async function refreshJob() {
