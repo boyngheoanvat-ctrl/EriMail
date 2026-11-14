@@ -80,6 +80,21 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         assert request.json()["progress"] == 0
         assert client.get(base + "/requests/" + job_id).status_code == 401
         assert client.get(base + "/requests/" + job_id,headers=auth).status_code == 200
+        # Retried request must reuse one durable job rather than consuming quota.
+        repeat = client.post(base + "/requests",headers=auth,
+            json={"target":"com.example.football","country":"vn","version":"2.0.0"})
+        assert repeat.status_code == 201, repeat.text
+        assert repeat.json()["job_id"] == job_id and repeat.json()["reused"] is True
+        history = client.get(base + "/requests",headers=auth)
+        assert history.status_code == 200
+        assert history.json()["total"] == 1
+        assert history.json()["items"][0]["state"] == "waiting_for_authorized_file"
+        assert client.get(base + "/requests").status_code == 401
+        assert client.get("/api/v1/admin/decrypt/requests").status_code == 403
+        admin = client.get("/api/v1/admin/decrypt/requests",
+            headers={"X-ERI-Admin-Key":os.environ["ERI_ADMIN_KEY"]})
+        assert admin.status_code == 200 and admin.json()["total"] == 1
+        assert admin.json()["items"][0]["requester"] == "decrypttest"
 
         # Populate two physically stored archives, only one free and authorized.
         UPLOAD_DIR.mkdir(exist_ok=True,parents=True)
@@ -132,6 +147,7 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         assert completed["state"] == "completed"
         assert completed["progress"] == 100
         assert completed["result"]["id"] == free_id
+        assert client.get(base + "/requests",headers=auth).json()["items"][0]["state"] == "completed"
         actual_download = client.get(completed["result"]["download_path"])
         assert actual_download.status_code == 200
         assert actual_download.content == ipa_bytes
@@ -149,6 +165,7 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         assert other.status_code == 201, other.text
         wrong_auth={"Authorization":"Bearer " + other.json()["token"]}
         assert client.get(base + "/requests/" + job_id,headers=wrong_auth).status_code == 404
+        assert client.get(base + "/requests",headers=wrong_auth).json()["items"] == []
 
         # A stale DB record without a physical IPA file never generates a link.
         (UPLOAD_DIR / file_name).unlink()
