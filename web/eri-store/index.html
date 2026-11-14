@@ -13,9 +13,9 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://eri-api-dag8.onrender.com; img-src 'self' data: https://eri-api-dag8.onrender.com https://*.mzstatic.com; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
-<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/shop-theme.css">
-<script defer src="/app.js"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js?v=20261114b"></script>
-<script defer src="/decrypt-store.js?v=20261114b"></script><script defer src="/sign-jobs.js?v=20261114b"></script>
+<link rel="stylesheet" href="/styles.css?v=20261115p1"><link rel="stylesheet" href="/shop-theme.css?v=20261115p1">
+<script defer src="/app.js?v=20261115p1"></script><script defer src="/udid.js?v=20261115p1"></script><script defer src="/ipa-tools.js?v=20261115p1"></script>
+<script defer src="/decrypt-store.js?v=20261115p1"></script><script defer src="/sign-jobs.js?v=20261115p1"></script>
 <title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
 </head>
 <body class="shop-v2">
@@ -221,6 +221,7 @@
   </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>
+    <p class="small" id="eri-sign-ui-version">Tiến độ gửi tệp · ERI STORE 15.11 (bản sửa giao diện iPhone)</p>
     <p>Chọn IPA, chứng chỉ P12, hồ sơ mobileprovision và nhập mật khẩu P12. Tệp ký chỉ cài được trên các thiết bị mà chứng chỉ và hồ sơ của bạn cho phép.</p>
     <form id="ipa-sign-form" enctype="multipart/form-data" autocomplete="off">
       <label class="field">Tệp ứng dụng .ipa
@@ -239,13 +240,13 @@
         <button class="btn primary" type="submit">Ký IPA và cài đặt</button>
       </div>
     </form>
-    <div id="ipa-sign-progress" class="ipa-sign-progress hidden" aria-live="polite">
+    <div id="ipa-sign-progress" class="ipa-sign-progress" aria-live="polite">
       <div class="ipa-sign-progress-heading">
-        <strong id="ipa-sign-progress-label">Đang chuẩn bị tải IPA</strong>
+        <strong id="ipa-sign-progress-label">Chưa bắt đầu gửi IPA</strong>
         <span id="ipa-sign-progress-percent">0%</span>
       </div>
       <progress id="ipa-sign-progress-bar" max="100" value="0" aria-label="Tiến độ IPA máy chủ đã nhận"></progress>
-      <p id="ipa-sign-progress-stage">Thanh % chỉ tính dữ liệu máy chủ xác nhận đã nhận.</p>
+      <p id="ipa-sign-progress-stage">0% — Chọn IPA và bấm Ký. Thanh tiến độ chỉ tăng theo phần dữ liệu máy chủ xác nhận đã nhận; ký số là bước riêng.</p>
     </div>
     <div id="ipa-sign-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
     <p class="small">Mật khẩu và chứng chỉ chỉ được gửi khi bạn bấm ký; máy chủ xử lý tạm thời rồi xóa tệp đầu vào. Không sử dụng chứng chỉ hoặc IPA mà bạn không có quyền sử dụng.</p>

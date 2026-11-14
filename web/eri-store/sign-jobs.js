@@ -155,7 +155,8 @@
         }
         if (job.state === "uploading") {
           showProgress(job.uploaded_bytes, job.size_bytes, "uploading");
-          status("Tệp đã gửi " + fmt(job.uploaded_bytes) + "/" + fmt(job.size_bytes) +
+          const savedPct = (100 * job.uploaded_bytes / Math.max(1, job.size_bytes)).toFixed(1);
+          status("Đã nhận " + savedPct + "% · " + fmt(job.uploaded_bytes) + " / " + fmt(job.size_bytes) +
             ". Chọn lại IPA nếu đã thoát trang để tiếp tục.");
           return;
         }
@@ -179,6 +180,7 @@
       const password = form.elements.namedItem("password")?.value;
       if (!file || !p12 || !profile || !password) throw new Error("Chọn đủ IPA, P12, mobileprovision và mật khẩu.");
       showProgress(0, file.size, "uploading");
+      status("Đang chuẩn bị tải IPA: 0.0% · 0.0 MB / " + fmt(file.size));
       const ready = getSaved();
       let job;
       if (ready && ready.name === file.name && ready.size === file.size) {
@@ -230,11 +232,12 @@
         // Count real acknowledged ranges; final chunk can be shorter than 2 MiB.
         const uploaded = confirmedBytes();
         showProgress(uploaded, file.size, "uploading");
-        status("Đã lưu lên máy chủ " + fmt(uploaded) + " / " + fmt(file.size) +
+        const pct = (100 * uploaded / Math.max(1, file.size)).toFixed(1);
+        status("Đã nhận " + pct + "% · " + fmt(uploaded) + " / " + fmt(file.size) +
           " (phần " + (i+1) + "/" + chunks + "). Có thể tiếp tục nếu mạng ngắt.");
       }
       showProgress(file.size, file.size, "signing");
-      status("Đã tải đủ IPA. Đang gửi chứng chỉ để bắt đầu ký...");
+      status("Đã nhận 100% dữ liệu IPA. Đang gửi chứng chỉ để bắt đầu ký; chữ ký chưa hoàn tất.");
       const args = new FormData();
       args.append("p12",p12);
       args.append("mobileprovision",profile);

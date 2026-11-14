@@ -109,11 +109,12 @@
       uploadedBytes = ev.loaded;
       uploadTotal = total;
       updateLegacyProgress(ev.loaded, total, "uploading");
-      display(result, "Đang gửi file qua HTTPS: " + pretty(ev.loaded) + " / " + pretty(total));
+      const percentage = total > 0 ? (100 * ev.loaded / total).toFixed(1) : "0.0";
+      display(result, "Đang gửi IPA: " + percentage + "% · " + pretty(ev.loaded) + " / " + pretty(total) + " qua HTTPS.");
     };
     xhr.upload.onload = () => {
       updateLegacyProgress(ipa.size, ipa.size, "processing");
-      display(result, "Đã gửi file; máy chủ đang kiểm tra và ký số...");
+      display(result, "100% dữ liệu đã truyền qua HTTPS; chờ máy chủ xác nhận và ký IPA...");
     };
     xhr.onload = () => {
       let response;
