@@ -161,6 +161,21 @@
       parent.append(image);
     } catch {}
   }
+  async function externalStatus(root, item) {
+    const url = safeStoreLink(item.app_store_url);
+    if (!url || item.cached?.download_path) return;
+    const status = card("p", "small", "Đang kiểm tra nguồn IPA ERI bên ngoài...");
+    root.append(status);
+    try {
+      const result = await request("/api/v1/tools/ipa/decrypt/external?" +
+        new URLSearchParams({target:url,country:"auto"}));
+      status.textContent = result.found
+        ? "Nguồn ERI có thông tin IPA, nhưng file và quyền tải chưa được xác minh."
+        : "Nguồn ERI chưa xác nhận có IPA tải được.";
+    } catch (_) {
+      status.textContent = "Chưa thể kiểm tra nguồn IPA bên ngoài.";
+    }
+  }
   function searchResult(item) {
     const root = card("article", "eri-decrypt-card");
     const meta = card("div","eri-dec-app-meta");
@@ -185,6 +200,7 @@
       installActions(root, item.cached);
     } else {
       root.append(card("div", "eri-decrypt-unavailable", "Chưa có IPA"));
+      externalStatus(root, item);
       actions.append(button(item.source_available ? "Xử lý IPA" : "Yêu cầu IPA",
         () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
     }
