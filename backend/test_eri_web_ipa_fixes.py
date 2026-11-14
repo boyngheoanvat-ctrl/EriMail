@@ -40,4 +40,18 @@ assert "eri-dec-f4-import" not in html
 assert not re.search(r'ipa.*download.*apps\.apple\.com', tools, re.I)
 assert 'Link App Store không chứa IPA đã giải mã FairPlay' not in tools
 
+admin_page = (web / "ipa-admin.html").read_text()
+admin_script = (web / "ipa-admin.js").read_text()
+assert 'id="admin-key"' in admin_page
+assert 'id="ipa-file"' in admin_page
+assert 'id="upload-progress"' in admin_page
+assert 'ipa-admin.js?v=20261115p3' in admin_page
+assert 'verify_free_ipa: true' in admin_script
+assert '/fast-parts/' in admin_script
+assert 'crypto.subtle.digest("SHA-256"' in admin_script
+assert 'localStorage.setItem(KEY, JSON.stringify(data))' in admin_script
+assert 'ERI_ADMIN_KEY=' not in admin_script
+import subprocess
+subprocess.run(["node", "--check", str(web / "ipa-admin.js")], check=True)
+
 print("ERI STORE: precise progress, cache-bust, backend vault lookup and IPA request UI OK")
