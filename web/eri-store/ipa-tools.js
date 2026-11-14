@@ -187,19 +187,29 @@
           // Never fabricate a file URL based on an App Store ID.
           let existingIPA = null;
           try {
-            const inventoryReply = await fetch(API + "/api/v1/mods", {
-              cache: "no-store", signal: controller.signal
-            });
+            // /mods is capped at 100 mixed APK/IPA products and can falsely
+            // report "no IPA" even when a valid file exists. Search the ERI IPA
+            // vault by exact Bundle ID first, then retain old-API compatibility.
+            let inventoryReply = await fetch(
+              API + "/api/v1/tools/ipa/decrypt/vault?q=" +
+                encodeURIComponent(bundle) + "&limit=50&offset=0",
+              {cache: "no-store", signal: controller.signal}
+            );
+            const modernVault = inventoryReply.ok;
+            if (!modernVault && inventoryReply.status === 404) {
+              inventoryReply = await fetch(API + "/api/v1/mods", {
+                cache: "no-store", signal: controller.signal
+              });
+            }
             if (inventoryReply.ok) {
               const inventory = await inventoryReply.json();
               const candidates = (Array.isArray(inventory.items) ? inventory.items : [])
-                .filter(item => item.platform === "ipa"
-                  && String(item.bundle_id || "").toLowerCase() === bundle.toLowerCase()
-                  && Number(item.price_vnd) === 0
+                .filter(item => String(item.bundle_id || "").toLowerCase() === bundle.toLowerCase()
+                  && (modernVault || (item.platform === "ipa" && Number(item.price_vnd) === 0))
                   && /^\/api\/v1\/mods\/[1-9][0-9]*\/download$/.test(item.download_path || ""));
               existingIPA = candidates.find(item => item.version === version) || candidates[0] || null;
             }
-          } catch (_) { /* A catalog outage must not hide App Store metadata. */ }
+          } catch (_) { /* Apple metadata still renders when inventory is offline. */ }
 
           if (existingIPA) {
             const download = document.createElement("a");
