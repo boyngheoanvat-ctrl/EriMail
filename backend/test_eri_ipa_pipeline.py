@@ -13,7 +13,7 @@ from unittest.mock import patch
 with tempfile.TemporaryDirectory(prefix="eri-real-ipa-") as root:
     os.environ["ERI_DB_PATH"] = str(Path(root) / "eri.sqlite3")
     os.environ["ERI_UPLOAD_DIR"] = str(Path(root) / "uploads")
-    os.environ["ERI_ADMIN_KEY"] = "eri-test-admin-012345678901234"
+    os.environ["ERI_ADMIN_KEY"] = "eri-test-admin-012345678901234567890123456789"
     os.environ["ERI_IPA_SOURCE_HOSTS"] = "files.eri.example"
 
     from fastapi.testclient import TestClient
