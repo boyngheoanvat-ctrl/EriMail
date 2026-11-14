@@ -375,6 +375,40 @@ def register_ipa_tools(app, require_customer):
             _write_upload(ipa, source, MAX_IPA, ".ipa")
             return _inspect_archive(source)
 
+    @router.post("/api/v1/tools/ipa/nonjb/prepare")
+    def prepare_nonjb(ipa: UploadFile = File(...), customer=Depends(require_customer)):
+        """Validate an existing unencrypted IPA and return a real download.
+
+        Preserve original signatures and bundle layout. This does not decrypt
+        FairPlay, sign the IPA, or guarantee installation on any iOS device.
+        """
+        if not _work_slots.acquire(blocking=False):
+            raise HTTPException(503, "Máy chủ đang xử lý IPA khác. Thử lại sau.")
+        try:
+            with tempfile.TemporaryDirectory(prefix="eri-nonjb-") as root:
+                source = Path(root) / "input.ipa"
+                _write_upload(ipa, source, MAX_IPA, ".ipa")
+                details = _inspect_archive(source)
+                if details["zip_password_protected"]:
+                    raise HTTPException(422, "IPA có mật khẩu ZIP; cần mở khóa ZIP trước.")
+                if details["fairplay_encrypted"] is not False:
+                    raise HTTPException(422, "Không xác minh được IPA không mã hóa FairPlay.")
+                with zipfile.ZipFile(source) as archive:
+                    bad = archive.testzip()
+                    if bad is not None:
+                        raise HTTPException(422, "IPA lỗi CRC trong ZIP.")
+                result = _register_output(source)
+                return {
+                    **result,
+                    "status": "ready",
+                    "app": details["app"],
+                    "fairplay_encrypted": False,
+                    "signed_for_device": False,
+                    "message": "IPA đã kiểm tra và có file tải thật. Không thay đổi chữ ký; cần ký hợp lệ để cài trên iPhone chưa jailbreak.",
+                }
+        finally:
+            _work_slots.release()
+
     @router.post("/api/v1/tools/ipa/decrypt")
     def decrypt_zip(ipa: UploadFile = File(...), password: str = Form(""),
                     customer=Depends(require_customer)):
