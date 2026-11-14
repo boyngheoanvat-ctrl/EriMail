@@ -153,13 +153,62 @@
             "\n" + (data.message || "Link App Store không phải tệp IPA có thể tải về."), "success");
           const actions = document.createElement("div");
           actions.className = "ipa-tool-actions";
-          const unavailable = document.createElement("button");
-          unavailable.type = "button";
-          unavailable.className = "btn outline";
-          unavailable.disabled = true;
-          unavailable.textContent = "Tải IPA (chưa có file)";
-          unavailable.title = "Link App Store không chứa tệp IPA công khai";
-          actions.append(unavailable);
+          // The Apple Lookup API is metadata-only. Cross-check our actual,
+          // authorized FREE inventory before offering a downloadable IPA.
+          // Never fabricate a file URL based on an App Store ID.
+          let existingIPA = null;
+          try {
+            const inventoryReply = await fetch(API + "/api/v1/mods", {
+              cache: "no-store", signal: controller.signal
+            });
+            if (inventoryReply.ok) {
+              const inventory = await inventoryReply.json();
+              const candidates = (Array.isArray(inventory.items) ? inventory.items : [])
+                .filter(item => item.platform === "ipa"
+                  && String(item.bundle_id || "").toLowerCase() === bundle.toLowerCase()
+                  && Number(item.price_vnd) === 0
+                  && /^\\/api\\/v1\\/mods\\/[1-9][0-9]*\\/download$/.test(item.download_path || ""));
+              existingIPA = candidates.find(item => item.version === version) || candidates[0] || null;
+            }
+          } catch (_) { /* A catalog outage must not hide App Store metadata. */ }
+
+          if (existingIPA) {
+            const download = document.createElement("a");
+            download.className = "btn primary";
+            download.href = API + existingIPA.download_path;
+            download.rel = "noopener noreferrer";
+            download.textContent = "Tải IPA từ kho ERI (v" + existingIPA.version + ")";
+            actions.append(download);
+            if (String(existingIPA.version) !== version) {
+              const note = document.createElement("p");
+              note.className = "small";
+              note.textContent = "Kho ERI hiện có bản v" + existingIPA.version
+                + ", khác bản App Store v" + version + ".";
+              appStoreResult.append(note);
+            }
+          } else {
+            const note = document.createElement("p");
+            note.className = "small";
+            note.textContent = "Kho ERI chưa có IPA miễn phí có tệp thật cho Bundle ID này. "
+              + "Bạn có thể yêu cầu bản IPA được phép phân phối trong mục Decrypt IPA.";
+            appStoreResult.append(note);
+          }
+
+          const decryptTab = document.querySelector('[data-kind="decrypt"]');
+          if (decryptTab && $("eri-decrypt-query")) {
+            const browse = document.createElement("button");
+            browse.type = "button";
+            browse.className = "btn outline";
+            browse.textContent = "Xem kho IPA / chọn phiên bản";
+            browse.addEventListener("click", () => {
+              const query = $("eri-decrypt-query");
+              query.value = link;
+              query.dispatchEvent(new Event("input", {bubbles: true}));
+              decryptTab.click();
+              $("eri-decrypt-search-form")?.requestSubmit();
+            });
+            actions.append(browse);
+          }
           if (typeof data.app_store_url === "string") {
             try {
               const destination = new URL(data.app_store_url);
