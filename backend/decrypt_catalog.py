@@ -5,6 +5,7 @@ The public library exposes ONLY explicitly authorized, free IPA files already
 present in this installation. No fake cryptid=0 claims or fake progress.
 """
 import json
+from concurrent.futures import ThreadPoolExecutor
 import re
 import secrets
 import sqlite3
@@ -130,7 +131,7 @@ def _search_apps(target: str, region: str, limit: int = 15):
     results = []
     seen = set()
     last_error = None
-    for country in countries:
+    def query_country(country):
         if kind == "id":
             endpoint, params = "lookup", {"id": value, "country": country, "entity": "software"}
         elif kind == "bundle":
@@ -139,11 +140,29 @@ def _search_apps(target: str, region: str, limit: int = 15):
             endpoint, params = "search", {"term": value, "country": country,
                                            "media": "software", "entity": "software",
                                            "limit": min(limit, 25)}
-        try:
-            source = _apple_json(endpoint, params)
-        except HTTPException as exc:
-            last_error = exc
-            continue
+        return _apple_json(endpoint, params)
+
+    # Apple Search API requests are independent by region. Resolve them
+    # concurrently for the auto setting to avoid three serial mobile timeouts.
+    if len(countries) > 1 and kind == "term":
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {country: pool.submit(query_country, country) for country in countries}
+            replies = []
+            for country in countries:
+                try:
+                    replies.append((country, futures[country].result()))
+                except HTTPException as exc:
+                    last_error = exc
+    else:
+        replies = []
+        for country in countries:
+            try:
+                replies.append((country, query_country(country)))
+                if kind in ("id", "bundle") and replies[-1][1].get("results"):
+                    break
+            except HTTPException as exc:
+                last_error = exc
+    for country, source in replies:
         for entry in source["results"]:
             if not isinstance(entry, dict):
                 continue
@@ -156,8 +175,6 @@ def _search_apps(target: str, region: str, limit: int = 15):
             results.append(normalized)
             if len(results) >= limit:
                 break
-        if results and kind in ("id", "bundle"):
-            break
         if len(results) >= limit:
             break
     if not results and last_error:
