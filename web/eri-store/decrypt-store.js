@@ -186,7 +186,7 @@
           const parsed = new URL(external.download_url);
           if (parsed.protocol === "https:" &&
               parsed.hostname === "160-191-242-70.sslip.io" &&
-              /^\\/dl_dec\\/[A-Za-z0-9_-]{8,128}\\/[0-9]{8,15}\\/[A-Za-z0-9._%-]+\\.ipa$/i.test(parsed.pathname)) {
+              parsed.pathname.startsWith("/dl_dec/") && parsed.pathname.toLowerCase().endsWith(".ipa")) {
             status.textContent = "F4TEAM có IPA v" + (external.version || item.version || "—") +
               " · Nguồn ngoài, ERI chưa kiểm định nội dung file.";
             root.append(link("Tải IPA từ F4TEAM" +
