@@ -37,7 +37,7 @@ def feed_configured():
     return bool(os.getenv("ERI_IPA_SOURCE_MANIFEST_URL", "").strip())
 
 
-def sync_source_feed(connection, force=False):
+def sync_source_feed(connection, upload_dir=None, force=False):
     """Discover ERI-owned sources over allowlisted HTTPS. Never a decrypt API.
 
     Only metadata with explicit distribution authorization is trusted.
@@ -74,7 +74,9 @@ def sync_source_feed(connection, force=False):
                     version=source["version"], url=source["url"], sha256=source["sha256"]
                 )
                 registered += 1
-            except (KeyError, TypeError, ValueError):
+                if upload_dir is not None:
+                    schedule_matching(connection, upload_dir, source["bundle_id"], source["version"])
+            except (AttributeError, KeyError, TypeError, ValueError):
                 continue
         return {"configured": True, "registered": registered}
 
