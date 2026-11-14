@@ -1,0 +1,42 @@
+name: Verify ERI Authorized IPA Worker
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'web/eri-store/decrypt-store.js'
+      - '.github/workflows/eri-verified-worker.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'web/eri-store/decrypt-store.js'
+      - '.github/workflows/eri-verified-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt httpx
+      - name: Syntax check
+        run: |
+          python -m py_compile backend/ipa_verified_worker.py backend/decrypt_catalog.py backend/app.py
+          node --check web/eri-store/decrypt-store.js
+          node --check web/eri-store/ipa-tools.js
+      - name: Existing Decrypt API regression tests
+        working-directory: backend
+        run: python test_decrypt_catalog.py
+      - name: Authorized worker and Mach-O verification tests
+        working-directory: backend
+        run: python test_ipa_verified_worker.py
