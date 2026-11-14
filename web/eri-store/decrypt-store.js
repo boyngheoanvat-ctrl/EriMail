@@ -218,14 +218,17 @@
     const matches = rows.filter(x => id ? String(x.i) === "id"+id :
       [x.n,x.p,x.i,...(Array.isArray(x.t)?x.t:[])].some(v=>fold(v).includes(needle)))
       .slice(0,15);
+    const vault = await legacyVault("", "newest", 0, 100).catch(() => ({items:[]}));
+    const available = Array.isArray(vault.items) ? vault.items : [];
     return {items:matches.map(x=>({
       app_id:Number(String(x.i||"").replace(/^id/,""))||0,
       name:x.n||"Ứng dụng",developer:x.p||"",version:x.v||"",
       country:country==="auto"?"VN":country.toUpperCase(),
       app_store_url:"https://apps.apple.com/app/"+x.i,
       genre:Array.isArray(x.t)?(x.t.find(t=>/games/i.test(t))||x.t[0]||"App Store"):"App Store",
-      cached:null,ipa_available:false
-    })),total:matches.length,source:"Public catalog metadata — IPA not verified"};
+      cached:available.find(item => String(item.name || "").trim().toLowerCase() === String(x.n || "").trim().toLowerCase() && String(item.version || "") === String(x.v || "")) || null,
+      ipa_available:available.some(item => String(item.name || "").trim().toLowerCase() === String(x.n || "").trim().toLowerCase() && String(item.version || "") === String(x.v || ""))
+    })),total:matches.length,source:"Public catalog metadata + verified ERI vault files"};
   }
 
   async function search(q, country) {
