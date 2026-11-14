@@ -167,7 +167,7 @@
                 .filter(item => item.platform === "ipa"
                   && String(item.bundle_id || "").toLowerCase() === bundle.toLowerCase()
                   && Number(item.price_vnd) === 0
-                  && /^\\/api\\/v1\\/mods\\/[1-9][0-9]*\\/download$/.test(item.download_path || ""));
+                  && /^\/api\/v1\/mods\/[1-9][0-9]*\/download$/.test(item.download_path || ""));
               existingIPA = candidates.find(item => item.version === version) || candidates[0] || null;
             }
           } catch (_) { /* A catalog outage must not hide App Store metadata. */ }
