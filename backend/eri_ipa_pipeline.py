@@ -30,7 +30,7 @@ _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="eri-ipa")
 _active = set()
 _guard = threading.Lock()
 _feed_lock = threading.Lock()
-_feed_last_check = 0.0
+_feed_last_check = None
 FEED_MAX_BYTES = 1024 * 1024
 FEED_MIN_SECONDS = 60
 
@@ -68,9 +68,9 @@ def sync_source_feed(connection, upload_dir=None, force=False):
         return {"configured": False, "registered": 0}
     with _feed_lock:
         now = time.monotonic()
-        if not force and now - _feed_last_check < FEED_MIN_SECONDS:
+        if (not force and _feed_last_check is not None
+                and now - _feed_last_check < FEED_MIN_SECONDS):
             return {"configured": True, "cached": True, "registered": 0}
-        _feed_last_check = now
         validate_url(url)
         opener = urllib.request.build_opener(_SafeRedirect())
         request = urllib.request.Request(
@@ -103,6 +103,8 @@ def sync_source_feed(connection, upload_dir=None, force=False):
                 logging.warning("ERI source feed skipped item: %s (%s)",
                                 type(exc).__name__, str(exc)[:120])
                 continue
+        # A failed first fetch must not poison the cache for 60 seconds.
+        _feed_last_check = time.monotonic()
         return {"configured": True, "registered": registered}
 
 
