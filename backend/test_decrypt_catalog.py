@@ -76,8 +76,8 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
                   "country":"vn","version":"2.0.0"})
         assert request.status_code == 201, request.text
         job_id = request.json()["job_id"]
-        assert request.json()["state"] == "waiting_for_authorized_file"
-        assert request.json()["progress"] == 0
+        assert request.json()["state"] == "waiting_for_source"
+        assert request.json()["progress"] is None
         assert client.get(base + "/requests/" + job_id).status_code == 401
         assert client.get(base + "/requests/" + job_id,headers=auth).status_code == 200
         # Retried request must reuse one durable job rather than consuming quota.
@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         history = client.get(base + "/requests",headers=auth)
         assert history.status_code == 200
         assert history.json()["total"] == 1
-        assert history.json()["items"][0]["state"] == "waiting_for_authorized_file"
+        assert history.json()["items"][0]["state"] == "waiting_for_source"
         assert client.get(base + "/requests").status_code == 401
         assert client.get("/api/v1/admin/decrypt/requests").status_code == 403
         admin = client.get("/api/v1/admin/decrypt/requests",
@@ -171,6 +171,6 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         (UPLOAD_DIR / file_name).unlink()
         assert client.get(base + "/vault").json()["total"] == 0
         stale = client.get(base + "/requests/" + job_id,headers=auth).json()
-        assert stale["progress"] == 0 and stale["result"] is None
+        assert stale["progress"] is None and stale["result"] is None
 
     print("Apple regions/search/versions, real free vault, durable jobs and isolation: OK")
