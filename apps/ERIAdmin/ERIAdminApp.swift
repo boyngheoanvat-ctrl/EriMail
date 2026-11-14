@@ -514,6 +514,13 @@ private struct AdminHome: View {
                         AdminUploadView(kind: .apk).environmentObject(session)
                     } label: { Label("Nhập APK · FREE / BÁN", systemImage: "square.and.arrow.up") }
                 }
+                Section("ERI IPA Studio · Giải mã & ký IPA") {
+                    NavigationLink {
+                        AdminIPAStudioView().environmentObject(session)
+                    } label: {
+                        Label("Quản lý yêu cầu IPA và tác vụ ký", systemImage: "cpu")
+                    }
+                }
                 Section("Đăng sản phẩm — giao sau khi khách mua") {
                     NavigationLink {
                         ManualListingView(kind: .certificate).environmentObject(session)
@@ -584,6 +591,174 @@ private struct AdminHome: View {
             }
             .sheet(isPresented: $showLogin) { LoginView().environmentObject(session) }
             .onAppear { if !session.authenticated { showLogin = true } }
+        }
+    }
+}
+
+// ERI IPA Studio is a native administrative console. It does not decrypt
+// FairPlay, hold Apple passwords or send signing private keys to GitHub.
+private struct ERIIPAFulfillment {
+    let name: String
+    let bundleID: String
+    let version: String
+}
+
+private struct ERIIPARequest: Decodable, Identifiable {
+    let job_id: String
+    let name: String
+    let bundle_id: String
+    let version: String
+    let country: String
+    let state: String
+    let progress: Int
+    let message: String
+    let requester: String
+    var id: String { job_id }
+}
+
+private struct ERISigningJob: Decodable, Identifiable {
+    let job_id: String
+    let filename: String
+    let requester: String
+    let state: String
+    let size_bytes: Int
+    let created_at: Double
+    var id: String { job_id }
+}
+
+private struct ERISigningOverview: Decodable {
+    let items: [ERISigningJob]
+    let total: Int
+    let signing_available: Bool
+}
+
+private struct AdminIPAStudioView: View {
+    @EnvironmentObject private var session: AdminSession
+    @State private var requests: [ERIIPARequest] = []
+    @State private var signingJobs: [ERISigningJob] = []
+    @State private var signingAvailable: Bool?
+    @State private var refreshing = false
+    @State private var errorText = ""
+    private let actionsURL = URL(string: "https://github.com/boyngheoanvat-ctrl/EriMail/actions/workflows/eri-ipatool-sign.yml")!
+
+    var body: some View {
+        List {
+            Section("Trạng thái ERI") {
+                LabeledContent("Đã gửi yêu cầu IPA", value: String(requests.count))
+                LabeledContent("Đang chờ IPA", value: String(requests.filter {
+                    $0.state != "completed"
+                }.count))
+                LabeledContent("Tác vụ ký gần đây", value: String(signingJobs.count))
+                if let available = signingAvailable {
+                    Label(available ? "Bộ ký IPA trên ERI API có sẵn" :
+                          "Bộ ký IPA trên ERI API chưa sẵn sàng",
+                          systemImage: available ? "checkmark.circle.fill" : "exclamationmark.triangle")
+                        .foregroundStyle(available ? .green : .orange)
+                }
+                if !errorText.isEmpty {
+                    Text(errorText).font(.footnote).foregroundStyle(.red)
+                }
+                Button(refreshing ? "Đang đồng bộ..." : "Làm mới trạng thái") {
+                    Task { await reload() }
+                }
+                .disabled(refreshing)
+            }
+
+            Section("Khách yêu cầu IPA") {
+                if requests.isEmpty {
+                    Text("Chưa có yêu cầu, hoặc máy chủ chưa trả danh sách.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach(requests) { item in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(item.name).font(.headline)
+                            Spacer()
+                            Text(item.state == "completed" ? "Đã có IPA" : "Chờ IPA")
+                                .font(.caption).foregroundStyle(item.state == "completed" ? .green : .orange)
+                        }
+                        Text(item.bundle_id + " · v" + item.version + " · " +
+                             item.country.uppercased())
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text("Người gửi: " + item.requester)
+                            .font(.caption).foregroundStyle(.secondary)
+                        ProgressView(value: Double(min(100, max(0, item.progress))), total: 100)
+                        Text(item.message).font(.footnote).foregroundStyle(.secondary)
+                        if item.state != "completed" {
+                            NavigationLink {
+                                AdminUploadView(kind: .ipa, preset: ERIIPAFulfillment(
+                                    name: item.name, bundleID: item.bundle_id,
+                                    version: item.version)).environmentObject(session)
+                            } label: {
+                                Label("Nhập IPA hợp lệ cho yêu cầu này", systemImage: "square.and.arrow.up")
+                                    .font(.subheadline)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+
+            Section("Tác vụ ký IPA trực tiếp trên ERI STORE") {
+                if signingJobs.isEmpty {
+                    Text("Chưa có tác vụ ký nào được ghi nhận.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach(signingJobs) { job in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(job.filename).font(.headline).lineLimit(2)
+                            Spacer()
+                            Text(job.state).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(job.requester + " · " +
+                             ByteCountFormatter.string(fromByteCount: Int64(job.size_bytes),
+                                                       countStyle: .file))
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Text("Mã tác vụ: " + job.job_id)
+                            .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    .padding(.vertical, 5)
+                }
+                Text("Chỉ hiển thị trạng thái; chứng chỉ P12, mật khẩu và đường dẫn ký riêng tư không được đưa vào trang quản trị.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+
+            Section("ipatool + GitHub Actions") {
+                Link(destination: actionsURL) {
+                    Label("Mở ERI IPA Studio trên GitHub Actions", systemImage: "arrow.up.right.square")
+                }
+                Text("Chế độ App Store dùng ipatool để tải IPA; nó không tự giải mã FairPlay. Ký bằng GitHub Actions chỉ thành công với IPA đã không còn mã hóa và chứng chỉ Apple phù hợp. Workflow chạy thủ công, không lưu token GitHub trong ERI ADMIN.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("ERI IPA Studio")
+        .refreshable { await reload() }
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        guard !refreshing else { return }
+        refreshing = true
+        errorText = ""
+        defer { refreshing = false }
+
+        do {
+            let data = try await session.send("/api/v1/admin/decrypt/requests?limit=100")
+            requests = try JSONDecoder().decode(Envelope<ERIIPARequest>.self, from: data).items
+        } catch {
+            errorText = "Không lấy được yêu cầu IPA: " + error.localizedDescription +
+                ". Cần triển khai backend ERI mới trước khi sử dụng."
+        }
+        do {
+            let data = try await session.send("/api/v1/admin/ipa-studio/signing-jobs?limit=100")
+            let info = try JSONDecoder().decode(ERISigningOverview.self, from: data)
+            signingJobs = info.items
+            signingAvailable = info.signing_available
+        } catch {
+            errorText += (errorText.isEmpty ? "" : "\n") +
+                "Không lấy được tác vụ ký: " + error.localizedDescription
         }
     }
 }
@@ -1327,6 +1502,12 @@ private struct ERIDocumentPicker: UIViewControllerRepresentable {
 }
 
 private struct AdminUploadView: View {
+    let preset: ERIIPAFulfillment?
+    init(kind: UploadKind, preset: ERIIPAFulfillment? = nil) {
+        self.kind = kind
+        self.preset = preset
+    }
+
     @EnvironmentObject private var session: AdminSession
     @ObservedObject private var backgroundUploader = ERIBackgroundUploader.shared
     let kind: UploadKind
@@ -1343,6 +1524,7 @@ private struct AdminUploadView: View {
     @State private var status = ""
     @State private var progress = 0.0
     @State private var uploadPhase = ""
+    @State private var didApplyPreset = false
 
     var body: some View {
         Form {
@@ -1426,7 +1608,18 @@ private struct AdminUploadView: View {
             }
         }
         .navigationTitle(kind.title)
-        .onAppear { restoreDraft() }
+        .onAppear {
+            restoreDraft()
+            if !didApplyPreset, let request = preset, kind == .ipa {
+                didApplyPreset = true
+                name = request.name
+                description = "IPA theo yêu cầu: " + request.bundleID + " · v" + request.version
+                modIsFree = true
+                authorized = false
+                status = "Chọn IPA sạch được phép phân phối. Bundle ID và phiên bản trong file phải đúng: " +
+                         request.bundleID + " · v" + request.version
+            }
+        }
         .onChange(of: name) { _ in saveDraft() }
         .onChange(of: description) { _ in saveDraft() }
         .onChange(of: price) { _ in saveDraft() }
