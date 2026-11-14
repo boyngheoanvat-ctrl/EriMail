@@ -401,6 +401,7 @@
     const bar = $("eri-decrypt-job-progress");
     if (bar) {
       bar.hidden = pct === null;
+      bar.style.display = pct === null ? "none" : "";
       bar.value = pct === null ? 0 : pct;
     }
     const stateName = ready ? "Hoàn tất" : processing ? "Đang xử lý" :
