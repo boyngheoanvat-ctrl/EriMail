@@ -109,7 +109,7 @@ def schedule(connection, upload_dir, job_id):
     with connection() as db:
         row = db.execute(
             "SELECT r.id,r.state FROM ipa_decrypt_requests r "
-            "JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id "
+            "JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id COLLATE NOCASE "
             "AND s.version=r.version WHERE r.id=?", (job_id,)
         ).fetchone()
     if row is None or row["state"] == "completed":
@@ -130,7 +130,7 @@ def schedule(connection, upload_dir, job_id):
 def schedule_matching(connection, upload_dir, bundle_id, version):
     with connection() as db:
         rows = db.execute(
-            "SELECT id FROM ipa_decrypt_requests WHERE bundle_id=? AND version=?"
+            "SELECT id FROM ipa_decrypt_requests WHERE bundle_id=? COLLATE NOCASE AND version=?"
             " AND state!='completed' LIMIT 100",
             (bundle_id, version)
         ).fetchall()
@@ -182,7 +182,7 @@ def _run(connection, upload_dir, job_id):
             row = db.execute(
                 "SELECT r.id,r.app_id,r.country,r.bundle_id,r.version,"
                 "s.name,s.url,s.sha256 FROM ipa_decrypt_requests r "
-                "JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id "
+                "JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id COLLATE NOCASE "
                 "AND s.version=r.version WHERE r.id=?", (job_id,)
             ).fetchone()
         if row is None:
@@ -213,7 +213,7 @@ def _run(connection, upload_dir, job_id):
                 existing = db.execute(
                     "SELECT i.id FROM ipa i JOIN private_product_uploads p "
                     "ON p.product_id=i.id AND p.kind='ipa' "
-                    "WHERE i.bundle_id=? AND i.version=? AND i.authorized=1 "
+                    "WHERE i.bundle_id=? COLLATE NOCASE AND i.version=? AND i.authorized=1 "
                     "AND i.price_vnd=0 LIMIT 1",
                     (row["bundle_id"], row["version"])
                 ).fetchone()
