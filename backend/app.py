@@ -645,6 +645,10 @@ app.include_router(signing_router)
 from ipa_tools import register_ipa_tools
 register_ipa_tools(app, require_customer)
 
+# Admin-only oversight of ERI STORE signing uploads, without secret material.
+from admin_ipa_studio import register_admin_ipa_studio
+register_admin_ipa_studio(app, connection, require_admin)
+
 
 # Private macOS signing service. Deploy this API on a macOS host with Apple codesign.
 # Never expose this route without a strong per-client token and HTTPS termination.
