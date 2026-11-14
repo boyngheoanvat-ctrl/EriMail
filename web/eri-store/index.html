@@ -128,7 +128,7 @@
      </div>
      <div class="eri-dec-hero">
        <span class="eri-dec-eyebrow">APP STORE DISCOVERY · IPA CLOUD VAULT</span>
-    <h3>Giải Mã IPA App Store &amp; Chọn Phiên Bản</h3>
+    <h3>Tra Cứu IPA App Store &amp; Chọn Phiên Bản</h3>
     <p>Tra cứu ứng dụng từ Apple theo tên, Bundle ID hoặc link. Tìm IPA trong kho, chọn phiên bản, tải hoặc mở bằng ứng dụng cài đặt tương thích.</p>
     <form id="eri-decrypt-search-form" autocomplete="on">
       <div class="eri-decrypt-search-row">
@@ -155,26 +155,9 @@
       <div class="ipa-tool-actions eri-decrypt-buttons">
         <button class="btn primary" type="submit" id="eri-decrypt-search-button">⌕ Tìm App Store</button>
         <button class="btn outline" type="button" id="eri-decrypt-direct-version">◷ Chọn Ver</button>
-        <button class="btn outline" type="button" id="eri-decrypt-direct-request">♢ Giải Mã IPA</button>
+        <button class="btn outline" type="button" id="eri-decrypt-direct-request">♢ Gửi yêu cầu IPA</button>
         <button class="btn outline" type="button" id="eri-decrypt-open-vault">Kho IPA có sẵn</button>
       </div>
-      <div class="eri-decrypt-external" aria-label="Kho IPA bên ngoài">
-        <p class="eri-decrypt-external-title">Nguồn IPA ngoài ERI</p>
-        <div class="eri-decrypt-external-actions">
-          <a id="eri-decrypt-open-f4" class="btn outline" href="https://decrypt.160-191-242-70.sslip.io/" target="_blank" rel="noopener noreferrer">Mở F4TEAM</a>
-          <a id="eri-decrypt-open-public" class="btn outline" href="https://decrypt.stream/" target="_blank" rel="noopener noreferrer">Kho IPA công khai khác</a>
-          <button id="eri-decrypt-copy-query" class="btn outline" type="button">Sao chép tên / link</button>
-        </div>
-        <p class="small">Hai website này hoạt động độc lập với ERI; tải và xử lý trên hệ thống của họ, không chuyển tài khoản, chứng chỉ hoặc mật khẩu của bạn. F4TEAM có thể thay đổi địa chỉ và yêu cầu đăng nhập riêng.</p>
-      </div>
-      <details class="eri-dec-f4-import">
-        <summary>Đã có kết quả F4? Lấy link IPA về ERI</summary>
-        <p class="small">Dán JSON phản hồi hoàn tất hoặc link IPA từ F4TEAM. ERI chỉ đọc dữ liệu trên iPhone, không gửi JSON, cookie hay CSRF của F4 lên máy chủ.</p>
-        <label class="field" for="eri-dec-f4-input">Kết quả F4 hoặc đường dẫn .ipa</label>
-        <textarea id="eri-dec-f4-input" rows="3" maxlength="35000" spellcheck="false" placeholder='Dán JSON có "dl_url" hoặc https://160-191-242-70.sslip.io/dl_dec/...ipa'></textarea>
-        <button class="btn primary" type="button" id="eri-dec-f4-import-button">Hiển thị IPA từ F4</button>
-        <div id="eri-dec-f4-import-result" role="status" aria-live="polite"></div>
-      </details>
       <div class="eri-decrypt-preset" aria-label="Tìm kiếm nhanh">
         <span>Phổ biến:</span>
         <button type="button" data-eri-decrypt-preset="Liên Quân Mobile">Liên Quân</button>
@@ -186,7 +169,7 @@
       </div>
     </form>
     <div id="eri-decrypt-notice" class="ipa-tool-result" role="status" aria-live="polite"></div>
-      <p class="eri-dec-disclaimer">Link App Store không chứa IPA đã giải mã. Nút “Giải Mã IPA” gửi yêu cầu có lưu trạng thái, không phải một công cụ tự giải mã FairPlay; file chỉ tải được khi thực sự có trong kho ERI.</p>
+      <p class="eri-dec-disclaimer">Link App Store chỉ cung cấp thông tin ứng dụng. Yêu cầu IPA được lưu trong hệ thống ERI; chỉ xuất nút tải khi IPA thực sự có trong kho và được phép phân phối. Việc ký IPA trực tiếp nằm ở tab “Ký IPA trực tiếp”.</p>
      </div>
     <section id="eri-decrypt-result-section" class="eri-decrypt-section hidden" aria-label="Kết quả App Store">
       <div class="eri-decrypt-heading"><h4>Kết quả tìm kiếm App Store</h4><button type="button" class="btn outline eri-dec-small-button" id="eri-decrypt-results-close">× Đóng</button></div>
