@@ -236,12 +236,22 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
     router = APIRouter()
     setup_pipeline(connection)
 
+    def source_exists(bundle_id: str, version: str) -> bool:
+        if not bundle_id or not version:
+            return False
+        with connection() as db:
+            return db.execute(
+                "SELECT 1 FROM ipa_decrypt_sources WHERE bundle_id=? COLLATE NOCASE "
+                "AND version=? LIMIT 1", (bundle_id, version)
+            ).fetchone() is not None
+
     def decorate_with_vault(items):
         free = _all_free_ipa(connection, upload_dir, mod_file)
         for item in items:
             match = _match_vault(free, item["bundle_id"], item["version"])
             item["cached"] = match
             item["ipa_available"] = match is not None
+            item["source_available"] = source_exists(item["bundle_id"], item["version"])
         return items
 
     @router.get("/api/v1/tools/ipa/decrypt/search")
@@ -298,7 +308,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             if x["version"] not in seen:
                 seen.add(x["version"])
                 versions_list.append({"version": x["version"], "cached": x,
-                                      "source": "ERI authorized library"})
+                                      "source": "ERI authorized library",
+                                      "source_available": True})
         if app["version"] not in seen:
             versions_list.insert(0, {"version": app["version"], "cached": None,
                                      "source": "Apple current version metadata"})
