@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://eri-api-dag8.onrender.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests">
+<title>ERI · Quản lý IPA</title>
+<style>
+:root{color-scheme:dark;--bg:#090d1b;--panel:#141b2e;--line:#303a58;--primary:#766bff;--text:#f2f4ff;--muted:#aab8d0;--ok:#3fe0ac}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at top left,#1e194e,#090d1b 58%);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--text);padding:18px 16px 70px}
+main{max-width:750px;margin:auto}header{padding:12px 1px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+h1{font-size:22px;margin:0;letter-spacing:-.03em}h2{font-size:19px;margin:0 0 16px;letter-spacing:-.02em}
+.brand{font-size:12px;letter-spacing:.14em;color:#b3aaff;font-weight:750}a{color:#bcb6ff;text-decoration:none}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:20px;margin:0 0 16px;box-shadow:0 10px 30px #0002}
+label{display:block;font-size:14px;font-weight:650;margin:16px 0 5px}
+input{display:block;width:100%;background:#0d1426;border:1px solid #3a4762;color:var(--text);font:inherit;padding:13px;border-radius:12px;min-height:48px}
+input[type=file]{font-size:13px}input:focus{outline:2px solid #8e8aff;outline-offset:1px}
+.inline-check{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:500;line-height:1.45;margin:17px 0}
+.inline-check input{width:19px;height:19px;min-height:19px;flex:none;accent-color:var(--primary)}
+button{border:1px solid #4c5678;background:#1d2741;color:#f5f5ff;border-radius:13px;padding:13px 16px;font:inherit;font-weight:700;min-height:48px;cursor:pointer}
+button.primary{border:0;background:linear-gradient(110deg,#6554f4,#317df1)}
+button:disabled{opacity:.55;cursor:wait}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}.actions button{flex:1}
+.status{white-space:pre-wrap;min-height:22px;color:var(--muted);font-size:14px;margin-top:15px;overflow-wrap:anywhere}
+.status[data-kind=error]{color:#ffb6b6}.status[data-kind=success]{color:var(--ok)}
+progress{width:100%;height:14px;accent-color:#7065ff;border-radius:15px}
+small{color:var(--muted);font-size:12px}
+hr{border:0;border-top:1px solid var(--line);margin:16px 0}
+.item{border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:10px;word-break:break-word}
+.item strong{display:block}.item small{display:block;margin-top:3px}
+#upload-progress-section[hidden]{display:none}
+</style>
+<script defer src="/ipa-admin.js?v=20261115p3"></script>
+</head>
+<body>
+<main>
+<header><div><div class="brand">BY ERI NGUYỄN</div><h1>ERI IPA ADMIN</h1></div><a href="/">Cửa hàng</a></header>
+<section class="panel">
+<h2>Xác thực quản trị</h2>
+<label for="admin-key">ERI_ADMIN_KEY</label>
+<input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Nhập khóa quản trị">
+<small>Khóa chỉ giữ trong trang hiện tại, không lưu vào thiết bị.</small>
+</section>
+<section class="panel">
+<h2>Đưa IPA vào kho ERI</h2>
+<label for="ipa-file">Chọn tệp IPA</label>
+<input id="ipa-file" type="file" accept=".ipa,application/octet-stream">
+<label for="ipa-name">Tên hiển thị</label>
+<input id="ipa-name" maxlength="160" placeholder="VD: ERI App">
+<label class="inline-check"><input id="ipa-authorized" type="checkbox"> Tôi có quyền phân phối tệp IPA này.</label>
+<div class="actions"><button id="upload-button" class="primary" type="button">Tải lên và xác minh</button></div>
+<div id="upload-progress-section" hidden>
+<label for="upload-progress">Tiến độ máy chủ đã nhận <span id="upload-pct">0%</span></label>
+<progress id="upload-progress" value="0" max="100"></progress>
+</div>
+<div id="upload-status" class="status" role="status" aria-live="polite"></div>
+<div id="uploaded-link"></div>
+</section>
+<section class="panel">
+<h2>Nhập IPA từ nguồn HTTPS</h2>
+<label for="source-name">Tên ứng dụng</label><input id="source-name" maxlength="160" placeholder="Tên ứng dụng">
+<label for="source-bundle">Bundle ID</label><input id="source-bundle" maxlength="255" placeholder="com.example.app" autocapitalize="none">
+<label for="source-version">Phiên bản</label><input id="source-version" maxlength="60" placeholder="1.0">
+<label for="source-url">Link IPA</label><input id="source-url" type="url" autocomplete="off" placeholder="https://files.example.org/app.ipa">
+<label for="source-sha">SHA-256</label><input id="source-sha" maxlength="64" placeholder="64 ký tự hex" autocapitalize="none">
+<label class="inline-check"><input id="source-authorized" type="checkbox"> Tôi xác nhận có quyền phân phối tệp tại nguồn này.</label>
+<div class="actions"><button id="source-button" type="button">Đăng ký nguồn</button></div>
+<div id="source-status" class="status" aria-live="polite"></div>
+</section>
+<section class="panel">
+<div class="actions" style="align-items:center;margin-top:0"><h2 style="margin:0;flex:1">Yêu cầu IPA</h2><button id="refresh-button" type="button">Làm mới</button></div>
+<div id="requests-status" class="status" aria-live="polite"></div>
+<div id="requests-list"></div>
+</section>
+</main>
+</body>
+</html>
