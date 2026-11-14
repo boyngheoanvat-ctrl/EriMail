@@ -4,7 +4,7 @@
 const VERSION="eri-store-v27";
 const STATIC=["/","/index.html","/styles.css","/shop-theme.css","/app.js","/udid.js","/ipa-tools.js","/decrypt-store.js","/sign-jobs.js","/icon.svg","/manifest.webmanifest"];
 const DOWNLOAD_PREFIX="/_eri_download/";
-const API="https://eri-api-dag8.onrender.com";
+const API="https://eri-ipa-preview-api.onrender.com";
 const MAX_PREPARE_AGE_MS=10*60*1000;
 const grants=new Map();
 function b64url(bytes){
