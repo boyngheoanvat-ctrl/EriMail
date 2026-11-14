@@ -167,24 +167,20 @@
     const status = card("p", "small", "Đang kiểm tra nguồn IPA ERI bên ngoài...");
     root.append(status);
     try {
-      const result = await request("/api/v1/tools/ipa/decrypt/external?" +
-        new URLSearchParams({target:url,country:"auto"}));
       if (item.bundle_id) {
         try {
           const official = await request("/api/v1/tools/ipa/decrypt/official?" +
             new URLSearchParams({bundle_id:item.bundle_id}));
-          if (official.available && official.download_url.startsWith("https://github.com/")) {
-            status.textContent = "Có IPA từ nhà phát triển · v" + (official.version || "—");
-            root.append(link("Tải IPA từ nhà phát triển", official.download_url, true));
+          if (official.available && /^https:\/\/github\.com\//.test(official.download_url || "")) {
+            status.textContent = "Có IPA công khai từ nhà phát triển · " + (official.version || "");
+            root.append(link("Tải IPA chính chủ", official.download_url, true));
             return;
           }
         } catch (_) {}
       }
-      status.textContent = result.found
-        ? "Nguồn ERI có thông tin IPA, nhưng file và quyền tải chưa được xác minh."
-        : "Nguồn ERI chưa xác nhận có IPA tải được.";
+      status.textContent = "Chưa có IPA công khai chính chủ được xác minh cho ứng dụng này.";
     } catch (_) {
-      status.textContent = "Chưa thể kiểm tra nguồn IPA bên ngoài.";
+      status.textContent = "Không thể kiểm tra nguồn IPA lúc này.";
     }
   }
   function searchResult(item) {
