@@ -13,9 +13,9 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://eri-api-dag8.onrender.com; img-src 'self' data: https://eri-api-dag8.onrender.com https://*.mzstatic.com; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
-<link rel="stylesheet" href="/styles.css?v=20261115p1"><link rel="stylesheet" href="/shop-theme.css?v=20261115p1">
-<script defer src="/app.js?v=20261115p1"></script><script defer src="/udid.js?v=20261115p1"></script><script defer src="/ipa-tools.js?v=20261115p1"></script>
-<script defer src="/decrypt-store.js?v=20261115p1"></script><script defer src="/sign-jobs.js?v=20261115p1"></script>
+<link rel="stylesheet" href="/styles.css?v=20261115p2"><link rel="stylesheet" href="/shop-theme.css?v=20261115p2">
+<script defer src="/app.js?v=20261115p2"></script><script defer src="/udid.js?v=20261115p2"></script><script defer src="/ipa-tools.js?v=20261115p2"></script>
+<script defer src="/decrypt-store.js?v=20261115p2"></script><script defer src="/sign-jobs.js?v=20261115p2"></script>
 <title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
 </head>
 <body class="shop-v2">
@@ -128,8 +128,7 @@
      </div>
      <div class="eri-dec-hero">
        <span class="eri-dec-eyebrow">APP STORE DISCOVERY · IPA CLOUD VAULT</span>
-    <h3>Giải Mã IPA App Store &amp; Chọn Phiên Bản</h3>
-    <p>Tra cứu ứng dụng từ Apple theo tên, Bundle ID hoặc link. Tìm IPA trong kho, chọn phiên bản, tải hoặc mở bằng ứng dụng cài đặt tương thích.</p>
+    <h3>ERI IPA · Tra cứu &amp; xử lý</h3>
     <form id="eri-decrypt-search-form" autocomplete="on">
       <div class="eri-decrypt-search-row">
         <label class="field">Khu vực App Store
@@ -155,10 +154,9 @@
       <div class="ipa-tool-actions eri-decrypt-buttons">
         <button class="btn primary" type="submit" id="eri-decrypt-search-button">⌕ Tìm App Store</button>
         <button class="btn outline" type="button" id="eri-decrypt-direct-version">◷ Chọn Ver</button>
-        <button class="btn outline" type="button" id="eri-decrypt-direct-request">♢ Gửi yêu cầu IPA</button>
+        <button class="btn outline" type="button" id="eri-decrypt-direct-request">♢ Xử lý IPA</button>
         <button class="btn outline" type="button" id="eri-decrypt-open-vault">Kho IPA có sẵn</button>
       </div>
-      <p class="eri-dec-disclaimer">ERI hoạt động độc lập: tìm thông tin App Store, gửi yêu cầu xử lý và chỉ cung cấp liên kết tải khi máy chủ ERI đã lưu tệp IPA hợp lệ được phép phân phối.</p>
       <div class="eri-decrypt-preset" aria-label="Tìm kiếm nhanh">
         <span>Phổ biến:</span>
         <button type="button" data-eri-decrypt-preset="Liên Quân Mobile">Liên Quân</button>
@@ -170,7 +168,6 @@
       </div>
     </form>
     <div id="eri-decrypt-notice" class="ipa-tool-result" role="status" aria-live="polite"></div>
-      <p class="eri-dec-disclaimer">Link App Store chỉ cung cấp thông tin ứng dụng. Nút “Gửi yêu cầu IPA” lưu yêu cầu và trạng thái trong ERI; tệp chỉ tải được khi có IPA thật được phép phân phối trong kho. Không hiển thị tiến độ giải mã giả.</p>
      </div>
     <section id="eri-decrypt-result-section" class="eri-decrypt-section hidden" aria-label="Kết quả App Store">
       <div class="eri-decrypt-heading"><h4>Kết quả tìm kiếm App Store</h4><button type="button" class="btn outline eri-dec-small-button" id="eri-decrypt-results-close">× Đóng</button></div>
@@ -186,12 +183,10 @@
       <div class="eri-decrypt-heading"><h4>Yêu cầu IPA đã lưu của tôi</h4>
         <button type="button" class="btn outline" id="eri-decrypt-refresh-history">Cập nhật trạng thái</button>
       </div>
-      <p class="small">Đăng nhập ERI STORE để xem mọi yêu cầu trên tài khoản, kể cả khi bạn đã thoát website. Không hiển thị % xử lý giả.</p>
       <div id="eri-decrypt-history-grid" class="eri-decrypt-grid" role="status" aria-live="polite"></div>
     </section>
     <section id="eri-decrypt-vault-section" class="eri-decrypt-section" aria-label="Kho IPA ERI">
       <div class="eri-decrypt-heading"><h4>Kho IPA Có Sẵn</h4><span class="eri-decrypt-count" id="eri-decrypt-vault-count">—</span></div>
-      <p class="small">Chỉ hiển thị IPA miễn phí được quản trị viên xác nhận quyền phân phối và còn file trên máy chủ. Trạng thái FairPlay không được mặc định coi là đã giải mã.</p>
       <div class="eri-decrypt-filter">
         <input type="search" id="eri-decrypt-vault-filter" placeholder="Lọc tên ứng dụng hoặc Bundle ID" aria-label="Lọc kho IPA">
         <select id="eri-decrypt-vault-sort" aria-label="Sắp xếp kho IPA">
@@ -216,12 +211,10 @@
       </div>
       <input type="search" id="eri-decrypt-version-filter" class="eri-dec-version-filter" placeholder="Lọc phiên bản (ví dụ 1.64...)" aria-label="Lọc phiên bản IPA">
       <div id="eri-decrypt-versions-grid" class="eri-decrypt-grid"></div>
-      <p class="small">Apple không công bố công khai lịch sử mọi bản IPA. Chỉ hiển thị bản hiện tại và các phiên bản thực sự có trong kho ERI.</p>
     </section>
   </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>
-    <p class="small" id="eri-sign-ui-version">Tiến độ gửi tệp · ERI STORE 15.11 (bản sửa giao diện iPhone)</p>
     <p>Chọn IPA, chứng chỉ P12, hồ sơ mobileprovision và nhập mật khẩu P12. Tệp ký chỉ cài được trên các thiết bị mà chứng chỉ và hồ sơ của bạn cho phép.</p>
     <form id="ipa-sign-form" enctype="multipart/form-data" autocomplete="off">
       <label class="field">Tệp ứng dụng .ipa
@@ -246,10 +239,9 @@
         <span id="ipa-sign-progress-percent">0%</span>
       </div>
       <progress id="ipa-sign-progress-bar" max="100" value="0" aria-label="Tiến độ IPA máy chủ đã nhận"></progress>
-      <p id="ipa-sign-progress-stage">0% — Chọn IPA và bấm Ký. Thanh tiến độ chỉ tăng theo phần dữ liệu máy chủ xác nhận đã nhận; ký số là bước riêng.</p>
+      <p id="ipa-sign-progress-stage">Sẵn sàng ký IPA.</p>
     </div>
     <div id="ipa-sign-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
-    <p class="small">Mật khẩu và chứng chỉ chỉ được gửi khi bạn bấm ký; máy chủ xử lý tạm thời rồi xóa tệp đầu vào. Không sử dụng chứng chỉ hoặc IPA mà bạn không có quyền sử dụng.</p>
   </div>
 </section>
 <section id="orders-view" class="section hidden" aria-labelledby="orders-heading">
