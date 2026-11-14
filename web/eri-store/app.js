@@ -556,5 +556,5 @@ document.addEventListener("DOMContentLoaded",()=>{
     tab.setAttribute("aria-selected",String(active));
   });
   updateHeader();loadCatalog();restoreSession();syncRegistrationLimits();
-  if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js?v=20261115p1",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
+  if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js?v=20261115p2",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
 });
