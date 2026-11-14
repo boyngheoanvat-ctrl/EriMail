@@ -308,8 +308,9 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             "ON ipa_decrypt_requests(bundle_id, version, created_at)"
         )
 
-    def job_payload(row):
-        free = _all_free_ipa(connection, upload_dir, mod_file)
+    def job_payload(row, free=None):
+        if free is None:
+            free = _all_free_ipa(connection, upload_dir, mod_file)
         match = _match_vault(free, row["bundle_id"], row["version"])
         return {
             "job_id": row["id"], "app_id": row["app_id"], "name": row["name"],
@@ -369,7 +370,8 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 "SELECT * FROM ipa_decrypt_requests WHERE customer_id=? "
                 "ORDER BY created_at DESC LIMIT 30", (customer["id"],)
             ).fetchall()
-        return {"items": [job_payload(row) for row in rows], "total": len(rows)}
+        free = _all_free_ipa(connection, upload_dir, mod_file)
+        return {"items": [job_payload(row, free) for row in rows], "total": len(rows)}
 
     if require_admin is not None:
         @router.get("/api/v1/admin/decrypt/requests",
@@ -381,8 +383,9 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                     "JOIN customers c ON c.id=r.customer_id "
                     "ORDER BY r.created_at DESC LIMIT ?", (limit,)
                 ).fetchall()
+            free = _all_free_ipa(connection, upload_dir, mod_file)
             return {"items": [
-                {**job_payload(row), "requester": row["username"]}
+                {**job_payload(row, free), "requester": row["username"]}
                 for row in rows
             ], "total": len(rows)}
 
