@@ -329,3 +329,43 @@ body.shop-v2{
 .shop-v2 #ipa-sign-progress-stage{margin:10px 0 0;color:#626781;font-size:12px;line-height:1.5}
 .shop-v2 .ipa-tool-result[data-state=success]>.ipa-tool-actions{display:flex;gap:10px;flex-wrap:wrap}
 .shop-v2 .ipa-tool-result[data-state=success]>.ipa-tool-actions .btn{flex:1 1 180px;text-align:center}
+
+/* ERI IPA catalog: compact iPhone-first App Store search and licensed vault. */
+.shop-v2 .eri-decrypt-search-row{display:grid;grid-template-columns:minmax(145px,.55fr) minmax(0,2fr);gap:12px}
+.shop-v2 .eri-decrypt-search-row .field{min-width:0}
+.shop-v2 .eri-decrypt-search-row select,
+.shop-v2 .eri-decrypt-filter select,
+.shop-v2 .eri-decrypt-filter input{display:block;min-width:0;width:100%;border:1px solid #dddcef;border-radius:11px;min-height:45px;padding:11px;background:#fafaff;color:#292644;font:inherit}
+.shop-v2 .eri-decrypt-buttons{margin-top:12px}
+.shop-v2 .eri-decrypt-preset{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0;color:#777b98;font-size:12px}
+.shop-v2 .eri-decrypt-preset button{border:1px solid #e4e0f6;background:#f8f6ff;color:#6351c9;border-radius:18px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer}
+.shop-v2 .eri-decrypt-section{margin-top:22px;padding-top:18px;border-top:1px solid #e8e6f4}
+.shop-v2 .eri-decrypt-section.hidden{display:none!important}
+.shop-v2 .eri-decrypt-section h4{font-size:18px;color:#292348;line-height:1.35;margin:0 0 12px}
+.shop-v2 .eri-decrypt-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.shop-v2 .eri-decrypt-count{font-size:13px;font-weight:800;border-radius:999px;padding:6px 10px;background:#edebff;color:#6454d1}
+.shop-v2 .eri-decrypt-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.shop-v2 .eri-decrypt-card{min-width:0;overflow-wrap:anywhere;background:#faf9ff;border:1px solid #e6e3f4;padding:16px;border-radius:14px}
+.shop-v2 .eri-decrypt-card strong{font-size:15px;color:#282249}
+.shop-v2 .eri-decrypt-card-top{display:flex;gap:12px;align-items:flex-start;min-width:0}
+.shop-v2 .eri-decrypt-app-icon{width:52px;height:52px;flex:0 0 52px;object-fit:cover;border-radius:12px;border:1px solid #e9e6f2}
+.shop-v2 .eri-decrypt-details{display:flex;flex-direction:column;gap:4px;min-width:0}
+.shop-v2 .eri-decrypt-details span{color:#59617c;font-size:13px}
+.shop-v2 .eri-decrypt-details small{color:#767c93;font-size:12px;overflow-wrap:anywhere}
+.shop-v2 .eri-decrypt-available,.shop-v2 .eri-decrypt-unavailable{margin-top:12px;padding:9px 11px;border-radius:9px;font-size:12px;line-height:1.55}
+.shop-v2 .eri-decrypt-available{color:#136046;background:#e9fbf2}
+.shop-v2 .eri-decrypt-unavailable{color:#665d4a;background:#f9f3e9}
+.shop-v2 .eri-decrypt-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.shop-v2 .eri-decrypt-actions .btn{min-width:0;white-space:normal;text-align:center;font-size:12px;padding:9px 12px;line-height:1.4}
+.shop-v2 .eri-decrypt-filter{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:9px;margin:12px 0}
+.shop-v2 .eri-decrypt-pager{justify-content:center;align-items:center}
+.shop-v2 .eri-decrypt-pager span{font-size:12px;color:#6b6b88}
+.shop-v2 .eri-decrypt-pager .btn{font-size:12px}
+.shop-v2 #eri-decrypt-job-progress{display:block;appearance:auto;accent-color:#6153f1;width:100%;height:16px}
+.shop-v2 #eri-decrypt-job-stage{white-space:pre-wrap;overflow-wrap:anywhere;margin:9px 0}
+@media(max-width:720px){
+  .shop-v2 .eri-decrypt-grid{grid-template-columns:1fr}
+  .shop-v2 .eri-decrypt-search-row{grid-template-columns:1fr;gap:0}
+  .shop-v2 .eri-decrypt-filter{grid-template-columns:1fr}
+  .shop-v2 .eri-decrypt-actions .btn{flex:1 1 130px}
+}
