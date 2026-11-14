@@ -381,7 +381,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             parts.scheme == "https"
             and parts.hostname == "160-191-242-70.sslip.io"
             and parts.port in (None, 443)
-            and bool(re.fullmatch(r"/dl_dec/[A-Za-z0-9_-]{8,128}/[0-9]{8,15}/[A-Za-z0-9._%-]+\\.ipa", parts.path, re.I))
+            and bool(re.fullmatch(r"/dl_dec/[A-Za-z0-9_-]{8,128}/[0-9]{8,15}/[A-Za-z0-9._%-]+[.]ipa", parts.path, re.I))
             and not parts.username and not parts.password
             and not parts.query and not parts.fragment
         )
