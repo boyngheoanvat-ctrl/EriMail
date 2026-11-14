@@ -253,7 +253,7 @@ def _download(connection, job_id, url, target, expected_sha):
     return count, checksum.hexdigest()
 
 
-def _acquire_with_ipatool(connection, job_id, app_id, target):
+def _acquire_with_ipatool(connection, job_id, app_id, target, expected_bytes=0):
     """Fetch an app already licensed to the worker Apple Account.
 
     This is acquisition, not decryption. Do not add --purchase (no accidental
@@ -275,11 +275,25 @@ def _acquire_with_ipatool(connection, job_id, app_id, target):
                             close_fds=True)
     try:
         deadline = time.monotonic() + timeout
+        last_bytes = -1
         while proc.poll() is None:
             if time.monotonic() >= deadline:
                 raise ValueError("Quá thời gian tải IPA từ App Store")
-            if target.exists() and target.stat().st_size > MAX_BYTES:
+            current_bytes = target.stat().st_size if target.exists() else 0
+            if current_bytes > MAX_BYTES:
                 raise ValueError("IPA vượt dung lượng tối đa cho phép")
+            if current_bytes and current_bytes != last_bytes:
+                # Apple's public package size can differ from actual download.
+                # Percentage is an estimate based on bytes physically written.
+                if expected_bytes and expected_bytes > 0:
+                    pct = min(89, int(current_bytes * 90 / expected_bytes))
+                    note = "Đã tải %.1f / %.1f MB (ước tính)" % (
+                        current_bytes / 1e6, expected_bytes / 1e6)
+                else:
+                    pct = None
+                    note = "Đã nhận %.1f MB từ App Store" % (current_bytes / 1e6)
+                _status(connection, job_id, "processing", pct, note)
+                last_bytes = current_bytes
             time.sleep(0.5)
         if proc.returncode != 0:
             raise ValueError(
@@ -306,7 +320,7 @@ def _run(connection, upload_dir, job_id):
         with connection() as db:
             row = db.execute(
                 "SELECT r.id,r.app_id,r.country,r.bundle_id,r.version,"
-                "COALESCE(s.name,r.name) AS name,s.url,s.sha256 "
+                "r.estimated_size_bytes,COALESCE(s.name,r.name) AS name,s.url,s.sha256 "
                 "FROM ipa_decrypt_requests r "
                 "LEFT JOIN ipa_decrypt_sources s ON s.bundle_id=r.bundle_id COLLATE NOCASE "
                 "AND s.version=r.version WHERE r.id=?", (job_id,)
@@ -320,7 +334,8 @@ def _run(connection, upload_dir, job_id):
             size, digest = _download(connection, job_id, row["url"], partial, row["sha256"])
         elif can_auto_acquire(row["bundle_id"]):
             size, digest = _acquire_with_ipatool(
-                connection, job_id, row["app_id"], partial)
+                connection, job_id, row["app_id"], partial,
+                row["estimated_size_bytes"] or 0)
         else:
             _status(connection, job_id, "waiting_for_source", None,
                     "ERI chưa có nguồn IPA có quyền phân phối")
