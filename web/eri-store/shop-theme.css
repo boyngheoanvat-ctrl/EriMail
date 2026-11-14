@@ -371,7 +371,7 @@ body.shop-v2{
 }
 
 
-/* F4-inspired ERI DECRYPT layout, using independently scoped light/dark UI.
+/* ERI DECRYPT independent light/dark interface.
    Retain real server status, authorized vault entries and native shop branding. */
 .shop-v2 #ipa-decrypt-panel.eri-dec {
  --dec-bg:#090d16;--dec-panel:#121929;--dec-panel2:#172033;
