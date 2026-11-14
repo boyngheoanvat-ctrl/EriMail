@@ -196,17 +196,31 @@
 
           const decryptTab = document.querySelector('[data-kind="decrypt"]');
           if (decryptTab && $("eri-decrypt-query")) {
-            const browse = document.createElement("button");
-            browse.type = "button";
-            browse.className = "btn outline";
-            browse.textContent = "Xem kho IPA / chọn phiên bản";
-            browse.addEventListener("click", () => {
+            const openDecrypt = submitJob => {
               const query = $("eri-decrypt-query");
               query.value = link;
               query.dispatchEvent(new Event("input", {bubbles: true}));
               decryptTab.click();
-              $("eri-decrypt-search-form")?.requestSubmit();
-            });
+              if (submitJob) {
+                // Create an ERI request, not a fake FairPlay decryption job.
+                $("eri-decrypt-direct-request")?.click();
+              } else {
+                $("eri-decrypt-search-form")?.requestSubmit();
+              }
+            };
+            if (!existingIPA) {
+              const request = document.createElement("button");
+              request.type = "button";
+              request.className = "btn primary";
+              request.textContent = "Gửi yêu cầu IPA đến ERI";
+              request.addEventListener("click", () => openDecrypt(true));
+              actions.append(request);
+            }
+            const browse = document.createElement("button");
+            browse.type = "button";
+            browse.className = "btn outline";
+            browse.textContent = "Xem kho IPA / chọn phiên bản";
+            browse.addEventListener("click", () => openDecrypt(false));
             actions.append(browse);
           }
           if (typeof data.app_store_url === "string") {
