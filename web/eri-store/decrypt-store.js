@@ -105,6 +105,7 @@
     const enc = encodeURIComponent(url);
     actions.append(link("Mở bằng ESign", "esign://install?url=" + enc));
     actions.append(link("TrollStore", "apple-magnifier://install?url=" + enc));
+    actions.append(link("Scarlet", "scarlet://install?url=" + enc));
     actions.append(link("Feather", "feather://install?url=" + enc));
     parent.append(actions);
     const foot = card("p", "small", "IPA có thể cần ký bằng chứng chỉ hợp lệ trước khi iOS cho phép cài. ESign / TrollStore / Feather phải có sẵn trên thiết bị.");
@@ -185,6 +186,7 @@
     section?.classList.remove("hidden");
     if (grid) grid.replaceChildren();
     text("eri-decrypt-versions-title", "Phiên bản: " + item.name);
+    if ($("eri-decrypt-version-filter")) $("eri-decrypt-version-filter").value = "";
     notice("Đang kiểm tra những phiên bản có thể xác nhận...");
     try {
       const data = await request("/api/v1/tools/ipa/decrypt/versions?" +
@@ -192,6 +194,7 @@
       const entries = Array.isArray(data.versions) ? data.versions : [];
       for (const entry of entries) {
         const node = card("article","eri-decrypt-card");
+        node.dataset.version = entry.version || "";
         node.append(card("strong", "", "Phiên bản " + (entry.version || "—")));
         node.append(card("p", "small", entry.source === "ERI authorized library"
           ? "Đã có file ở kho ERI." : "Apple chỉ xác nhận thông tin phiên bản này, không cung cấp IPA."));
@@ -216,6 +219,7 @@
       if (serial !== vaultSerial) return;
       vaultTotal = Number(result.total) || 0;
       text("eri-decrypt-vault-count", vaultTotal + " IPA");
+      text("eri-decrypt-header-vault-count", String(vaultTotal));
       if (grid) grid.replaceChildren();
       if (!result.items?.length) grid?.append(card("p", "small",
         "Chưa có IPA được cấp quyền phân phối và còn file trên máy chủ phù hợp bộ lọc này."));
@@ -236,6 +240,7 @@
       if (serial === vaultSerial) {
         if(grid) grid.replaceChildren(card("p","small",error.message));
         text("eri-decrypt-vault-count","Chưa kết nối");
+        text("eri-decrypt-header-vault-count","—");
       }
     }
   }
@@ -341,6 +346,8 @@
       }
     } finally { pollInFlight=false; }
   }
+  // A version-picker is information lookup; no invented Apple CDN IPA URLs.
+
   function init() {
     const form = $("eri-decrypt-search-form");
     if (!form) return;
@@ -362,6 +369,37 @@
       const q = $("eri-decrypt-query").value.trim();
       if (q) search(q,$("eri-decrypt-region").value);
     });
+    $("eri-decrypt-direct-version")?.addEventListener("click", () => {
+      const q = $("eri-decrypt-query").value.trim();
+      if (!q) { notice("Nhập tên game, Bundle ID hoặc link App Store để chọn phiên bản.", "error"); $("eri-decrypt-query").focus(); return; }
+      loadVersions({name:q,app_store_url:q,app_id:q,country:$("eri-decrypt-region").value});
+    });
+    $("eri-decrypt-direct-request")?.addEventListener("click", () => {
+      const q = $("eri-decrypt-query").value.trim();
+      if (!q) { notice("Nhập tên game, Bundle ID hoặc link App Store trước khi yêu cầu IPA.", "error"); $("eri-decrypt-query").focus(); return; }
+      createJob(q,$("eri-decrypt-region").value,"");
+    });
+    $("eri-decrypt-theme-toggle")?.addEventListener("click", () => {
+      const panel = $("ipa-decrypt-panel");
+      const next = panel.dataset.theme === "dark" ? "light" : "dark";
+      panel.dataset.theme = next;
+      $("eri-decrypt-theme-toggle").textContent = next === "dark" ? "☀" : "☾";
+      try {localStorage.setItem("eri.decrypt.theme",next);}catch{}
+    });
+    try {
+      const saved = localStorage.getItem("eri.decrypt.theme");
+      if (saved === "light" || saved === "dark") $("ipa-decrypt-panel").dataset.theme = saved;
+    }catch{}
+    $("eri-decrypt-theme-toggle").textContent =
+      $("ipa-decrypt-panel").dataset.theme === "dark" ? "☀" : "☾";
+    $("eri-decrypt-results-close")?.addEventListener("click",
+      () => $("eri-decrypt-result-section")?.classList.add("hidden"));
+    $("eri-decrypt-version-filter")?.addEventListener("input", event => {
+      const query = event.target.value.trim().toLowerCase();
+      $("eri-decrypt-versions-grid")?.querySelectorAll("[data-version]").forEach(node => {
+        node.hidden = !!query && !node.dataset.version.toLowerCase().includes(query);
+      });
+    });
     document.querySelectorAll("[data-eri-decrypt-preset]").forEach(node => {
       node.addEventListener("click", () => {
         $("eri-decrypt-query").value = node.dataset.eriDecryptPreset;
@@ -373,6 +411,7 @@
       $("eri-decrypt-vault-section")?.scrollIntoView({behavior:"smooth",block:"start"});
       loadVault();
     });
+    $("eri-decrypt-vault-refresh")?.addEventListener("click",() => loadVault());
     let debounce;
     $("eri-decrypt-vault-filter")?.addEventListener("input",() => {
       clearTimeout(debounce);
