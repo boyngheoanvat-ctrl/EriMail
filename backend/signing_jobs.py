@@ -243,8 +243,8 @@ def register_signing_jobs(router: APIRouter, require_customer, inspect, validate
                 if not output.is_file() or output.stat().st_size == 0:
                     raise ValueError("Bộ ký IPA không tạo ra kết quả")
                 with zipfile.ZipFile(output) as archive:
-                    validate(archive)
-                metadata = details(output)
+                    validated_app = validate(archive)
+                    metadata = details(output, validated=(archive, validated_app))
                 if metadata["bundle_id"] != signed_bundle:
                     raise ValueError("Bundle ID không khớp với kết quả ký")
                 result = register_output(output, metadata)

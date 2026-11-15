@@ -6,6 +6,7 @@ Temporary inputs are deleted after each request; completed downloads expire.
 """
 import importlib.util
 import json
+import logging
 import os
 import posixpath
 import plistlib
@@ -40,6 +41,7 @@ SIGNED_FOLDER = Path(os.getenv("ERI_SIGNED_IPA_DIR",
                             str(Path(tempfile.gettempdir()) / "eri-signed-ipa")))
 _lock = threading.Lock()
 _work_slots = threading.BoundedSemaphore(value=1)
+_sign_logger = logging.getLogger("eri.ipa.sign")
 
 
 def _write_upload(upload: UploadFile, target: Path, max_bytes: int, suffix: str):
@@ -228,17 +230,13 @@ def _purge_signed_locked():
             _signed_tickets.pop(token, None)
 
 
-def _manifest_details(output: Path):
-    try:
-        with zipfile.ZipFile(output) as archive:
-            app = _validate_ipa(archive)
-            name = "Payload/" + app + "/Info.plist"
-            info = archive.getinfo(name)
-            if info.file_size > 2 * 1024 * 1024:
-                raise HTTPException(422, "Info.plist quá lớn")
-            metadata = plistlib.loads(archive.read(name))
-    except (KeyError, ValueError, plistlib.InvalidFileException, zipfile.BadZipFile):
-        raise HTTPException(422, "Không đọc được thông tin IPA đã ký")
+def _manifest_metadata(archive: zipfile.ZipFile, app: str):
+    """Extract iOS install metadata from an IPA already structurally validated."""
+    name = "Payload/" + app + "/Info.plist"
+    info = archive.getinfo(name)
+    if info.file_size > 2 * 1024 * 1024:
+        raise HTTPException(422, "Info.plist quá lớn")
+    metadata = plistlib.loads(archive.read(name))
     bundle = str(metadata.get("CFBundleIdentifier", ""))
     version = str(metadata.get("CFBundleVersion") or metadata.get("CFBundleShortVersionString") or "1.0")
     title = str(metadata.get("CFBundleDisplayName") or metadata.get("CFBundleName") or app[:-4])
@@ -246,6 +244,20 @@ def _manifest_details(output: Path):
         raise HTTPException(422, "Thông tin Bundle ID hoặc phiên bản không hợp lệ")
     return {"bundle_id": bundle, "version": version, "title": title}
 
+
+def _manifest_details(output: Path, *, validated: tuple[zipfile.ZipFile, str] | None = None):
+    """The default path verifies IPA safety. Trusted signing callers can reuse
+    the same already-validated open ZIP, avoiding a second full entry scan.
+    """
+    try:
+        if validated is not None:
+            archive, app = validated
+            return _manifest_metadata(archive, app)
+        with zipfile.ZipFile(output) as archive:
+            app = _validate_ipa(archive)
+            return _manifest_metadata(archive, app)
+    except (KeyError, ValueError, plistlib.InvalidFileException, zipfile.BadZipFile):
+        raise HTTPException(422, "Không đọc được thông tin IPA đã ký")
 
 def _register_signed_output(file: Path, metadata: dict):
     with _lock:
@@ -461,6 +473,7 @@ def register_ipa_tools(app, require_customer):
             raise HTTPException(503, "Một tác vụ IPA khác đang chạy. Vui lòng thử lại.")
         try:
             import ipasign
+            timing_start = time.perf_counter()
             with tempfile.TemporaryDirectory(prefix="eri-sign-") as root:
                 folder = Path(root)
                 source = folder / "input.ipa"
@@ -470,25 +483,37 @@ def register_ipa_tools(app, require_customer):
                 _write_upload(ipa, source, MAX_IPA, ".ipa")
                 _write_upload(p12, certificate, MAX_CERT, ".p12")
                 _write_upload(mobileprovision, profile, MAX_CERT, ".mobileprovision")
+                timing_uploaded = time.perf_counter()
                 details = _inspect_archive(source)
                 if details["zip_password_protected"]:
                     raise HTTPException(422, "IPA có mật khẩu ZIP, hãy giải mã ZIP trước khi ký.")
                 if details["fairplay_encrypted"] is True:
                     raise HTTPException(422, "Ứng dụng còn mã hóa FairPlay. Cần IPA đã giải mã hợp pháp trước khi ký.")
+                timing_inspected = time.perf_counter()
                 try:
                     signed = ipasign.Key(str(certificate), str(profile), password).sign(
                         str(source), str(output))
                 except Exception as exc:
                     # Do not expose private key data, passwords, or signer internals.
                     raise HTTPException(422, "Ký IPA thất bại: kiểm tra P12, mật khẩu, provisioning profile và Bundle ID.") from exc
+                timing_signed = time.perf_counter()
                 if not output.is_file() or output.stat().st_size == 0:
                     raise HTTPException(422, "Bộ ký không tạo ra IPA hợp lệ")
                 with zipfile.ZipFile(output) as verified:
-                    _validate_ipa(verified)
-                details = _manifest_details(output)
+                    validated_app = _validate_ipa(verified)
+                    details = _manifest_details(output, validated=(verified, validated_app))
+                timing_verified = time.perf_counter()
                 if details["bundle_id"] != str(signed.bundle_id):
                     raise HTTPException(422, "Bundle ID trong IPA ký không khớp")
                 response = _register_signed_output(output, details)
+                timing_stored = time.perf_counter()
+                _sign_logger.info(
+                    "ipa_sign_timing_seconds upload_copy=%.3f precheck=%.3f "
+                    "sign=%.3f output_verify=%.3f store=%.3f total=%.3f",
+                    timing_uploaded - timing_start, timing_inspected - timing_uploaded,
+                    timing_signed - timing_inspected, timing_verified - timing_signed,
+                    timing_stored - timing_verified, timing_stored - timing_start,
+                )
                 return {
                     **response,
                     "message": "IPA đã được ký. Có thể tải về hoặc bấm Cài lên iPhone bằng Safari.",

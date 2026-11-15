@@ -126,6 +126,23 @@ with tempfile.TemporaryDirectory(prefix="eri-tools-test-") as root:
     signed_test.write_bytes(make_ipa(executable))
     metadata = _manifest_details(signed_test)
     assert metadata["bundle_id"] == "vn.eri.tool.test"
+    # A signed result is validated once and metadata is extracted from the
+    # same open archive; without the trusted argument validation still runs.
+    import ipa_tools
+    from unittest.mock import patch
+    with zipfile.ZipFile(signed_test) as validated_zip:
+        app_name = ipa_tools._validate_ipa(validated_zip)
+        with patch.object(ipa_tools, "_validate_ipa", side_effect=AssertionError(
+                "Unexpected second full IPA validation")):
+            reused = _manifest_details(signed_test, validated=(validated_zip, app_name))
+    assert reused == metadata
+    with patch.object(ipa_tools, "_validate_ipa", side_effect=ValueError("verification called")):
+        try:
+            _manifest_details(signed_test)
+        except Exception:
+            pass
+        else:
+            raise AssertionError("Default metadata path must validate the archive")
     signed_result = _register_signed_output(signed_test, metadata)
     assert signed_result["install_url"].startswith("itms-services://?action=download-manifest")
     manifest = client.get(signed_result["manifest_path"])
