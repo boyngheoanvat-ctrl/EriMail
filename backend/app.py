@@ -1591,6 +1591,32 @@ def admin_vault_cleanup():
     return _drain_cloud_deletions()
 
 
+@app.get("/api/v1/admin/backups/sqlite", dependencies=[Depends(require_admin)])
+def admin_export_sqlite_backup():
+    """Admin-only consistent SQLite export. Never serve /tmp via a public path."""
+    folder = Path(tempfile.mkdtemp(prefix="eri-admin-backup-"))
+    target = folder / "eri-store-backup.sqlite3"
+    try:
+        with _eri_db_guard:
+            with sqlite3.connect(DB) as source:
+                with sqlite3.connect(target) as dest:
+                    source.backup(dest)
+        os.chmod(target,0o600)
+        with sqlite3.connect(target) as check:
+            if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise VaultError("SQLite backup integrity failed")
+        return FileResponse(
+            target, filename="eri-store-backup.sqlite3",
+            media_type="application/octet-stream",
+            background=BackgroundTask(shutil.rmtree, folder, ignore_errors=True),
+            headers={"Cache-Control":"private, no-store",
+                     "X-Content-Type-Options":"nosniff"}
+        )
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
 @app.get("/api/v1/admin/customers", dependencies=[Depends(require_admin)])
 def admin_customers():
     with connection() as db:
