@@ -89,7 +89,8 @@ class ActionsTests(unittest.TestCase):
 
     def test_large_actions_budget_without_weakening_web_uploads(self):
         # A 3.85-GB IPA cannot pass a 1-GiB Actions download cap.
-        self.assertGreater(worker.MAX_DOWNLOAD, 3_850_000_000)
+        # No arbitrary per-file byte cap: 0 uses available runner disk space.
+        self.assertEqual(worker.MAX_DOWNLOAD, 0)
         self.assertGreater(worker.MAX_UNPACKED, 3_850_000_000)
         info = zipfile.ZipInfo("Payload/ERI.app/Info.plist")
         info.file_size = 3 * 1024 ** 3
