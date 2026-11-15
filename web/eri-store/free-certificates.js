@@ -36,16 +36,23 @@
     status.textContent=(selected==="ksign"?"KSign":"ESign")+" · "+entries.length+" bản cài đặt";
     const fragment=document.createDocumentFragment();
     entries.forEach((item,index)=>{
-      const card=element("article","eri-free-card");
+      const card=element("article","product product--certificate eri-free-card");
+      const visual=element("div","product-art");
       const mark=element("div","eri-free-card-mark",selected==="ksign"?"K":"E");
       mark.setAttribute("aria-hidden","true");
-      const info=element("div","eri-free-card-body");
-      info.append(element("h4","eri-free-card-title",item.name),element("p","eri-free-card-issuer","Chứng chỉ: "+item.descriptions));
-      const number=element("span","eri-free-card-index",String(index+1).padStart(2,"0"));
+      visual.append(mark,element("span","product-chip is-free","FREE"));
+      const info=element("div","product-body eri-free-card-body");
+      info.append(element("h3","eri-free-card-title",item.name));
+      info.append(element("p","product-desc eri-free-card-issuer","Chứng chỉ: "+item.descriptions));
+      info.append(element("div","product-info eri-free-card-index","iOS · Bản "+String(index+1).padStart(2,"0")));
+      const footer=element("div","product-footer");
+      footer.append(element("strong","price","FREE"));
       const install=element("a","btn primary eri-free-install","Cài đặt");
       install.setAttribute("href",item.url);
       install.setAttribute("aria-label","Cài "+item.name+" - "+item.descriptions);
-      card.append(mark,info,number,install);
+      footer.append(install);
+      info.append(footer);
+      card.append(visual,info);
       fragment.append(card);
     });
     cards.append(fragment);
