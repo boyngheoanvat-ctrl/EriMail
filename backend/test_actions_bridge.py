@@ -63,4 +63,42 @@ with tempfile.TemporaryDirectory(prefix="eri-gh-bridge-") as temp:
                 assert result.status_code == 200, result.text
                 assert result.json()["items"][0]["conclusion"] == "success"
 
+
+    class GitHubReply:
+        def __init__(self, status, data=b""):
+            self.status = status
+            self.data = data
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, limit):
+            return self.data[:limit]
+
+    class GitHubOpener:
+        def __init__(self, reply):
+            self.reply = reply
+        def open(self, request, timeout=12):
+            assert request.full_url.endswith(
+                "/actions/workflows/process-ipa.yml/dispatches"
+            )
+            return self.reply
+
+    with patch.dict(os.environ, {
+        "ERI_GH_ACTIONS_REPO": "boyngheoanvat-ctrl/EriMail",
+        "ERI_GH_ACTIONS_TOKEN": "test-secret",
+    }):
+        for status, data, expected in (
+            (204, b"", None),
+            (200, json.dumps({"workflow_run_id": 456}).encode(), 456),
+        ):
+            with patch.object(bridge.urllib.request, "build_opener",
+                              return_value=GitHubOpener(GitHubReply(status, data))):
+                result = bridge._github(
+                    "POST", "actions/workflows/process-ipa.yml/dispatches",
+                    {"ref": "main", "inputs": {"source_id": "sample"}},
+                )
+            assert result["ok"] is True
+            assert result["workflow_run_id"] == expected
+
     print("ERI Actions admin bridge: auth, approved source and GitHub token isolation OK")
