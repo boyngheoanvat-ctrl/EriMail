@@ -94,12 +94,28 @@ assert "621" not in html
 assert "F4TEAM" not in html
 assert "F4Decrypt" not in html
 assert 'id="hero-ipa"' in html
-assert 'data-kind="certfree"' in html
+# One Chứng chỉ top-level tab with FREE/BÁN children, like Mod Game.
+assert html.count('data-kind="certificate"') == 1
+assert 'data-kind="certfree"' not in html
+assert 'id="certificate-subtabs"' in html
+assert 'data-cert-mode="free"' in html
+assert 'data-cert-mode="paid"' in html
 assert 'id="certificate-free-panel"' in html
-assert 'https://website.khoindvn.io.vn/apps.js' in html
-assert 'eri-home-extras.css?v=20261115a' in html
-assert 'app.js?v=20261115homeipa2' in html
-assert '"certfree"' in (web / "app.js").read_text()
+assert 'id="certificate-udid"' in html
+assert 'https://website.khoindvn.io.vn/apps.js' not in html
+assert 'eri-home-extras.css?v=20261115certificatetab1' in html
+assert 'app.js?v=20261115certificatetab1' in html
+app = (web / "app.js").read_text()
+assert 'openCategory("certificate",tab.dataset.certMode)' in app
+assert 'freeCertificates=category==="certificate"&&certMode==="free"' in app
+assert 'category==="certificate"?"Chứng chỉ BÁN"' in app
+assert 'id="ipa-sign-server"' in html
+assert 'id="ipa-sign-iphone"' in html
+assert 'data-sign-mode="server"' in html and 'data-sign-mode="iphone"' in html
+assert 'id="open-sign-local"' in html
+free_js = (web / "free-certificates.js").read_text()
+assert 'eri-free-card' in free_js and 'product--certificate' in free_js
+assert 'install.setAttribute("href",item.url)' in free_js
 assert 'window.ERIStoreIPA=Object.freeze' in decrypt
 assert 'const found=await findAvailableIPA(target);' in decrypt
 assert 'Đang kết nối kho IPA ERI Nguyễn...' in decrypt
