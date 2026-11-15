@@ -185,7 +185,7 @@
     const query=$("eri-decrypt-vault-filter")?.value.trim()||"";
     const sort=$("eri-decrypt-vault-sort")?.value||"newest";
     state.sort=sort;state.offset=Math.max(0,offset);
-    showEmpty(grid,"Đang kết nối kho IPA F4TEAM...");
+    showEmpty(grid,"Đang kết nối kho IPA ERI Nguyễn...");
     const qs=new URLSearchParams({q:query,category:state.category,sort,
       limit:String(state.limit),offset:String(state.offset)});
     try{
@@ -201,7 +201,7 @@
         if(n)n.textContent=fmt(count)+" IPA";
       });
       const summary=$("eri-v-vault-summary");
-      if(summary)summary.textContent="Hiển thị "+fmt(state.total)+" kết quả từ kho IPA F4TEAM";
+      if(summary)summary.textContent="Hiển thị "+fmt(state.total)+" kết quả trong kho IPA ERI Nguyễn";
       const pages=Math.max(1,Math.ceil(state.total/state.limit));
       const page=Math.floor(state.offset/state.limit)+1;
       if($("eri-decrypt-page-label"))$("eri-decrypt-page-label").textContent="Trang "+page+" / "+pages;
@@ -492,25 +492,61 @@
   }
   // Compatibility with the App Store lookup tab outside ERI DECRYPT.
   // Its download button performs a fresh source-catalog lookup, not a fake file redirect.
+  // Shared home and catalog download handler. Lookup uses verified file
+  // entries, not App Store metadata pretending to be an actual IPA.
   window.ERIStoreIPA=Object.freeze({
     download:async(item,feedback)=>{
       const report=(message,kind="info")=>{
         notice(message,kind);
-        if(feedback){feedback.hidden=false;feedback.textContent=message;feedback.dataset.state=kind;}
+        if(feedback){feedback.hidden=false;feedback.replaceChildren(document.createTextNode(message));feedback.dataset.state=kind;}
       };
-      report("Đang kiểm tra kho IPA nguồn...");
+      const bundle=String(item?.bundle_id||"").trim();
+      const appID=String(item?.app_id||"").trim();
+      if(!bundle||bundle==="Không rõ"){
+        report("Thiếu Bundle ID hợp lệ để đối chiếu đúng ứng dụng IPA.","error");return;
+      }
+      report("ERI Nguyễn đang tìm IPA theo Bundle ID và phiên bản trong kho...");
       try{
-        const q=String(item.bundle_id||item.app_store_url||item.app_id||"").trim();
-        if(!q)throw new Error("Thiếu Bundle ID hoặc link App Store.");
-        const params=new URLSearchParams({q,country:String(item.country||"auto").toLowerCase(),mode:"ios"});
-        const response=await providerRequest("/api/decrypt/search?"+params);
-        const match=(response.items||[]).map(normal).find(src=>
-          src.bundle_id.toLowerCase()===String(item.bundle_id||"").toLowerCase() &&
-          (!item.version||src.version===String(item.version))&&src.dl_url);
-        if(!match)throw new Error("Nguồn chưa cung cấp file IPA đúng phiên bản.");
-        report("Đã xác nhận link IPA từ nguồn. Đang bắt đầu tải...","success");
-        openDownload(match.dl_url);
-      }catch(error){report(error.message,"error");}
+        // Prefer the authenticated ERI inventory result when the first-party
+        // vault has already verified an exact, free download endpoint.
+        const own=item.cached||null;
+        const path=String(own?.download_path||"");
+        const exactOwned=own &&
+          String(own.bundle_id||"").toLowerCase()===bundle.toLowerCase() &&
+          String(own.version||"")===String(item.version||"") &&
+          /^\/api\/v1\/mods\/[1-9][0-9]*\/download$/.test(path) &&
+          (own.price_vnd===undefined || Number(own.price_vnd)===0);
+        if(exactOwned){
+          report("Kho ERI đã xác nhận IPA đúng Bundle ID và phiên bản. Bắt đầu tải...","success");
+          window.location.assign("https://eri-api-dag8.onrender.com"+path);
+          return;
+        }
+        const target=normal({
+          title:item.title||bundle,bundle_id:bundle,
+          version:String(item.version||""),
+          country:item.country||"VN",
+          app_id:appID,store_url:item.app_store_url||"",
+          vault_cached:item.cached||null
+        });
+        const found=await findAvailableIPA(target);
+        if(found.exact){
+          report("Đã tìm thấy IPA "+(found.exact.version?"v"+found.exact.version:"")+
+            " đúng ứng dụng. Bắt đầu tải file...","success");
+          openDownload(found.exact.dl_url);
+        }else if(found.alternate){
+          report("Chưa tìm thấy IPA phiên bản v"+(found.wanted||"yêu cầu")+
+            ". Có bản v"+(found.alternate.version||"khác")+".", "info");
+          if(feedback){
+            const btn=action("Tải phiên bản "+(found.alternate.version||"có sẵn"),
+              ()=>openDownload(found.alternate.dl_url),"btn outline");
+            feedback.append(document.createElement("br"),btn);
+          }
+        }else if(found.accessible){
+          report("Kho IPA ERI Nguyễn chưa tìm thấy file đúng Bundle ID/phiên bản này.","info");
+        }else{
+          report(found.lastError?.message||"Không kết nối được kho IPA ERI Nguyễn.","error");
+        }
+      }catch(e){report(e.message||"Không kiểm tra được kho IPA.","error");}
     }
   });
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);

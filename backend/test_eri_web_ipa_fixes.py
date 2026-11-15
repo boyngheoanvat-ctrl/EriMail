@@ -31,7 +31,7 @@ assert "Kiểm tra và tạo link tải IPA" not in html
 assert 'id="ipa-sign-panel"' in html
 assert 'name="ipa"' in html and 'name="p12"' in html
 assert 'name="mobileprovision"' in html and 'name="password"' in html
-assert 'sign-jobs.js?v=20261115signresume1' in html
+assert 'sign-jobs.js?v=20261115uploadphase2' in html
 assert '"eri_store_signing_job_v2"' in chunks
 assert 'if (!busy)' in chunks
 assert 'if (polling || (busy && !activeSigner)) return;' in chunks
@@ -57,10 +57,10 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v34" in service
+assert "eri-store-v35" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
-assert "decrypt-store.js?v=20261115f4bridge1" in html
+assert "decrypt-store.js?v=20261115erivault3" in html
 assert "eri-decrypt-layout.css?v=20261115dashboard2" in html
 
 # ERI hosts a branded view, but provider API data must stay sourced from
@@ -93,6 +93,19 @@ for identifier in (
 assert "621" not in html
 assert "F4TEAM" not in html
 assert "F4Decrypt" not in html
+assert 'id="hero-ipa"' in html
+assert 'data-kind="certfree"' in html
+assert 'id="certificate-free-panel"' in html
+assert 'https://website.khoindvn.io.vn/apps.js' in html
+assert 'eri-home-extras.css?v=20261115a' in html
+assert 'app.js?v=20261115homeipa2' in html
+assert '"certfree"' in (web / "app.js").read_text()
+assert 'window.ERIStoreIPA=Object.freeze' in decrypt
+assert 'const found=await findAvailableIPA(target);' in decrypt
+assert 'Đang kết nối kho IPA ERI Nguyễn...' in decrypt
+assert 'Đang kết nối kho IPA F4TEAM...' not in decrypt
+assert 'stage === "preparing"' in chunks
+assert 'Đang gửi phần IPA ' in chunks
 assert "ERI DECRYPT" in html
 assert "BY ERI NGUYỄN" in html
 

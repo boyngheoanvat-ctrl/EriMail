@@ -31,10 +31,13 @@
     panel.classList.remove("hidden");
     bar.value = value;
     percent.textContent = value.toFixed(1) + "%";
-    heading.textContent = stage === "signing" ? "Đã tải đủ IPA — đang ký trên máy chủ" :
+    heading.textContent = stage === "preparing" ? "Đang chuẩn bị phiên tải IPA" :
+      stage === "signing" ? "Đã tải đủ IPA — đang ký trên máy chủ" :
       stage === "complete" ? "Đã ký IPA thành công" :
       "Đang tải IPA lên máy chủ";
-    note.textContent = stage === "signing"
+    note.textContent = stage === "preparing"
+      ? "Chưa gửi tệp. Đang kiểm tra đăng nhập và kết nối máy chủ..."
+      : stage === "signing"
       ? "100% là tiến độ gửi file, không phải tiến độ ký. Máy chủ đang xử lý chữ ký."
       : stage === "complete"
         ? "Chọn Cài trực tiếp lên iPhone hoặc Tải IPA đã ký bên dưới."
@@ -195,12 +198,13 @@
       const profile = form.elements.namedItem("mobileprovision")?.files?.[0];
       const password = form.elements.namedItem("password")?.value;
       if (!file || !p12 || !profile || !password) throw new Error("Chọn đủ IPA, P12, mobileprovision và mật khẩu.");
-      showProgress(0, file.size, "uploading");
-      status("Đang chuẩn bị tải IPA: 0.0% · 0.0 MB / " + fmt(file.size));
+      showProgress(0, file.size, "preparing");
+      status("Đang kiểm tra đăng nhập và phiên tải IPA cũ. Chưa gửi dữ liệu tới máy chủ.");
       const ready = getSaved();
       let job;
       if (ready && ready.name === file.name && ready.size === file.size) {
         try {
+          status("Đang kết nối máy chủ để xác minh các phần IPA đã tải của phiên trước...");
           job = await api("/api/v1/tools/ipa/sign-jobs/" + ready.id);
           if (job.state === "failed") job = null;
           if (job?.state === "completed") {
@@ -216,7 +220,7 @@
       }
       if (!job) {
         clear();
-        status("Tạo phiên ký IPA mới...");
+        status("Đang yêu cầu máy chủ mở phiên ký IPA. Nếu Render Free đang khởi động, bước này có thể mất thêm thời gian...");
         job = await api("/api/v1/tools/ipa/sign-jobs", {
           method:"POST", body:JSON.stringify({filename:file.name,size_bytes:file.size}),
           contentType:"application/json"
@@ -236,10 +240,17 @@
         if (received.has(i)) continue;
         if (!token()) throw new Error("Phiên đăng nhập đã mất. Đăng nhập lại rồi tiếp tục tải IPA.");
         const slice = file.slice(i * job.chunk_bytes, Math.min(file.size,(i+1)*job.chunk_bytes));
+        status("Đang tính SHA-256 cho phần " + (i+1) + "/" + chunks +
+          " (" + fmt(slice.size) + "). Đã xác nhận " + fmt(confirmedBytes()) +
+          " / " + fmt(file.size) + ".");
         const digest = await sha256(slice);
         let sent = false;
         for (let retry=0;retry<3&&!sent;retry++) {
           try {
+            status("Đang gửi phần IPA " + (i+1) + "/" + chunks +
+              " (" + fmt(slice.size) + ") tới máy chủ" +
+              (retry?" · lần thử "+(retry+1):"")+
+              ". Đã xác nhận " + fmt(confirmedBytes()) + " / " + fmt(file.size) + ".");
             await putChunk(job.job_id,i,slice,digest);
             sent=true;
           } catch(e) {
