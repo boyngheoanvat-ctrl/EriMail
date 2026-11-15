@@ -277,21 +277,30 @@
       const data=await providerRequest("/api/decrypt/library?"+params);
       candidates.push(...ipaMatches(data.items||[],target));
     }
+    // Never let an optional versions endpoint prevent a confirmed IPA download.
+    const alreadyExact=candidates.find(candidate=>
+      candidate.dl_url && (!requestedVersion || ipaVersion(candidate)===requestedVersion));
+    if(alreadyExact)return {exact:alreadyExact,alternate:null,requestedVersion};
     if(target.bundle_id){
-      const params=new URLSearchParams({
-        target:target.bundle_id,country:String(target.country||"auto").toLowerCase()
-      });
-      const data=await providerRequest("/api/decrypt/versions?"+params);
-      for(const version of (Array.isArray(data.versions)?data.versions:[])){
-        const cache=version.cached||version.vault_cached;
-        if(!cache)continue;
-        const file=normal({...cache,
-          bundle_id:target.bundle_id,
-          title:target.title,
-          version:String(cache.version||version.version||""),
-          country:target.country
+      try{
+        const params=new URLSearchParams({
+          target:target.bundle_id,country:String(target.country||"auto").toLowerCase()
         });
-        if(file.dl_url)candidates.push(file);
+        const data=await providerRequest("/api/decrypt/versions?"+params);
+        for(const version of (Array.isArray(data.versions)?data.versions:[])){
+          const cache=version.cached||version.vault_cached;
+          if(!cache)continue;
+          const file=normal({...cache,
+            bundle_id:target.bundle_id,
+            title:target.title,
+            version:String(cache.version||version.version||""),
+            country:target.country
+          });
+          if(file.dl_url)candidates.push(file);
+        }
+      }catch(error){
+        // Version history is optional; a working vault lookup remains useful.
+        if(!candidates.length)throw error;
       }
     }
     const unique=new Map();
