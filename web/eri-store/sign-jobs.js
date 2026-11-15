@@ -15,7 +15,8 @@
   function status(message, level = "info") {
     const node = $("ipa-sign-status");
     if (!node) return;
-    node.replaceChildren(document.createTextNode(message));
+    node.replaceChildren();
+    if(message)node.append(document.createTextNode(message));
     node.dataset.state = level;
   }
 
@@ -35,25 +36,16 @@
     const bar = $("ipa-sign-progress-bar");
     const percent = $("ipa-sign-progress-percent");
     const label = $("ipa-sign-progress-label");
-    const note = $("ipa-sign-progress-stage");
-    if (!pane || !bar || !percent || !label || !note) return;
+    if (!pane || !bar || !percent || !label) return;
     const value = Math.min(100, Math.max(0,
       Math.round(1000 * bytes / Math.max(total, 1)) / 10));
     pane.classList.remove("hidden");
     bar.value = value;
     percent.textContent = value.toFixed(1) + "%";
     label.textContent =
-      stage === "preparing" ? "Đang chuẩn bị tải IPA" :
-      stage === "uploading" ? "Đang gửi toàn bộ IPA trong 1 lần" :
-      stage === "signing" ? "Đã truyền dữ liệu — đang chờ máy chủ ký" :
-      stage === "complete" ? "Ký IPA thành công" : "Không thể hoàn thành ký IPA";
-    note.textContent =
-      stage === "preparing" ? "Đang kiểm tra IPA, chứng chỉ và đăng nhập." :
-      stage === "uploading" ? "Trình duyệt đã truyền khoảng " + fmt(bytes) +
-        " / " + fmt(total) + ". Chỉ máy chủ mới xác nhận đã nhận đủ dữ liệu." :
-      stage === "signing" ? "100% là tiến độ truyền dữ liệu của trình duyệt, không phải tiến độ ký số." :
-      stage === "complete" ? "Có thể cài trực tiếp hoặc tải IPA đã ký." :
-        "Nếu một lần tải bị ngắt, cần gửi lại toàn bộ IPA từ đầu.";
+      stage === "complete" ? "Đã ký IPA" :
+      stage === "signing" ? "Đang ký IPA" :
+      stage === "error" ? "Lỗi ký IPA" : "Đang tải IPA";
   }
 
   function renderLinks(result) {
@@ -77,10 +69,7 @@
     download.rel = "noopener noreferrer";
     download.textContent = "Tải IPA đã ký";
     row.append(install, download);
-    const detail = document.createElement("p");
-    detail.className = "small";
-    detail.textContent = "Mở bằng Safari. Chữ ký phải hợp lệ với thiết bị; liên kết ký có thể hết hạn sau 60 phút.";
-    target.append(row, detail);
+    target.append(row);
   }
 
   function serverError(response, httpStatus) {
@@ -117,7 +106,7 @@
     const submit = form.querySelector('button[type="submit"]');
     if (submit) submit.disabled = true;
     progress(0, ipa.size, "preparing");
-    status("Đang gửi IPA và chứng chỉ trong một yêu cầu HTTPS. Không chia phần 2 MB.");
+    status("");
     const payload = new FormData();
     payload.append("ipa", ipa, ipa.name);
     payload.append("p12", p12, p12.name);
@@ -132,7 +121,7 @@
     xhr.setRequestHeader("Authorization", "Bearer " + auth);
     xhr.upload.onprogress = event => {
       if (!event.lengthComputable || !event.total) {
-        status("Đang gửi toàn bộ IPA trong một lần qua HTTPS...");
+        status("");
         return;
       }
       // Multipart totals contain P12/profile overhead; display an IPA-scaled
@@ -140,13 +129,11 @@
       const portion = Math.min(1, event.loaded / event.total);
       const approximate = Math.round(portion * ipa.size);
       progress(approximate, ipa.size, "uploading");
-      status("Đang gửi IPA một lần: " + (portion * 100).toFixed(1) +
-        "% · " + fmt(approximate) + " / " + fmt(ipa.size) +
-        ". Đây là dữ liệu trình duyệt đã truyền.");
+      status("");
     };
     xhr.upload.onload = () => {
       progress(ipa.size, ipa.size, "signing");
-      status("Trình duyệt đã gửi 100% dữ liệu. Đang chờ máy chủ nhận, kiểm tra và ký IPA...");
+      status("");
     };
     xhr.onload = () => {
       let body = {};
@@ -173,7 +160,7 @@
         throw new Error("Máy chủ chưa trả về đường dẫn IPA đã ký.");
       }
       progress(ipa.size, ipa.size, "complete");
-      status(body.message || "IPA đã được ký thành công.", "success");
+      status("Ký IPA thành công", "success");
       renderLinks(body);
     }
     xhr.onerror = () => {

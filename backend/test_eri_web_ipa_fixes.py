@@ -31,7 +31,7 @@ assert "Kiểm tra và tạo link tải IPA" not in html
 assert 'id="ipa-sign-panel"' in html
 assert 'name="ipa"' in html and 'name="p12"' in html
 assert 'name="mobileprovision"' in html and 'name="password"' in html
-assert 'sign-jobs.js?v=20261115uploadwhole1' in html
+assert 'sign-jobs.js?v=20261116cleanupload1' in html
 assert 'const MAX_IPA = 512 * 1024 * 1024' in chunks
 assert 'function uploadWholeIPA(form)' in chunks
 assert 'xhr.open("POST", API + "/api/v1/tools/ipa/sign", true);' in chunks
@@ -63,7 +63,7 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v41" in service
+assert "eri-store-v42" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
 assert "decrypt-store.js?v=20261115erivault3" in html
@@ -128,8 +128,15 @@ assert 'window.ERIStoreIPA=Object.freeze' in decrypt
 assert 'const found=await findAvailableIPA(target);' in decrypt
 assert 'Đang kết nối kho IPA ERI Nguyễn...' in decrypt
 assert 'Đang kết nối kho IPA F4TEAM...' not in decrypt
-assert 'stage === "preparing"' in chunks
-assert 'Đang gửi toàn bộ IPA trong 1 lần' in chunks
+assert 'stage === "signing"' in chunks
+assert 'ipa-sign-progress-stage' not in html
+assert 'ipa-sign-progress-stage' not in chunks
+assert 'Đang gửi IPA một lần:' not in chunks
+assert 'Trình duyệt đã truyền khoảng' not in chunks
+assert 'node.replaceChildren();' in chunks
+assert 'status("");' in chunks
+assert 'target.append(row);' in chunks
+assert 'Ký IPA thành công' in chunks
 assert "ERI DECRYPT" in html
 assert "BY ERI NGUYỄN" in html
 

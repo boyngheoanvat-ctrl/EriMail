@@ -20,7 +20,7 @@ document.addEventListener("submit", function(event) {
   if (event.target && event.target.id === "eri-decrypt-search-form") event.preventDefault();
 }, true);
 </script>
-<script defer src="/decrypt-store.js?v=20261115erivault3"></script><script defer src="/sign-jobs.js?v=20261115uploadwhole1"></script>
+<script defer src="/decrypt-store.js?v=20261115erivault3"></script><script defer src="/sign-jobs.js?v=20261116cleanupload1"></script>
 <title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
 </head>
 <body class="shop-v2">
@@ -293,8 +293,7 @@ document.addEventListener("submit", function(event) {
   </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>
-    <p>Chọn IPA, chứng chỉ P12, mobileprovision và mật khẩu P12. ERI sẽ tự động ký sau khi nhận đủ dữ liệu, không cần quản trị viên duyệt. iOS vẫn kiểm tra chứng chỉ và thiết bị khi cài đặt.</p>
-    <p class="small">IPA, P12 và mobileprovision được gửi trong một yêu cầu HTTPS. Nếu mất mạng hoặc máy chủ hết thời gian xử lý, bạn phải tải lại toàn bộ IPA.</p>
+    <p>Chọn IPA, P12, mobileprovision và nhập mật khẩu để ký.</p>
     <form id="ipa-sign-form" enctype="multipart/form-data" autocomplete="off">
       <label class="field">Tệp ứng dụng .ipa
         <input type="file" name="ipa" accept=".ipa" required>
@@ -318,7 +317,6 @@ document.addEventListener("submit", function(event) {
         <span id="ipa-sign-progress-percent">0%</span>
       </div>
       <progress id="ipa-sign-progress-bar" max="100" value="0" aria-label="Tiến độ IPA máy chủ đã nhận"></progress>
-      <p id="ipa-sign-progress-stage">Sẵn sàng ký IPA.</p>
     </div>
     <div id="ipa-sign-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
   </div>
