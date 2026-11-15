@@ -932,6 +932,44 @@ def _eri_paths(upload_id: str):
     return (UPLOAD_DIR / ("." + upload_id + ".session.json"),
             UPLOAD_DIR / ("." + upload_id + ".part"))
 
+def _eri_recover_fast_session(upload_id: str):
+    """Reconstruct acknowledged chunks from private cloud after a restart."""
+    if _eri_vault is None:
+        raise HTTPException(404, "Phiên upload không tồn tại")
+    try:
+        metadata = _eri_vault.get_session(upload_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "Không có phiên upload trong kho bền vững")
+    if not metadata.get("fast"):
+        raise HTTPException(409, "Phiên tải cũ không thể khôi phục; hãy tạo lại upload")
+    size, kind = metadata.get("size_bytes"), metadata.get("kind")
+    if (not isinstance(size, int) or kind not in UPLOAD_LIMITS
+            or not 0 < size <= UPLOAD_LIMITS[kind]):
+        raise VaultError("Cloud upload session has invalid size")
+    count = (size + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    metadata_file, data_file = _eri_paths(upload_id)
+    parts_dir = _eri_fast_parts_dir(upload_id)
+    parts_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with data_file.open("wb") as dest:
+        os.chmod(data_file, 0o600)
+        dest.truncate(size)
+        for index in range(count):
+            if not _eri_vault.chunk_exists(upload_id, index):
+                continue
+            data = _eri_vault.get_upload_part(upload_id, index)
+            expected = min(ERI_CHUNK_BYTES, size - index * ERI_CHUNK_BYTES)
+            if len(data) != expected:
+                raise VaultError("Cloud upload chunk has invalid size")
+            dest.seek(index * ERI_CHUNK_BYTES)
+            dest.write(data)
+            marker = _eri_fast_part_marker(upload_id, index)
+            marker.write_text(hashlib.sha256(data).hexdigest(), encoding="utf-8")
+            os.chmod(marker, 0o600)
+    _eri_save_session(upload_id, metadata)
+    return metadata
+
+
 def _eri_read_session(upload_id: str):
     metadata_file, data_file = _eri_paths(upload_id)
     try:
@@ -939,8 +977,13 @@ def _eri_read_session(upload_id: str):
         if metadata.get("upload_id") != upload_id:
             raise ValueError("Session mismatch")
     except (OSError, ValueError, TypeError):
-        raise HTTPException(404, "Upload session not found; server storage may have restarted")
+        if _eri_vault is None:
+            raise HTTPException(404, "Upload session not found; server storage may have restarted")
+        metadata = _eri_recover_fast_session(upload_id)
     actual = data_file.stat().st_size if data_file.exists() else -1
+    if _eri_vault is not None and metadata.get("fast") and actual != metadata["size_bytes"]:
+        metadata = _eri_recover_fast_session(upload_id)
+        actual = data_file.stat().st_size
     if metadata.get("fast"):
         # Fast mode pre-sizes a sparse file; completed ranges are tracked
         # independently so a partial chunk is never considered acknowledged.
@@ -960,6 +1003,8 @@ def _eri_save_session(upload_id: str, metadata: dict):
     staged.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
     os.chmod(staged, 0o600)
     os.replace(staged, metadata_file)
+    if _eri_vault is not None and metadata.get("fast"):
+        _eri_vault.put_session(upload_id, metadata)
 
 def _eri_ipa_properties(file: Path):
     try:
@@ -1076,6 +1121,9 @@ async def eri_send_fast_part(upload_id: str, index: int, request: Request,
         raise HTTPException(422, "Incomplete chunk")
     if hashlib.sha256(chunk).hexdigest() != x_eri_chunk_sha256:
         raise HTTPException(422, "Chunk checksum mismatch")
+    if _eri_vault is not None:
+        # Remote storage must acknowledge bytes before the Admin sees success.
+        await asyncio.to_thread(_eri_vault.put_upload_part, upload_id, index, bytes(chunk))
 
     async with _eri_upload_lock:
         # Revalidate after the network transfer (another call can have completed).
