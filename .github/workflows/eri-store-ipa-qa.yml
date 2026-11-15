@@ -18,6 +18,26 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Inspect publicly listed ESign and KSign installer source (diagnostic)
+        run: |
+          python3 - <<'PY'
+          from urllib.request import urlopen,Request
+          import re
+          urls=['https://website.khoindvn.io.vn/apps.js','https://khoindvn.io.vn/','https://khoindvn.com/']
+          for url in urls:
+              try:
+                  with urlopen(Request(url, headers={'User-Agent':'Mozilla/5.0 ERIStore/1.0'}), timeout=16) as r:
+                      body=r.read(500000).decode('utf-8','replace')
+                      print('DIAG',url,'status',r.status,'type',r.headers.get('Content-Type'),'bytes',len(body))
+                      if url.endswith('apps.js'):
+                          print('HEAD',body[:1400].replace('\\n',' '))
+                          for pat in ['itms-services','manifest.plist','ipa','esign','ksign','Viet Nam Rubber']:
+                              ix=body.lower().find(pat.lower())
+                              print('PATTERN',pat,'found',ix>=0,'context',body[max(0,ix-120):ix+300].replace('\\n',' ')[:420] if ix>=0 else '')
+                          print('URLs',list(dict.fromkeys(re.findall(r'https?://[^\\s"\\'<>]{3,150}',body)))[:20])
+              except Exception as e:
+                  print('DIAG ERROR',url,str(e)[:250])
+          PY
       - name: JavaScript syntax checks
         run: |
           node --check web/eri-store/ipa-tools.js
