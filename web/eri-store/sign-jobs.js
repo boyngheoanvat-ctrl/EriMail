@@ -1,130 +1,69 @@
 "use strict";
-// Resumable single-stream 2-MiB signing uploads. Do not store P12, password, or customer keys
-// in IndexedDB/localStorage. The job ID is non-secret and scoped by server auth.
+// Single-request IPA signing. Upload IPA, P12 and mobileprovision together.
+// The browser can report bytes transmitted; only a successful API response
+// confirms that ERI received, validated and signed the IPA.
 (() => {
   const API = "https://eri-api-dag8.onrender.com";
   const TOKEN_KEY = "eri_store_buyer_token";
-  const JOB_KEY = "eri_store_signing_job_v2";
+  const MAX_IPA = 512 * 1024 * 1024;
   const $ = id => document.getElementById(id);
-  const token = () => sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || "";
-  const fmt = b => (b / 1048576).toFixed(1) + " MB";
-  const getSaved = () => {
-    try { return JSON.parse(localStorage.getItem(JOB_KEY) || "null"); }
-    catch { return null; }
-  };
-  const save = data => { try { localStorage.setItem(JOB_KEY, JSON.stringify(data)); } catch {} };
-  const clear = () => { try { localStorage.removeItem(JOB_KEY); } catch {} };
+  const credential = () =>
+    sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || "";
+  const fmt = bytes => (bytes / 1048576).toFixed(1) + " MB";
   let busy = false;
-  let polling = false;
-  let currentJob = null;
-  // The user must re-select their local IPA after reloading Safari.
-  // Only confirmed server chunks count towards the progress bar.
 
-  function showProgress(bytes, total, stage) {
-    const panel = $("ipa-sign-progress");
+  function status(message, level = "info") {
+    const node = $("ipa-sign-status");
+    if (!node) return;
+    node.replaceChildren(document.createTextNode(message));
+    node.dataset.state = level;
+  }
+
+  function action(text, callback) {
+    const target = $("ipa-sign-status");
+    if (!target) return;
+    const control = document.createElement("button");
+    control.type = "button";
+    control.className = "btn outline";
+    control.textContent = text;
+    control.addEventListener("click", callback);
+    target.append(document.createElement("p"), control);
+  }
+
+  function progress(bytes, total, stage) {
+    const pane = $("ipa-sign-progress");
     const bar = $("ipa-sign-progress-bar");
     const percent = $("ipa-sign-progress-percent");
-    const heading = $("ipa-sign-progress-label");
+    const label = $("ipa-sign-progress-label");
     const note = $("ipa-sign-progress-stage");
-    if (!panel || !bar || !percent || !heading || !note) return;
-    const value = Math.max(0, Math.min(100, Math.round(1000 * bytes / Math.max(total, 1)) / 10));
-    panel.classList.remove("hidden");
+    if (!pane || !bar || !percent || !label || !note) return;
+    const value = Math.min(100, Math.max(0,
+      Math.round(1000 * bytes / Math.max(total, 1)) / 10));
+    pane.classList.remove("hidden");
     bar.value = value;
     percent.textContent = value.toFixed(1) + "%";
-    heading.textContent = stage === "preparing" ? "Đang chuẩn bị phiên tải IPA" :
-      stage === "signing" ? "Đã tải đủ IPA — đang ký trên máy chủ" :
-      stage === "complete" ? "Đã ký IPA thành công" :
-      "Đang tải IPA lên máy chủ";
-    note.textContent = stage === "preparing"
-      ? "Chưa gửi tệp. Đang kiểm tra đăng nhập và kết nối máy chủ..."
-      : stage === "signing"
-      ? "100% là tiến độ gửi file, không phải tiến độ ký. Máy chủ đang xử lý chữ ký."
-      : stage === "complete"
-        ? "Chọn Cài trực tiếp lên iPhone hoặc Tải IPA đã ký bên dưới."
-        : "Đã nhận " + fmt(bytes) + " / " + fmt(total) +
-          " — chỉ cập nhật sau khi máy chủ xác nhận dữ liệu.";
+    label.textContent =
+      stage === "preparing" ? "Đang chuẩn bị tải IPA" :
+      stage === "uploading" ? "Đang gửi toàn bộ IPA trong 1 lần" :
+      stage === "signing" ? "Đã truyền dữ liệu — đang chờ máy chủ ký" :
+      stage === "complete" ? "Ký IPA thành công" : "Không thể hoàn thành ký IPA";
+    note.textContent =
+      stage === "preparing" ? "Đang kiểm tra IPA, chứng chỉ và đăng nhập." :
+      stage === "uploading" ? "Trình duyệt đã truyền khoảng " + fmt(bytes) +
+        " / " + fmt(total) + ". Chỉ máy chủ mới xác nhận đã nhận đủ dữ liệu." :
+      stage === "signing" ? "100% là tiến độ truyền dữ liệu của trình duyệt, không phải tiến độ ký số." :
+      stage === "complete" ? "Có thể cài trực tiếp hoặc tải IPA đã ký." :
+        "Nếu một lần tải bị ngắt, cần gửi lại toàn bộ IPA từ đầu.";
   }
 
-  function status(message, severity = "info") {
-    const el = $("ipa-sign-status");
-    if (!el) return;
-    el.replaceChildren(document.createTextNode(message));
-    el.dataset.state = severity;
-  }
-  function action(name, fn) {
-    const el = $("ipa-sign-status");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "btn outline";
-    button.textContent = name;
-    button.addEventListener("click", fn);
-    el?.append(document.createElement("p"), button);
-  }
-  function errorText(data, statusCode) {
-    if (statusCode === 401) return "Phiên đăng nhập không còn hợp lệ. Đăng nhập lại rồi chọn Tiếp tục tải IPA.";
-    if (statusCode === 403) return "Tài khoản không có quyền truy cập phiên ký IPA này.";
-    if (statusCode === 404 || statusCode === 410) return "Phiên tải IPA cũ không còn trên máy chủ. Hãy tạo phiên mới.";
-    if (statusCode === 409) return "Phiên IPA không ở trạng thái mong đợi. Đang cần kiểm tra lại phiên.";
-    if (statusCode === 413) return "Phần IPA vượt giới hạn máy chủ. Hãy chọn file hợp lệ.";
-    if (statusCode === 429) return "Máy chủ đang giới hạn yêu cầu. Vui lòng thử lại.";
-    if (typeof data?.detail === "string") return data.detail;
-    if (statusCode >= 500) return "Máy chủ đang bận hoặc khởi động lại. Bạn có thể mở lại để tiếp tục.";
-    return "HTTP " + statusCode + ": Không xử lý được yêu cầu.";
-  }
-  async function api(path, {method = "GET", body, contentType, timeout = 60000} = {}) {
-    const credential = token();
-    if (!credential) throw new Error("Vui lòng đăng nhập ERI STORE trước khi ký IPA.");
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    try {
-      const headers = {"Authorization": "Bearer " + credential};
-      if (contentType) headers["Content-Type"] = contentType;
-      const response = await fetch(API + path, {
-        method, headers, body, cache:"no-store", signal:controller.signal
-      });
-      let json = {};
-      try { json = await response.json(); } catch {}
-      if (!response.ok) throw new Error(errorText(json, response.status));
-      return json;
-    } catch (e) {
-      if (e.name === "AbortError") throw new Error("Kết nối quá thời gian. Bấm tiếp tục để gửi lại phần chưa xác nhận.");
-      throw e;
-    } finally { clearTimeout(timer); }
-  }
-  async function putChunk(jobId, index, blob, sha) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90000);
-    try {
-      const response = await fetch(API + "/api/v1/tools/ipa/sign-jobs/" + jobId + "/chunks/" + index, {
-        method: "PUT", cache: "no-store", signal: controller.signal,
-        headers: {
-          "Authorization": "Bearer " + token(), "Content-Type": "application/octet-stream",
-          "X-ERI-Chunk-SHA256": sha
-        },
-        body: blob
-      });
-      let json = {};
-      try { json = await response.json(); } catch {}
-      if (!response.ok) throw new Error(errorText(json, response.status));
-      if (json.index !== index || json.received_bytes !== blob.size) {
-        throw new Error("Máy chủ chưa xác nhận đủ phần " + (index + 1));
-      }
-    } catch (e) {
-      if (e.name === "AbortError") throw new Error("Gửi từng phần quá thời gian, có thể thử lại.");
-      throw e;
-    } finally { clearTimeout(timer); }
-  }
-  async function sha256(blob) {
-    const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
-    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,"0")).join("");
-  }
-  function resultLinks(result) {
-    const el = $("ipa-sign-status");
-    if (!el || !result) return;
-    const link = result.download_path;
+  function renderLinks(result) {
+    const link = result && result.download_path;
     if (typeof link !== "string" ||
-        !/^\/api\/v1\/tools\/ipa\/install\/[A-Za-z0-9_-]{32,64}\/app\.ipa$/.test(link)) return;
+        !/^\/api\/v1\/tools\/ipa\/install\/[A-Za-z0-9_-]{32,64}\/app\.ipa$/.test(link)) {
+      throw new Error("Máy chủ chưa cung cấp tệp IPA đã ký hợp lệ.");
+    }
     const tokenId = link.split("/")[6];
+    const target = $("ipa-sign-status");
     const row = document.createElement("div");
     row.className = "ipa-tool-actions";
     const install = document.createElement("a");
@@ -135,206 +74,142 @@
     const download = document.createElement("a");
     download.className = "btn outline";
     download.href = API + link;
-    download.textContent = "Tải IPA đã ký";
     download.rel = "noopener noreferrer";
-    row.append(install,download);
-    el.append(row);
-    const message = document.createElement("p");
-    message.className = "small";
-    message.textContent = "Cài bằng Safari; chứng chỉ cần hợp lệ với thiết bị. Liên kết có hiệu lực 60 phút và có thể mất khi Render khởi động lại.";
-    el.append(message);
+    download.textContent = "Tải IPA đã ký";
+    row.append(install, download);
+    const detail = document.createElement("p");
+    detail.className = "small";
+    detail.textContent = "Mở bằng Safari. Chữ ký phải hợp lệ với thiết bị; liên kết ký có thể hết hạn sau 60 phút.";
+    target.append(row, detail);
   }
-  async function watch(jobId, activeSigner = false) {
-    if (polling || (busy && !activeSigner)) return;
-    polling = true;
-    try {
-      // Poll only while this page is open; processing continues server-side.
-      while (document.visibilityState !== "hidden") {
-        const job = await api("/api/v1/tools/ipa/sign-jobs/" + jobId);
-        if (job.state === "completed") {
-          clear();
-          showProgress(job.size_bytes, job.size_bytes, "complete");
-          status("Ký IPA thành công! Bấm Cài trực tiếp lên iPhone để iOS hỏi xác nhận cài đặt, hoặc tải IPA đã ký.", "success");
-          resultLinks(job.result);
-          return;
-        }
-        if (job.state === "failed") {
-          status(job.error || "Ký IPA thất bại.", "error");
-          $("ipa-sign-progress")?.classList.add("hidden");
-          clear();
-          return;
-        }
-        if (job.state === "uploading") {
-          // Background status checks may not overwrite the active upload's UI.
-          if (!busy) {
-            showProgress(job.uploaded_bytes, job.size_bytes, "uploading");
-            const savedPct = (100 * job.uploaded_bytes / Math.max(1, job.size_bytes)).toFixed(1);
-            status("Máy chủ đã nhận " + savedPct + "% · " + fmt(job.uploaded_bytes) + " / " + fmt(job.size_bytes) +
-              ". Chọn lại cùng tệp IPA và bấm Tiếp tục tải IPA để gửi những phần còn thiếu.");
-            const form = $("ipa-sign-form");
-            const resumeFile = form?.elements.namedItem("ipa")?.files?.[0];
-            if (resumeFile?.name === getSaved()?.name && resumeFile.size === getSaved()?.size) {
-              action("Tiếp tục tải IPA", () => run(form));
-            }
-          }
-          return;
-        }
-        showProgress(job.size_bytes, job.size_bytes, "signing");
-        status("Máy chủ đang ký IPA. Bạn có thể thoát trang và mở lại để xem kết quả...");
-        await new Promise(done => setTimeout(done, 3000));
-      }
-    } catch (e) {
-      status(e.message + " Có thể mở lại trang để kiểm tra tác vụ.", "error");
-    } finally { polling = false; }
+
+  function serverError(response, httpStatus) {
+    if (httpStatus === 401) return "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại và tải IPA từ đầu.";
+    if (httpStatus === 413) return "IPA vượt giới hạn tải lên của máy chủ.";
+    if (httpStatus === 429) return "Máy chủ đang giới hạn yêu cầu. Hãy thử lại.";
+    if (typeof response?.detail === "string") return response.detail;
+    if (httpStatus >= 500) return "Máy chủ bận hoặc giới hạn thời gian xử lý yêu cầu lớn.";
+    return "Máy chủ không hoàn thành yêu cầu (HTTP " + httpStatus + ").";
   }
-  async function run(form) {
+
+  function uploadWholeIPA(form) {
     if (busy) return;
+    const ipa = form.elements.namedItem("ipa")?.files?.[0];
+    const p12 = form.elements.namedItem("p12")?.files?.[0];
+    const profile = form.elements.namedItem("mobileprovision")?.files?.[0];
+    const password = form.elements.namedItem("password")?.value;
+    if (!ipa || !p12 || !profile || !password) {
+      status("Chọn đủ IPA, P12, mobileprovision và mật khẩu P12.", "error");
+      return;
+    }
+    if (!ipa.name.toLowerCase().endsWith(".ipa") || ipa.size < 1 || ipa.size > MAX_IPA) {
+      status("Tệp IPA phải hợp lệ và không vượt 512 MB.", "error");
+      return;
+    }
+    const auth = credential();
+    if (!auth) {
+      status("Vui lòng đăng nhập ERI STORE trước khi ký IPA.", "error");
+      action("Đăng nhập", () =>
+        document.querySelector('[data-view="account"]')?.click());
+      return;
+    }
     busy = true;
     const submit = form.querySelector('button[type="submit"]');
-    submit.disabled = true;
-    try {
-      const file = form.elements.namedItem("ipa")?.files?.[0];
-      const p12 = form.elements.namedItem("p12")?.files?.[0];
-      const profile = form.elements.namedItem("mobileprovision")?.files?.[0];
-      const password = form.elements.namedItem("password")?.value;
-      if (!file || !p12 || !profile || !password) throw new Error("Chọn đủ IPA, P12, mobileprovision và mật khẩu.");
-      showProgress(0, file.size, "preparing");
-      status("Đang kiểm tra đăng nhập và phiên tải IPA cũ. Chưa gửi dữ liệu tới máy chủ.");
-      const ready = getSaved();
-      let job;
-      if (ready && ready.name === file.name && ready.size === file.size) {
-        try {
-          status("Đang kết nối máy chủ để xác minh các phần IPA đã tải của phiên trước...");
-          job = await api("/api/v1/tools/ipa/sign-jobs/" + ready.id);
-          if (job.state === "failed") job = null;
-          if (job?.state === "completed") {
-            clear(); showProgress(job.size_bytes, job.size_bytes, "complete");
-            status("Tác vụ đã ký xong. Chọn cài trực tiếp hoặc tải IPA.", "success");
-            resultLinks(job.result); return;
-          }
-          if (job?.state === "processing") { await watch(ready.id, true); return; }
-        } catch (e) {
-          if (/không còn|404|410|tải lại/.test(e.message.toLowerCase())) job = null;
-          else throw e;
-        }
+    if (submit) submit.disabled = true;
+    progress(0, ipa.size, "preparing");
+    status("Đang gửi IPA và chứng chỉ trong một yêu cầu HTTPS. Không chia phần 2 MB.");
+    const payload = new FormData();
+    payload.append("ipa", ipa, ipa.name);
+    payload.append("p12", p12, p12.name);
+    payload.append("mobileprovision", profile, profile.name);
+    payload.append("password", password);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", API + "/api/v1/tools/ipa/sign", true);
+    // Browser timeout is disabled for large files; the reverse proxy may still
+    // enforce its own connection/request time limits.
+    xhr.timeout = 0;
+    xhr.setRequestHeader("Authorization", "Bearer " + auth);
+    xhr.upload.onprogress = event => {
+      if (!event.lengthComputable || !event.total) {
+        status("Đang gửi toàn bộ IPA trong một lần qua HTTPS...");
+        return;
       }
-      if (!job) {
-        clear();
-        status("Đang yêu cầu máy chủ mở phiên ký IPA. Nếu Render Free đang khởi động, bước này có thể mất thêm thời gian...");
-        job = await api("/api/v1/tools/ipa/sign-jobs", {
-          method:"POST", body:JSON.stringify({filename:file.name,size_bytes:file.size}),
-          contentType:"application/json"
-        });
-        save({id:job.job_id,name:file.name,size:file.size});
-        currentJob = job.job_id;
+      // Multipart totals contain P12/profile overhead; display an IPA-scaled
+      // estimate rather than claiming the server has acknowledged those bytes.
+      const portion = Math.min(1, event.loaded / event.total);
+      const approximate = Math.round(portion * ipa.size);
+      progress(approximate, ipa.size, "uploading");
+      status("Đang gửi IPA một lần: " + (portion * 100).toFixed(1) +
+        "% · " + fmt(approximate) + " / " + fmt(ipa.size) +
+        ". Đây là dữ liệu trình duyệt đã truyền.");
+    };
+    xhr.upload.onload = () => {
+      progress(ipa.size, ipa.size, "signing");
+      status("Trình duyệt đã gửi 100% dữ liệu. Đang chờ máy chủ nhận, kiểm tra và ký IPA...");
+    };
+    xhr.onload = () => {
+      let body = {};
+      try { body = JSON.parse(xhr.responseText || "{}"); } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) {
+        progress(0, ipa.size, "error");
+        status(serverError(body, xhr.status) +
+          " Upload một lần không thể tiếp tục từ phần đang dở.", "error");
+        if (xhr.status === 401) action("Đăng nhập lại", () =>
+          document.querySelector('[data-view="account"]')?.click());
+        return;
       }
-      currentJob = job.job_id;
-      let received = new Set(job.received || []);
-      const chunks = Math.ceil(file.size / job.chunk_bytes);
-      if (!(Number.isInteger(job.chunk_bytes) && job.chunk_bytes>0 && job.chunk_bytes<=8*1048576 &&
-            Number.isInteger(chunks) && chunks>0)) throw new Error("Máy chủ trả kích thước phần IPA không hợp lệ.");
-      const confirmedBytes = () => Array.from(received).reduce((bytes, n) =>
-        bytes + Math.max(0, Math.min(job.chunk_bytes, file.size - n * job.chunk_bytes)), 0);
-      showProgress(confirmedBytes(), file.size, "uploading");
-      // Upload one chunk at a time. Each chunk keeps SHA-256 verification,
-      // retries and resume; never send different chunks concurrently.
-      const pending=Array.from({length:chunks},(_,i)=>i).filter(i=>!received.has(i));
-      const concurrency=Math.min(1,pending.length);
-      let cursor=0;
-      let failed=null;
-      async function uploadWorker(){
-        while(!failed){
-          // Increment synchronously before the first await so workers never
-          // send the same chunk within a single run.
-          const i=pending[cursor++];
-          if(i===undefined)return;
-          try{
-            if(!token())throw new Error("Phiên đăng nhập đã mất. Đăng nhập lại rồi tiếp tục tải IPA.");
-            const slice=file.slice(i*job.chunk_bytes,Math.min(file.size,(i+1)*job.chunk_bytes));
-            const digest=await sha256(slice);
-            let sent=false;
-            for(let retry=0;retry<3&&!sent;retry++){
-              try{
-                status("Đang gửi phần IPA "+(i+1)+"/"+chunks+" ("+fmt(slice.size)+")"+
-                  (retry?" · thử lại "+(retry+1):"")+
-                  ". Tải 1 phần mỗi lượt. Đã xác nhận "+fmt(confirmedBytes())+
-                  " / "+fmt(file.size)+".");
-                await putChunk(job.job_id,i,slice,digest);
-                sent=true;
-              }catch(error){
-                // An interrupted reply may still mean the server stored the bytes.
-                // Check the server's received marker before attempting a resend.
-                const remote=await api("/api/v1/tools/ipa/sign-jobs/"+job.job_id);
-                if((remote.received||[]).includes(i))sent=true;
-                else if(retry===2)throw error;
-                else await new Promise(done=>setTimeout(done,500*(retry+1)));
-              }
-            }
-            if(!sent)throw new Error("Máy chủ chưa xác nhận phần "+(i+1));
-            received.add(i);
-            const uploaded=confirmedBytes();
-            showProgress(uploaded,file.size,"uploading");
-            const pct=(100*uploaded/Math.max(1,file.size)).toFixed(1);
-            status("Đã nhận "+pct+"% · "+fmt(uploaded)+" / "+fmt(file.size)+
-              " (đã xác nhận "+received.size+"/"+chunks+" phần). Đừng đóng Safari.");
-          }catch(error){
-            // Wait for already running requests before enabling resume.
-            if(!failed)failed=error;
-            return;
-          }
-        }
+      try {
+        renderLinksAfterSuccess(body);
+      } catch (error) {
+        progress(0, ipa.size, "error");
+        status(error.message || "Không có kết quả ký hợp lệ.", "error");
       }
-      await Promise.all(Array.from({length:concurrency},()=>uploadWorker()));
-      if(failed)throw failed;
-      if(received.size!==chunks)throw new Error("IPA chưa tải đủ, hãy tiếp tục các phần còn thiếu.");
-      showProgress(file.size, file.size, "signing");
-      status("Đã nhận 100% dữ liệu IPA. Đang gửi chứng chỉ để bắt đầu ký; chữ ký chưa hoàn tất.");
-      const args = new FormData();
-      args.append("p12",p12);
-      args.append("mobileprovision",profile);
-      args.append("password",password);
-      await api("/api/v1/tools/ipa/sign-jobs/" + job.job_id + "/start", {
-        method:"POST",body:args,timeout:90000
-      });
-      form.elements.namedItem("password").value = "";
-      status("Đã giao máy chủ xử lý ký. Có thể đóng website và mở lại để xem kết quả.");
-      await watch(job.job_id, true);
-    } catch(e) {
-      status((e.message || "Không thể gửi IPA.") +
-        " Các phần máy chủ đã xác nhận vẫn có thể tiếp tục nếu phiên tải còn tồn tại.", "error");
-      if (/hết hạn|đăng nhập|không còn hợp lệ|quyền truy cập/.test(e.message?.toLowerCase()||"")) {
-        action("Đăng nhập lại", () => document.querySelector('[data-view="account"]')?.click());
+    };
+    function renderLinksAfterSuccess(body) {
+      const result = body && body.download_path;
+      if (typeof result !== "string" ||
+          !/^\/api\/v1\/tools\/ipa\/install\/[A-Za-z0-9_-]{32,64}\/app\.ipa$/.test(result)) {
+        throw new Error("Máy chủ chưa trả về đường dẫn IPA đã ký.");
       }
-      action("Tiếp tục tải IPA", () => run(form));
-      if (/không còn|404|410|tạo phiên mới/.test(e.message?.toLowerCase()||"")) {
-        // Expired jobs are not resumable; a fresh upload is required.
-        clear();
-      }
-    } finally {
-      busy=false;
-      submit.disabled=false;
+      progress(ipa.size, ipa.size, "complete");
+      status(body.message || "IPA đã được ký thành công.", "success");
+      renderLinks(body);
+    }
+    xhr.onerror = () => {
+      progress(0, ipa.size, "error");
+      status("Mất kết nối khi tải hoặc ký IPA. Cần gửi lại toàn bộ IPA.", "error");
+    };
+    xhr.onabort = () => {
+      progress(0, ipa.size, "error");
+      status("Yêu cầu đã hủy. Upload lại toàn bộ IPA để thử tiếp.", "error");
+    };
+    xhr.ontimeout = () => {
+      progress(0, ipa.size, "error");
+      status("Máy chủ vượt thời gian xử lý một lần. Có thể dùng phương án tải từng phần nếu cần.", "error");
+    };
+    xhr.onloadend = () => {
+      busy = false;
+      if (submit) submit.disabled = false;
+      const pwd = form.elements.namedItem("password");
+      if (pwd) pwd.value = "";
+    };
+    try { xhr.send(payload); }
+    catch (error) {
+      busy = false;
+      if (submit) submit.disabled = false;
+      status("Không khởi tạo được yêu cầu tải IPA: " + error.message, "error");
     }
   }
-  document.addEventListener("DOMContentLoaded",() => {
+
+  document.addEventListener("DOMContentLoaded", () => {
     const form = $("ipa-sign-form");
     if (!form) return;
-    form.addEventListener("submit",e => {e.preventDefault();run(form);});
-    const pending = getSaved();
-    if (pending?.id) {
-      status("Đã lưu phiên tải IPA trước đó. Chọn lại đúng tệp IPA, P12, mobileprovision và bấm Tiếp tục tải IPA.");
-      // A status request must never compete with an upload started by the user.
-      if (token()) watch(pending.id);
-    }
-    form.elements.namedItem("ipa")?.addEventListener("change", () => {
-      const file = form.elements.namedItem("ipa")?.files?.[0];
-      const saved = getSaved();
-      const submit = form.querySelector('button[type="submit"]');
-      if (submit) submit.textContent = file && saved?.name === file.name && saved.size === file.size
-        ? "Tiếp tục tải IPA và ký" : "Ký IPA và cài đặt";
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      uploadWholeIPA(form);
     });
-    document.addEventListener("visibilitychange",() => {
-      if (document.visibilityState === "visible" && !busy && getSaved()?.id && token())
-        watch(getSaved().id);
-    });
+    const submit = form.querySelector('button[type="submit"]');
+    if (submit) submit.textContent = "Tải toàn bộ IPA một lần và ký";
   });
 })();

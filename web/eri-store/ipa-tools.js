@@ -284,7 +284,7 @@
     const signForm = $("ipa-sign-form");
     const signStatus = $("ipa-sign-status");
     if (!signForm || !signStatus) return;
-    // Large file signing is handled by sign-jobs.js with resumable chunks.
+    // IPA signing is handled by sign-jobs.js with one multipart HTTPS request.
     fetch(API + "/api/v1/tools/ipa/status", {cache:"no-store"})
       .then(r => r.ok ? r.json() : null)
       .then(info => {
