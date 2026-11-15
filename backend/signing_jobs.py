@@ -27,6 +27,7 @@ CHUNK_BYTES = 2 * 1024 * 1024
 MAX_IPA = 512 * 1024 * 1024
 MAX_CERT = 10 * 1024 * 1024
 JOB_TTL = 6 * 3600
+UPLOAD_IDLE_TTL = 45 * 60  # Abandoned uploads must not occupy both signing slots for 6h.
 BOOT = secrets.token_hex(12)
 ROOT = Path(os.getenv("ERI_SIGN_JOBS_DIR", str(Path(tempfile.gettempdir()) / "eri-sign-jobs")))
 LOCK = threading.RLock()
@@ -78,8 +79,13 @@ def _purge_old():
             continue
         try:
             state = json.loads((folder / "state.json").read_text(encoding="utf-8"))
-            when = state.get("created", 0)
-            if when and now - when > JOB_TTL:
+            when = float(state.get("created", 0) or 0)
+            activity = float(state.get("last_activity", when) or when)
+            # Only successfully acknowledged chunks refresh the upload lease.
+            # Reading/polling a job must not keep an abandoned upload alive.
+            stale_upload = state.get("state") == "uploading" and now - activity > UPLOAD_IDLE_TTL
+            expired = when and now - when > JOB_TTL
+            if stale_upload or expired:
                 shutil.rmtree(folder)
         except (OSError, ValueError):
             pass
@@ -123,6 +129,39 @@ def _write_small(upload: UploadFile, target: Path, suffix: str):
 
 def register_signing_jobs(router: APIRouter, require_customer, inspect, validate,
                           details, register_output):
+    @router.get("/api/v1/tools/ipa/sign-jobs")
+    def list_sign_jobs(customer=Depends(require_customer)):
+        """List only the caller's own jobs; never expose certificate contents."""
+        with LOCK:
+            _purge_old()
+            jobs = []
+            for folder in ROOT.iterdir():
+                if not folder.is_dir() or not re.fullmatch(r"[a-f0-9]{32}", folder.name):
+                    continue
+                try:
+                    state = json.loads((folder / "state.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if state.get("owner") != customer["id"]:
+                    continue
+                info = _public_state(state, folder)
+                info["filename"] = state.get("filename", "")
+                info["created"] = state.get("created", 0)
+                info["last_activity"] = state.get("last_activity", state.get("created", 0))
+                jobs.append(info)
+            jobs.sort(key=lambda job: job["created"], reverse=True)
+            return {"items": jobs[:20]}
+
+    @router.delete("/api/v1/tools/ipa/sign-jobs/{job_id}")
+    def cancel_sign_job(job_id: str, customer=Depends(require_customer)):
+        """Explicit cancellation; reject processing jobs to avoid signer races."""
+        with LOCK:
+            folder, source, state = _read(job_id, customer["id"])
+            if state["state"] not in ("uploading", "failed"):
+                raise HTTPException(409, "Chỉ có thể hủy phiên đang tải hoặc đã lỗi")
+            shutil.rmtree(folder)
+            return {"cancelled": True, "job_id": job_id}
+
     @router.post("/api/v1/tools/ipa/sign-jobs", status_code=201)
     def create_sign_job(item: JobCreate, customer=Depends(require_customer)):
         if not item.filename.lower().endswith(".ipa"):
@@ -130,6 +169,7 @@ def register_signing_jobs(router: APIRouter, require_customer, inspect, validate
         with LOCK:
             _purge_old()
             existing = 0
+            resumable = []
             for job_folder in ROOT.iterdir():
                 if not job_folder.is_dir(): continue
                 try:
@@ -138,8 +178,21 @@ def register_signing_jobs(router: APIRouter, require_customer, inspect, validate
                     continue
                 if state.get("state") in ("uploading", "processing"):
                     existing += 1
+                if (state.get("state") == "uploading" and
+                    state.get("owner") == customer["id"] and
+                    state.get("filename") == Path(item.filename).name and
+                    state.get("size_bytes") == item.size_bytes and
+                    (job_folder / "input.ipa").is_file()):
+                    resumable.append((state, job_folder))
+            # Idempotent create: resume the user's own exact filename and size
+            # even if both global slots are occupied. Prefer most bytes stored.
+            if resumable:
+                state, folder = max(resumable, key=lambda pair:
+                    (_public_state(pair[0], pair[1])["uploaded_bytes"],
+                     pair[0].get("last_activity", pair[0].get("created", 0))))
+                return _public_state(state, folder)
             if existing >= ACTIVE_LIMIT:
-                raise HTTPException(503, "Máy chủ đang xử lý nhiều IPA. Vui lòng thử lại.")
+                raise HTTPException(503, "Máy chủ đang xử lý nhiều IPA. Xem các phiên tải của bạn và hủy phiên bỏ dở trước khi tạo lượt mới.")
             job_id = secrets.token_hex(16)
             folder, _, source = _paths(job_id)
             folder.mkdir(mode=0o700)
@@ -151,6 +204,7 @@ def register_signing_jobs(router: APIRouter, require_customer, inspect, validate
                 "job_id": job_id, "owner": customer["id"],
                 "filename": Path(item.filename).name, "size_bytes": item.size_bytes,
                 "state": "uploading", "created": time.time(),
+                "last_activity": time.time(),
             }
             _save(folder, state)
         return _public_state(state, folder)
@@ -206,6 +260,8 @@ def register_signing_jobs(router: APIRouter, require_customer, inspect, validate
             tmp = marker.with_suffix(".tmp")
             tmp.write_text(x_eri_chunk_sha256)
             os.replace(tmp, marker)
+            state["last_activity"] = time.time()
+            _save(folder, state)
         return {"index": index, "received_bytes": size, "duplicate": False}
 
     def _finish_job(job_id: str, password: str):
@@ -303,6 +359,7 @@ def register_signing_jobs(router: APIRouter, require_customer, inspect, validate
                 (folder / "profile.mobileprovision").unlink(missing_ok=True)
                 raise
             state["state"] = "processing"
+            state["last_activity"] = time.time()
             state["boot"] = BOOT
             _save(folder, state)
             background.add_task(_finish_job, job_id, password)

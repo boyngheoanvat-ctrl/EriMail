@@ -120,4 +120,47 @@ with tempfile.TemporaryDirectory(prefix="eri-job-ci-") as root:
     assert client.get(path, headers={
         "Authorization": "Bearer " + wrong_user.json()["token"]
     }).status_code == 404
-    print("Chunk upload / resume / safe signing / private jobs / OTA manifest: OK")
+    # Abandoned uploads must not permanently fill the two active slots.
+    # Idempotent create resumes a user's exact own file before checking limits.
+    hold1 = client.post(basename,headers=headers,json={
+        "filename":"hold-one.ipa","size_bytes":3*1024*1024})
+    hold2 = client.post(basename,headers=headers,json={
+        "filename":"hold-two.ipa","size_bytes":3*1024*1024})
+    assert hold1.status_code == 201 and hold2.status_code == 201
+    hold1_id=hold1.json()["job_id"]
+    hold2_id=hold2.json()["job_id"]
+    resumed=client.post(basename,headers=headers,json={
+        "filename":"hold-one.ipa","size_bytes":3*1024*1024})
+    assert resumed.status_code==201 and resumed.json()["job_id"]==hold1_id
+    full=client.post(basename,headers=headers,json={
+        "filename":"hold-three.ipa","size_bytes":3*1024*1024})
+    assert full.status_code == 503
+    my_jobs=client.get(basename,headers=headers)
+    assert my_jobs.status_code==200 and {hold1_id,hold2_id}.issubset({
+        item["job_id"] for item in my_jobs.json()["items"]})
+    other_headers={"Authorization":"Bearer "+wrong_user.json()["token"]}
+    assert client.get(basename,headers=other_headers).json()["items"]==[]
+    assert client.delete(basename+"/"+hold1_id,headers=other_headers).status_code==404
+    assert client.delete(basename+"/"+hold2_id,headers=headers).json()["cancelled"] is True
+    next_job=client.post(basename,headers=headers,json={
+        "filename":"hold-three.ipa","size_bytes":3*1024*1024})
+    assert next_job.status_code==201
+    assert client.delete(basename+"/"+hold1_id,headers=headers).status_code==200
+    assert client.delete(basename+"/"+next_job.json()["job_id"],headers=headers).status_code==200
+
+    # Inactive upload leases expire without polling keeping a slot occupied.
+    import json
+    import time
+    import signing_jobs
+    stale=client.post(basename,headers=headers,json={
+        "filename":"stale.ipa","size_bytes":3*1024*1024})
+    assert stale.status_code==201
+    stale_id=stale.json()["job_id"]
+    statefile=signing_jobs.ROOT/stale_id/"state.json"
+    detail=json.loads(statefile.read_text(encoding="utf-8"))
+    detail["last_activity"]=time.time()-signing_jobs.UPLOAD_IDLE_TTL-2
+    statefile.write_text(json.dumps(detail),encoding="utf-8")
+    assert stale_id not in {item["job_id"] for item in client.get(
+        basename,headers=headers).json()["items"]}
+    assert client.get(basename+"/"+stale_id,headers=headers).status_code==410
+    print("Chunk upload / resume / queue ownership / idle expiry / safe signing / OTA: OK")
