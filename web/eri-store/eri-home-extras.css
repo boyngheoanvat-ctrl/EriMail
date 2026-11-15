@@ -51,3 +51,26 @@
 #certificate-free-panel .eri-free-install{grid-column:1/-1;grid-row:2;width:100%;padding:10px 15px;min-height:43px;touch-action:manipulation}
 #certificate-free-panel .eri-free-note{margin-top:18px;font-size:12px}
 @media(max-width:700px){.eri-free-cards{grid-template-columns:1fr}.eri-free-tab{flex:1;min-width:0}}
+
+
+/* Single Chứng chỉ category: FREE and BÁN use Mod Game's secondary tabs and product cards. */
+#certificate-subtabs{margin:3px 0 18px}
+#certificate-free-panel.eri-cert-free{max-width:none;margin:0;padding:0;border:0;box-shadow:none;background:transparent}
+#certificate-free-panel .eri-cert-free-icon{display:none}
+#certificate-free-panel .eri-free-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+#certificate-free-panel .eri-free-card{display:flex;flex-direction:column;grid-template-columns:none;grid-template-rows:none;align-items:stretch;gap:0;padding:0;border-radius:22px}
+#certificate-free-panel .eri-free-card .product-art{display:grid;place-items:center;min-height:128px}
+#certificate-free-panel .eri-free-card-mark{grid-column:auto;grid-row:auto;width:66px;height:66px;border-radius:18px;font-size:35px;background:linear-gradient(135deg,#6352e9,#9b8aff);color:#fff;box-shadow:0 10px 23px #6352e943}
+#certificate-free-panel .eri-free-card-body{grid-column:auto;grid-row:auto;display:flex;flex-direction:column;align-items:stretch;gap:0;min-height:180px}
+#certificate-free-panel .eri-free-card-title{font-size:18px;line-height:1.35;margin:0 0 9px}
+#certificate-free-panel .eri-free-card-issuer{font-size:13px;line-height:1.6;margin:0 0 13px;flex:1}
+#certificate-free-panel .eri-free-card-index{grid-column:auto;grid-row:auto;align-self:auto;color:#76708e;margin-bottom:12px}
+#certificate-free-panel .eri-free-card .product-footer{flex-wrap:wrap;align-items:center;gap:10px}
+#certificate-free-panel .eri-free-card .price{color:#087c5e}
+#certificate-free-panel .eri-free-install{grid-column:auto;grid-row:auto;width:auto;min-width:98px;min-height:43px}
+#ipa-sign-panel .eri-sign-mode-tabs{flex-wrap:wrap;margin:18px 0}
+#ipa-sign-panel .eri-sign-local{padding:19px;border:1px solid #e3dffb;border-radius:16px;background:#f8f7ff}
+#ipa-sign-panel .eri-sign-local h4{font-size:18px;margin:0 0 10px}
+#ipa-sign-panel .eri-sign-local p{line-height:1.7}
+@media(max-width:900px){#certificate-free-panel .eri-free-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){#certificate-free-panel .eri-free-cards{grid-template-columns:1fr;gap:14px}#ipa-sign-panel .eri-sign-mode-tabs .mod-subtab{flex:1 1 auto}}
