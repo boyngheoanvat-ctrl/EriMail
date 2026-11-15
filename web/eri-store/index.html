@@ -20,7 +20,7 @@ document.addEventListener("submit", function(event) {
   if (event.target && event.target.id === "eri-decrypt-search-form") event.preventDefault();
 }, true);
 </script>
-<script defer src="/decrypt-store.js?v=20261115erivault3"></script><script defer src="/sign-jobs.js?v=20261115uploadparallel1"></script>
+<script defer src="/decrypt-store.js?v=20261115erivault3"></script><script defer src="/sign-jobs.js?v=20261115uploadsingle1"></script>
 <title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
 </head>
 <body class="shop-v2">
@@ -294,7 +294,7 @@ document.addEventListener("submit", function(event) {
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>
     <p>Chọn IPA, chứng chỉ P12, mobileprovision và mật khẩu P12. ERI sẽ tự động ký sau khi nhận đủ dữ liệu, không cần quản trị viên duyệt. iOS vẫn kiểm tra chứng chỉ và thiết bị khi cài đặt.</p>
-    <p class="small">Tải IPA theo nhiều phần đồng thời để giảm thời gian chờ. Nếu mất mạng, bạn có thể tiếp tục từ các phần máy chủ đã nhận.</p>
+    <p class="small">Tải IPA theo từng phần bằng một luồng để tránh quá tải kết nối. Nếu mất mạng, bạn có thể tiếp tục từ các phần máy chủ đã nhận.</p>
     <form id="ipa-sign-form" enctype="multipart/form-data" autocomplete="off">
       <label class="field">Tệp ứng dụng .ipa
         <input type="file" name="ipa" accept=".ipa" required>

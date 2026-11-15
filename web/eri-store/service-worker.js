@@ -1,7 +1,7 @@
 // SHOP MOD BY ERI NGUYỄN private download streaming (native Safari downloads, no large JS Blob).
 // Each capability nonce lives only in this service worker memory and is never
 // a customer bearer token. No private file or auth token is cached.
-const VERSION="eri-store-v39";
+const VERSION="eri-store-v40";
 const STATIC=["/","/index.html","/styles.css","/shop-theme.css","/app.js","/free-certificates.js","/install-tools.json","/udid.js","/ipa-tools.js","/decrypt-store.js","/sign-jobs.js","/eri-home-extras.css","/icon.svg","/manifest.webmanifest"];
 const DOWNLOAD_PREFIX="/_eri_download/";
 const API="https://eri-api-dag8.onrender.com";

@@ -31,7 +31,7 @@ assert "Kiểm tra và tạo link tải IPA" not in html
 assert 'id="ipa-sign-panel"' in html
 assert 'name="ipa"' in html and 'name="p12"' in html
 assert 'name="mobileprovision"' in html and 'name="password"' in html
-assert 'sign-jobs.js?v=20261115uploadparallel1' in html
+assert 'sign-jobs.js?v=20261115uploadsingle1' in html
 assert '"eri_store_signing_job_v2"' in chunks
 assert 'if (!busy)' in chunks
 assert 'if (polling || (busy && !activeSigner)) return;' in chunks
@@ -40,7 +40,9 @@ assert 'filter(i=>!received.has(i))' in chunks
 assert 'if(!token())throw new Error' in chunks
 assert 'const confirmedBytes = () => Array.from(received).reduce' in chunks
 assert 'await putChunk(job.job_id,i,slice,digest);' in chunks
-assert 'const concurrency=Math.min(3,pending.length);' in chunks
+assert 'const concurrency=Math.min(1,pending.length);' in chunks
+assert 'Tải song song' not in chunks
+assert 'Tải 1 phần mỗi lượt' in chunks
 assert 'await Promise.all(Array.from({length:concurrency},()=>uploadWorker()));' in chunks
 assert 'const i=pending[cursor++];' in chunks
 assert 'if(received.size!==chunks)' in chunks

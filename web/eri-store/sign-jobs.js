@@ -1,5 +1,5 @@
 "use strict";
-// Resumable concurrent 2-MiB signing uploads. Do not store P12, password, or customer keys
+// Resumable single-stream 2-MiB signing uploads. Do not store P12, password, or customer keys
 // in IndexedDB/localStorage. The job ID is non-secret and scoped by server auth.
 (() => {
   const API = "https://eri-api-dag8.onrender.com";
@@ -236,11 +236,10 @@
       const confirmedBytes = () => Array.from(received).reduce((bytes, n) =>
         bytes + Math.max(0, Math.min(job.chunk_bytes, file.size - n * job.chunk_bytes)), 0);
       showProgress(confirmedBytes(), file.size, "uploading");
-      // Upload at most 3 chunks concurrently. Each chunk keeps the existing
-      // SHA-256 acknowledgment, retry and resume contract with the server.
-      // This overlaps network latency without buffering the entire IPA.
+      // Upload one chunk at a time. Each chunk keeps SHA-256 verification,
+      // retries and resume; never send different chunks concurrently.
       const pending=Array.from({length:chunks},(_,i)=>i).filter(i=>!received.has(i));
-      const concurrency=Math.min(3,pending.length);
+      const concurrency=Math.min(1,pending.length);
       let cursor=0;
       let failed=null;
       async function uploadWorker(){
@@ -258,7 +257,7 @@
               try{
                 status("Đang gửi phần IPA "+(i+1)+"/"+chunks+" ("+fmt(slice.size)+")"+
                   (retry?" · thử lại "+(retry+1):"")+
-                  ". Tải song song "+concurrency+" phần. Đã xác nhận "+fmt(confirmedBytes())+
+                  ". Tải 1 phần mỗi lượt. Đã xác nhận "+fmt(confirmedBytes())+
                   " / "+fmt(file.size)+".");
                 await putChunk(job.job_id,i,slice,digest);
                 sent=true;
