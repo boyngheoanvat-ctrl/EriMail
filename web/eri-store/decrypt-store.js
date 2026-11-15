@@ -380,7 +380,7 @@
       const data = await request("/api/v1/tools/ipa/decrypt/requests",{auth:true});
       if (startingToken !== getToken()) return; // Account changed mid-request.
       grid.replaceChildren();
-      // F4 history must still load when there are no ERI-source requests.
+      // Show independent ERI job history even when no IPA is currently available.
       for (const job of (Array.isArray(data.items) ? data.items : [])) {
         const node = card("article","eri-decrypt-card");
         node.append(card("strong","",job.name || job.bundle_id));
