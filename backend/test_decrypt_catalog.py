@@ -173,121 +173,30 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         stale = client.get(base + "/requests/" + job_id,headers=auth).json()
         assert stale["progress"] is None and stale["result"] is None
 
-    # F4 /search returns an items list, not a top-level vault_entry.
-    # A download is displayed only when its Apple track ID matches exactly,
-    # and only a strictly validated F4 download route may be linked.
-    import json
+    # Native ERI capabilities and scoped start/job endpoints require no F4 API.
+    native = client.get(base + "/capabilities")
+    assert native.status_code == 200, native.text
+    assert native.json()["provider"] == "ERI native IPA worker"
+    assert native.json()["third_party_decrypt_api"] is False
+    assert native.json()["fairplay_decryption_supported"] is False
+    assert native.json()["app_store_link_is_ipa"] is False
+    assert client.post(base + "/start", json={
+        "target": "https://apps.apple.com/vn/app/id6447961802", "country":"vn"
+    }).status_code == 401
+    with patch.object(decrypt_catalog, "_apple_json", return_value=apple):
+        native_request = client.post(base + "/start", headers=auth, json={
+            "target":"https://apps.apple.com/vn/app/id6447961802",
+            "country":"vn", "version":"2.0.0"
+        })
+    assert native_request.status_code == 201, native_request.text
+    assert native_request.json()["job_id"] == job_id
+    assert native_request.json()["reused"] is True
+    assert client.get(base + "/job/" + job_id, headers=auth).status_code == 200
+    assert client.get(base + "/job/" + job_id).status_code == 401
+    assert client.get(base + "/job/" + "a" * 32, headers=auth).status_code == 404
+    assert native.json()["source_count"] >= 0
 
-    class F4Reply:
-        status = 200
-        def __init__(self, content):
-            self.content = json.dumps(content).encode("utf-8")
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def read(self, _limit):
-            return self.content
-
-    f4_target = "https://apps.apple.com/vn/app/ngh%E1%BB%8Bch-th%E1%BB%A7y-h%C3%A0n/id6743144418?l=vi&ppid=example"
-    f4_token = "a" * 32
-    f4_path = "/api/decrypt/download/" + f4_token
-    f4_search = {"ok": True, "items": [
-        {"item_id": "6743144419", "title": "Unrelated Game",
-         "vault_cached": {"dl_url": "/api/decrypt/download/" + "b" * 32}},
-        {"item_id": "6743144418", "title": "Nghịch Thủy Hàn",
-         "bundle_id": "com.example.nth", "version": "1.2.3",
-         "vault_cached": {"dl_url": f4_path}}
-    ]}
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(f4_search)):
-        f4 = client.get(base + "/external", params={"target": f4_target})
-    assert f4.status_code == 200, f4.text
-    assert f4.json()["download_ready"] is True
-    assert f4.json()["download_url"] == "https://decrypt.160-191-242-70.sslip.io" + f4_path
-    assert f4.json()["version"] == "1.2.3"
-    assert f4.json()["verification"]["file_exists"] is False
-
-    # F4 browser inspector 2026-11-15: public /search returns vault_entry,
-    # not vault_cached. Reject cross-app vault records and mark alternate
-    # versions explicitly instead of claiming they match App Store.
-    browser_f4 = {"ok": True, "mode": "direct", "target_mode": "ios",
-                  "items": [{"item_id": "6743144418", "title": "Nghịch Thủy Hàn",
-                             "bundle_id": "vng.game.nth", "version": "102.1.11820680",
-                             "vault_exact": True, "vault_entry": {
-                                 "item_id": "6743144418", "bundle_id": "vng.game.nth",
-                                 "target_mode": "ios", "version": "102.1.11820680",
-                                 "dl_url": f4_path, "total_size": 12345678}}]}
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(browser_f4)):
-        browser = client.get(base + "/external", params={"target": f4_target})
-    assert browser.status_code == 200, browser.text
-    assert browser.json()["download_ready"] is True
-    assert browser.json()["exact_version"] is True
-    assert browser.json()["vault_source"] == "vault_entry"
-    assert browser.json()["version"] == "102.1.11820680"
-    assert browser.json()["size_bytes"] == 12345678
-
-    browser_f4["items"][0]["vault_entry"]["item_id"] = "6743144419"
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(browser_f4)):
-        mismatch = client.get(base + "/external", params={"target": f4_target})
-    assert mismatch.json()["found"] is True
-    assert mismatch.json()["download_ready"] is False
-    browser_f4["items"][0].pop("vault_entry")
-
-    browser_f4["items"][0]["vault_exact"] = False
-    browser_f4["items"][0]["vault_alt_entry"] = {
-        "item_id": "6743144418", "bundle_id": "vng.game.nth",
-        "target_mode": "ios", "version": "102.1.OLD", "dl_url": f4_path
-    }
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(browser_f4)):
-        alternate = client.get(base + "/external", params={"target": f4_target})
-    assert alternate.status_code == 200
-    assert alternate.json()["download_ready"] is True
-    assert alternate.json()["exact_version"] is False
-    assert alternate.json()["vault_source"] == "vault_alt_entry"
-    assert alternate.json()["version"] == "102.1.OLD"
-
-    browser_f4["items"][0]["vault_alt_entry"]["dl_url"] = "https://evil.invalid/download"
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(browser_f4)):
-        invalid = client.get(base + "/external", params={"target": f4_target})
-    assert invalid.json()["download_ready"] is False
-    assert invalid.json()["download_link_present"] is True
-
-    # A matching app with no cached IPA must not show a fake download.
-    f4_missing = {"ok": True, "items": [{
-        "app_id": 6743144418, "title": "Nghịch Thủy Hàn", "vault_cached": None
-    }]}
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(f4_missing)):
-        missing = client.get(base + "/external", params={"target": f4_target})
-    assert missing.status_code == 200
-    assert missing.json()["found"] is True
-    assert missing.json()["download_ready"] is False
-    assert missing.json()["download_url"] is None
-
-    # Do not accept a download URL from a different app or third-party host.
-    wrong = {"ok": True, "items": [{
-        "app_id": 6743144419, "vault_cached": {"dl_url": f4_path}
-    }]}
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(wrong)):
-        wrong_response = client.get(base + "/external", params={"target": f4_target})
-    assert wrong_response.json()["download_ready"] is False
-
-    evil = {"ok": True, "items": [{
-        "app_id": 6743144418,
-        "vault_cached": {"dl_url": "https://example.invalid/IPA.ipa"}
-    }]}
-    with patch.object(decrypt_catalog.urllib.request, "urlopen",
-                      return_value=F4Reply(evil)):
-        evil_response = client.get(base + "/external", params={"target": f4_target})
-    assert evil_response.json()["download_ready"] is False
-
-    print("Apple regions/search/versions, real free vault, durable jobs and isolation: OK")
+    print("Apple regions/search/versions, native ERI worker, durable jobs and isolation: OK")
     # Exercise the independent worker in a fresh process with its own isolated DB.
     import subprocess
     import sys

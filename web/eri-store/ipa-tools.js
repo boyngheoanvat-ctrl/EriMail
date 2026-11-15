@@ -227,53 +227,13 @@
             }
           } catch (_) { /* Apple metadata still renders when inventory is offline. */ }
 
-          // A valid App Store link does not itself contain an IPA.
-          // Ask the ERI backend whether F4 has an actual cached download link.
-          // Do not infer download availability from a successful search response.
+          // App Store URLs expose metadata only. ERI never invents IPA links.
           if (!existingIPA) {
-            try {
-              const lookup = await fetch(
-                API + "/api/v1/tools/ipa/decrypt/external?" +
-                new URLSearchParams({target: link, country: "auto"}),
-                {cache: "no-store", signal: controller.signal}
-              );
-              if (!lookup.ok) throw new Error("F4 lookup unavailable");
-              const f4 = await lookup.json();
-              let validF4 = null;
-              if (f4.download_ready && typeof f4.download_url === "string") {
-                const source = new URL(f4.download_url);
-                if (source.protocol === "https:" &&
-                    ["decrypt.160-191-242-70.sslip.io", "160-191-242-70.sslip.io"].includes(source.hostname) &&
-                    !source.username && !source.password && !source.search && !source.hash &&
-                    (/^\/api\/decrypt\/download\/[a-f0-9]{32}$/i.test(source.pathname) ||
-                     /^\/dl_dec\/[A-Za-z0-9_-]{8,128}\/[0-9]{8,15}\/[A-Za-z0-9._%-]+\.ipa$/i.test(source.pathname))) {
-                  validF4 = source.href;
-                }
-              }
-              if (validF4) {
-                const f4Link = document.createElement("a");
-                f4Link.className = "btn primary";
-                f4Link.textContent = "Tải IPA từ F4TEAM";
-                f4Link.href = validF4;
-                f4Link.rel = "noopener noreferrer";
-                f4Link.referrerPolicy = "no-referrer";
-                actions.append(f4Link);
-                const note = document.createElement("p");
-                note.className = "small";
-                note.textContent = "F4TEAM có link IPA, ERI chưa xác minh tệp, quyền truy cập hoặc khả năng cài đặt.";
-                appStoreResult.append(note);
-              } else {
-                const note = document.createElement("p");
-                note.className = "small";
-                note.textContent = "F4TEAM chưa có link IPA được trả về cho ứng dụng này. Bạn có thể gửi yêu cầu IPA.";
-                appStoreResult.append(note);
-              }
-            } catch (_) {
-              const note = document.createElement("p");
-              note.className = "small";
-              note.textContent = "Chưa kiểm tra được kho F4TEAM. Có thể mở Kho IPA để xem nguồn ERI.";
-              appStoreResult.append(note);
-            }
+            const note = document.createElement("p");
+            note.className = "small";
+            note.textContent = "ERI chưa có IPA được kiểm định cho ứng dụng này. "
+              + "Hãy tạo yêu cầu IPA trong kho ERI; worker sẽ xử lý khi có nguồn được cấp quyền.";
+            appStoreResult.append(note);
           }
 
           if (existingIPA) {

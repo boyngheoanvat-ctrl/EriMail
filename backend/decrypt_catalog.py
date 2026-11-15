@@ -344,139 +344,26 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
             pass
         return {"available": False, "notice": "Chưa tìm được bản IPA công khai từ nhà phát triển."}
 
-    @router.get("/api/v1/tools/ipa/decrypt/external")
-    def external_ipa(target: str = Query(min_length=12, max_length=500),
-                     country: str = "auto"):
-        """Read-only discovery. Never treat an upstream 200 as a verified IPA."""
-        safe_target = urlsplit(target)
-        if (safe_target.scheme != "https" or safe_target.hostname != "apps.apple.com"
-                or not re.search(r"/id[0-9]{6,15}(?:/|$)", safe_target.path)):
-            raise HTTPException(422, "Cần link ứng dụng HTTPS từ App Store")
-        region = _region(country)
-        endpoint = ("https://decrypt.160-191-242-70.sslip.io/api/decrypt/search?"
-                    + urlencode({"q": target, "country": region, "mode": "ios"}))
-        req = urllib.request.Request(endpoint, headers={
-            "Accept": "application/json", "User-Agent": "ERIStore/1.0"})
-        try:
-            with urllib.request.urlopen(req, timeout=8) as response:
-                if response.status != 200:
-                    raise HTTPException(502, "Nguồn IPA bên ngoài không phản hồi thành công")
-                raw = response.read(256 * 1024 + 1)
-            if len(raw) > 256 * 1024:
-                raise HTTPException(502, "Phản hồi nguồn IPA quá lớn")
-            data = json.loads(raw)
-            if not isinstance(data, dict):
-                raise ValueError("Expected JSON object")
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-            raise HTTPException(503, "Chưa xác minh được nguồn IPA bên ngoài") from exc
-        # F4 browser response (verified 2026-11-15):
-        # {items:[{item_id, version, vault_exact, vault_entry?, vault_alt_entry?}]}.
-        # Older F4 instances may have used vault_cached. Never substitute an
-        # item or IPA belonging to a different App Store track ID.
-        requested_id = re.search(r"/id([0-9]{6,15})(?:/|$)", safe_target.path).group(1)
-        entries = data.get("items")
-        entry = {}
-        if isinstance(entries, list):
-            for candidate in entries[:100]:
-                if not isinstance(candidate, dict):
-                    continue
-                ids = (candidate.get("app_id"), candidate.get("item_id"),
-                       candidate.get("trackId"))
-                if any(str(value).removeprefix("id") == requested_id
-                       for value in ids if value is not None):
-                    entry = candidate
-                    break
-        elif isinstance(data.get("vault_entry"), dict):
-            # Legacy top-level response with no exact item identity.
-            entry = data["vault_entry"]
-            entry_id = str(entry.get("item_id") or entry.get("app_id") or "")
-            if entry_id.removeprefix("id") != requested_id:
-                entry = {}
-
-        # Keep an alternate-version IPA distinguishable from an exact match.
-        # A simple search result is not evidence of a downloadable IPA.
-        approved_path = re.compile(r"(?:/api/decrypt/download/[0-9a-fA-F]{32}|"
-            r"/dl_dec/[A-Za-z0-9_-]{8,128}/[0-9]{8,15}/"
-            r"[A-Za-z0-9._%-]+[.]ipa)\Z")
-        origin = "https://decrypt.160-191-242-70.sslip.io"
-        download_url = None
-        selected = {}
-        vault_kind = None
-        raw_link_present = False
-        for name in ("vault_entry", "vault_cached", "vault_alt_entry"):
-            vault_item = entry.get(name)
-            if not isinstance(vault_item, dict):
-                continue
-            embedded_id = str(vault_item.get("item_id") or "")
-            if embedded_id and embedded_id.removeprefix("id") != requested_id:
-                continue
-            embedded_bundle = str(vault_item.get("bundle_id") or "")
-            app_bundle = str(entry.get("bundle_id") or "")
-            if embedded_bundle and app_bundle and embedded_bundle.casefold() != app_bundle.casefold():
-                continue
-            if str(vault_item.get("target_mode") or "ios").lower() != "ios":
-                continue
-            raw_url = vault_item.get("dl_url") or vault_item.get("download_url")
-            if not isinstance(raw_url, str) or not raw_url:
-                continue
-            raw_link_present = True
-            valid_url = None
-            if approved_path.fullmatch(raw_url):
-                valid_url = origin + raw_url
-            else:
-                parts = urlsplit(raw_url)
-                if (parts.scheme == "https"
-                        and parts.hostname in ("decrypt.160-191-242-70.sslip.io",
-                                               "160-191-242-70.sslip.io")
-                        and parts.port in (None, 443)
-                        and not parts.username and not parts.password
-                        and not parts.query and not parts.fragment
-                        and approved_path.fullmatch(parts.path)):
-                    valid_url = raw_url
-            if valid_url:
-                download_url, selected, vault_kind = valid_url, vault_item, name
-                break
-
-        # Legacy flat vault response with an exact item ID.
-        if not download_url and entry and not isinstance(entries, list):
-            raw_url = entry.get("dl_url") or entry.get("download_url")
-            if isinstance(raw_url, str) and approved_path.fullmatch(raw_url):
-                download_url, selected, vault_kind = origin + raw_url, entry, "vault_entry"
-
-        selected_version = str(selected.get("version") or entry.get("version") or "")[:60]
-        entry_version = str(entry.get("version") or "")[:60]
-        exact_version = bool(download_url and vault_kind != "vault_alt_entry"
-                             and selected_version and entry_version
-                             and selected_version == entry_version)
-        size = selected.get("total_size") or selected.get("size_bytes")
-        if type(size) is not int or size <= 0:
-            size = None
+    # Native ERI-only IPA service. Public metadata never implies an IPA exists.
+    @router.get("/api/v1/tools/ipa/decrypt/capabilities")
+    def capabilities():
+        with connection() as db:
+            sources = db.execute("SELECT COUNT(*) FROM ipa_decrypt_sources").fetchone()[0]
+            waiting = db.execute("SELECT COUNT(*) FROM ipa_decrypt_requests WHERE "
+                                 "state='waiting_for_source'").fetchone()[0]
+            processing = db.execute("SELECT COUNT(*) FROM ipa_decrypt_requests WHERE "
+                                    "state='processing'").fetchone()[0]
         return {
-            "found": bool(entry),
-            "download_ready": bool(download_url),
-            "download_url": download_url,
-            "source": "F4TEAM (external)",
-            "title": str(entry.get("title") or entry.get("name") or "")[:160],
-            "bundle_id": str(entry.get("bundle_id") or "")[:255],
-            "version": selected_version,
-            "requested_version": entry_version,
-            "exact_version": exact_version,
-            "vault_source": vault_kind,
-            "download_link_present": raw_link_present,
-            "size_bytes": size,
-            "notice": ("F4TEAM có link IPA đúng phiên bản, ERI chưa kiểm định file hoặc quyền truy cập."
-                       if download_url and exact_version else
-                       "F4TEAM có link IPA phiên bản khác, hãy kiểm tra phiên bản trước khi tải."
-                       if download_url else
-                       "F4TEAM có trường link nhưng đường dẫn không được ERI chấp nhận."
-                       if raw_link_present else
-                       "F4TEAM nhận diện ứng dụng nhưng chưa cung cấp link IPA."),
-            "verification": {
-                "file_exists": False,
-                "distribution_authorized": False,
-                "plaintext_verified": False,
-                "account_data_stripped": False,
-            },
+            "provider": "ERI native IPA worker",
+            "independent": True, "third_party_decrypt_api": False,
+            "request_supported": True, "source_count": sources,
+            "waiting_for_source": waiting, "processing": processing,
+            "can_process_authorized_ipa": True,
+            "app_store_link_is_ipa": False,
+            "fairplay_decryption_supported": False,
+            "notice": ("ERI tải và kiểm tra IPA từ nguồn được cấp quyền; "
+                       "Apple Search API chỉ cung cấp dữ liệu ứng dụng, "
+                       "không tự cung cấp IPA hoặc giải mã FairPlay."),
         }
 
     @router.get("/api/v1/tools/ipa/decrypt/search")
@@ -621,6 +508,11 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         schedule_pipeline(connection, upload_dir, job_id)
         return job_payload(row)
 
+    @router.post("/api/v1/tools/ipa/decrypt/start", status_code=201)
+    def native_start(payload: IPARequest, customer=Depends(require_customer)):
+        """ERI's own start endpoint; returns a queued/waiting/processing job."""
+        return create_request(payload, customer)
+
     @router.get("/api/v1/tools/ipa/decrypt/requests")
     def list_requests(customer=Depends(require_customer)):
         # User-scoped work history survives browser reloads and lost localStorage
@@ -684,6 +576,11 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         if row["state"] not in ("completed", "failed"):
             schedule_pipeline(connection, upload_dir, job_id)
         return job_payload(row)
+
+    @router.get("/api/v1/tools/ipa/decrypt/job/{job_id}")
+    def native_job(job_id: str, customer=Depends(require_customer)):
+        """ERI-only job polling. Identical ownership checks to /requests/{id}."""
+        return get_request(job_id, customer)
 
     app.include_router(router)
     return router

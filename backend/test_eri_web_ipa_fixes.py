@@ -32,19 +32,19 @@ assert 'Xử lý IPA' in tools
 assert 'if (createRequest) $("eri-decrypt-direct-request")?.click();' in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v26" in service
+assert "eri-store-v27" in service
 assert "?v=20261115p3" in html
-assert "decrypt-store.js?v=20261115f4team5" in html
-assert "/api/v1/tools/ipa/decrypt/f4/capabilities" in decrypt
-assert "/api/v1/tools/ipa/decrypt/f4/start" in decrypt
-assert "/api/v1/tools/ipa/decrypt/f4/jobs/" in decrypt
-assert "renderF4Job" in decrypt
-assert "trustedF4Download" in decrypt
-assert "Mở F4TEAM để tạo tác vụ trong phiên trình duyệt" in decrypt
-assert "eri-decrypt-open-f4" not in html
-assert "eri-dec-f4-import" not in html
-assert "/api/v1/tools/ipa/decrypt/external?" in tools
-assert "F4TEAM có link IPA" in tools
+assert "ipa-tools.js?v=20261115native1" in html
+assert "decrypt-store.js?v=20261115native1" in html
+assert "/api/v1/tools/ipa/decrypt/start" in decrypt
+assert "/api/v1/tools/ipa/decrypt/job/" in decrypt
+assert "nativeSourceStatus" in decrypt
+assert "ERI đã có nguồn IPA được đăng ký" in decrypt
+assert '"/api/v1/tools/ipa/decrypt/vault?q="' in tools
+assert "/api/v1/tools/ipa/decrypt/external?" not in tools
+assert "/api/v1/tools/ipa/decrypt/f4/" not in decrypt
+assert "F4TEAM" not in decrypt
+assert "F4TEAM" not in tools
 
 # No bogus IPA URL from App Store link is ever generated.
 assert not re.search(r'ipa.*download.*apps\.apple\.com', tools, re.I)
@@ -73,4 +73,4 @@ else:
     assert not (admin_html.is_file() ^ admin_js.is_file()), "Admin upload UI must include both HTML and JS"
     print("ERI Admin uploader is absent from this checkout; skipping its independent checks.")
 
-print("ERI STORE: precise progress, cache-bust, backend vault lookup and IPA request UI OK")
+print("ERI STORE: native IPA queue, progress, cache-bust, backend vault lookup and request UI OK")

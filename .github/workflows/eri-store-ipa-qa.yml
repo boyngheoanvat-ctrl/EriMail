@@ -1,4 +1,4 @@
-name: ERI STORE IPA percentage and request checks
+name: ERI STORE native IPA worker and request checks
 
 on:
   pull_request:
@@ -30,5 +30,4 @@ jobs:
           python3 -m pip install -r backend/requirements.txt httpx
           cd backend
           python3 test_decrypt_catalog.py
-          python3 test_f4_jobs.py
           python3 test_signing_jobs.py
