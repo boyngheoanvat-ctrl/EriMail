@@ -227,61 +227,29 @@
             }
           } catch (_) { /* Apple metadata still renders when inventory is offline. */ }
 
-          // App Store URLs expose metadata only. ERI never invents IPA links.
-          if (!existingIPA) {
-            const note = document.createElement("p");
-            note.className = "small";
-            note.textContent = "ERI chưa có IPA đã kiểm định cho ứng dụng này. "
-              + "Bạn có thể kiểm tra ngay trang ứng dụng trên Decrypt.day; "
-              + "tính sẵn có của file và phiên bản cần xác minh tại nguồn.";
-            appStoreResult.append(note);
-          }
-
-          if (existingIPA) {
-            const download = document.createElement("a");
-            download.className = "btn primary";
-            download.href = API + existingIPA.download_path;
-            download.rel = "noopener noreferrer";
-            download.textContent = "Tải IPA từ kho ERI (v" + existingIPA.version + ")";
-            actions.append(download);
-          }
-
-          // Open the provider's verified app-detail route, never a made-up
-          // direct .ipa/download URL or a request/decrypt endpoint.
-          let externalAppId = /^[0-9]{6,15}$/.test(String(data.app_id || ""))
-            ? String(data.app_id) : null;
-          if (!externalAppId) {
-            try {
-              const appStore = new URL(data.app_store_url || link);
-              if (appStore.protocol === "https:" && appStore.hostname === "apps.apple.com")
-                externalAppId = appStore.pathname.match(/id([0-9]{6,15})/)?.[1] || null;
-            } catch {}
-          }
-          if (externalAppId && !existingIPA) {
-            const external = document.createElement("a");
-            external.className = "btn primary";
-            external.href = "https://decrypt.day/app/id" + externalAppId;
-            external.target = "_blank";
-            external.rel = "noopener noreferrer";
-            external.textContent = "Xem tải IPA trên Decrypt.day";
-            actions.append(external);
-          }
-          const decryptTab = document.querySelector('[data-kind="decrypt"]');
-          if (decryptTab && $("eri-decrypt-query")) {
-            const browseVault = () => {
-              const query = $("eri-decrypt-query");
-              query.value = link;
-              query.dispatchEvent(new Event("input", {bubbles: true}));
-              decryptTab.click();
-              $("eri-decrypt-search-form")?.requestSubmit();
-            };
-            const browse = document.createElement("button");
-            browse.type = "button";
-            browse.className = "btn outline";
-            browse.textContent = "Xem kho IPA ERI / phiên bản";
-            browse.addEventListener("click", browseVault);
-            actions.append(browse);
-          }
+          // Single first-party download button. The shared ERI Store checker
+          // validates exact Bundle ID/version and the actual IPA download path.
+          // No redirect to a third-party app page, no imaginary IPA URLs.
+          const download = document.createElement("button");
+          download.type = "button";
+          download.className = "btn primary";
+          download.textContent = "Tải IPA";
+          download.addEventListener("click", () => {
+            const handler = window.ERIStoreIPA?.download;
+            if (typeof handler !== "function") {
+              display(appStoreResult, "Công cụ tải IPA của ERI chưa sẵn sàng. Hãy tải lại trang.", "error");
+              return;
+            }
+            handler({
+              app_id: Number(data.app_id) || Number(link.match(/id([0-9]{6,15})/)?.[1]) || 0,
+              bundle_id: bundle,
+              version,
+              country: data.country || "VN",
+              app_store_url: data.app_store_url || link,
+              cached: existingIPA,
+            });
+          });
+          actions.append(download);
           if (typeof data.app_store_url === "string") {
             try {
               const destination = new URL(data.app_store_url);
