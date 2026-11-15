@@ -55,7 +55,7 @@ assert "Yêu cầu IPA" not in decrypt.split("function searchResult(item) {")[1]
 assert "isRemoteDownload" in decrypt
 assert "trustedSignedR2" in decrypt
 assert "Tải IPA từ ERI R2" in decrypt
-assert "ERI đã nhận diện nguồn IPA được cấp quyền" in decrypt
+assert "Chưa có IPA đã xác minh trong kho ERI" in decrypt
 assert '"/api/v1/tools/ipa/decrypt/vault?q="' in tools
 assert "/api/v1/tools/ipa/decrypt/external?" not in tools
 assert "/api/v1/tools/ipa/decrypt/f4/" not in decrypt
