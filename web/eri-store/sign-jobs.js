@@ -57,6 +57,73 @@
     button.addEventListener("click", fn);
     el?.append(document.createElement("p"), button);
   }
+  async function manageOwnJobs() {
+    const el = $("ipa-sign-status");
+    if (!el) return;
+    status("Đang kiểm tra các phiên ký IPA thuộc tài khoản ERI của bạn...");
+    try {
+      const response = await api("/api/v1/tools/ipa/sign-jobs");
+      const jobs = Array.isArray(response.items) ? response.items : [];
+      status(jobs.length
+        ? "Các phiên tải IPA của tài khoản này. Chỉ hủy phiên không còn sử dụng."
+        : "Tài khoản này không có phiên IPA nào trên máy chủ.");
+      for (const job of jobs) {
+        if (!["uploading","failed","processing"].includes(job.state)) continue;
+        const row = document.createElement("div");
+        row.className = "ipa-sign-job-row";
+        const title = document.createElement("p");
+        title.className = "small";
+        const pct = (100 * Number(job.uploaded_bytes||0) /
+          Math.max(1,Number(job.size_bytes||0))).toFixed(1);
+        title.textContent = String(job.filename||"IPA") + " · " + pct + "% · " +
+          (job.state==="uploading"?"Đang tải":job.state==="processing"?"Đang ký":"Đã lỗi");
+        row.append(title);
+        if (job.state === "uploading") {
+          const resume = document.createElement("button");
+          resume.type="button";resume.className="btn outline";
+          resume.textContent = "Tiếp tục phiên này";
+          resume.addEventListener("click",()=>{
+            const form = $("ipa-sign-form");
+            const file = form?.elements.namedItem("ipa")?.files?.[0];
+            if (!file || file.name !== job.filename || file.size !== job.size_bytes) {
+              status("Chọn lại đúng tệp " + job.filename +
+                " (" + fmt(job.size_bytes) + ") và các chứng chỉ trước khi tiếp tục.","error");
+              action("Quản lý các phiên tải",manageOwnJobs);
+              return;
+            }
+            save({id:job.job_id,name:file.name,size:file.size});
+            run(form);
+          });
+          row.append(resume);
+        }
+        if (job.state === "uploading" || job.state === "failed") {
+          const cancel = document.createElement("button");
+          cancel.type="button";cancel.className="btn outline";
+          cancel.textContent="Hủy phiên này";
+          cancel.addEventListener("click",async()=>{
+            if(!window.confirm("Hủy phiên upload " + (job.filename||"IPA") +
+              "? Dữ liệu đã tải của phiên này sẽ bị xóa vĩnh viễn."))return;
+            cancel.disabled=true;
+            try{
+              await api("/api/v1/tools/ipa/sign-jobs/" + encodeURIComponent(job.job_id),
+                {method:"DELETE"});
+              if(getSaved()?.id===job.job_id)clear();
+              manageOwnJobs();
+            }catch(e){
+              status(e.message,"error");
+              action("Quản lý các phiên tải",manageOwnJobs);
+            }
+          });
+          row.append(cancel);
+        }
+        el.append(row);
+      }
+      if (jobs.some(j=>j.state==="uploading" || j.state==="failed"))
+        action("Làm mới danh sách",manageOwnJobs);
+    } catch(e) {
+      status("Không thể xem các phiên tải IPA: "+e.message,"error");
+    }
+  }
   function errorText(data, statusCode) {
     if (statusCode === 401) return "Phiên đăng nhập không còn hợp lệ. Đăng nhập lại rồi chọn Tiếp tục tải IPA.";
     if (statusCode === 403) return "Tài khoản không có quyền truy cập phiên ký IPA này.";
@@ -64,6 +131,7 @@
     if (statusCode === 409) return "Phiên IPA không ở trạng thái mong đợi. Đang cần kiểm tra lại phiên.";
     if (statusCode === 413) return "Phần IPA vượt giới hạn máy chủ. Hãy chọn file hợp lệ.";
     if (statusCode === 429) return "Máy chủ đang giới hạn yêu cầu. Vui lòng thử lại.";
+    if (statusCode === 503 && typeof data?.detail === "string") return data.detail;
     if (typeof data?.detail === "string") return data.detail;
     if (statusCode >= 500) return "Máy chủ đang bận hoặc khởi động lại. Bạn có thể mở lại để tiếp tục.";
     return "HTTP " + statusCode + ": Không xử lý được yêu cầu.";
@@ -279,6 +347,9 @@
         action("Đăng nhập lại", () => document.querySelector('[data-view="account"]')?.click());
       }
       action("Tiếp tục tải IPA", () => run(form));
+      if (/đang xử lý nhiều IPA|hàng đợi|đầy hàng đợi|đang bận/i.test(e.message||"")) {
+        action("Xem và hủy phiên IPA bỏ dở",manageOwnJobs);
+      }
       if (/không còn|404|410|tạo phiên mới/.test(e.message?.toLowerCase()||"")) {
         // Expired jobs are not resumable; a fresh upload is required.
         clear();
