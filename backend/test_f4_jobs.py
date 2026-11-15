@@ -125,4 +125,22 @@ with tempfile.TemporaryDirectory(prefix="eri-f4-jobs-") as root:
         no_progress = f4_jobs._provider_status({"status": "working"})
         assert no_progress[1] is None
 
+    # Account deletion must also remove its F4 job history and remote ID.
+    from app import connection
+    with connection() as db:
+        account_id = db.execute(
+            "SELECT id FROM customers WHERE username='f4owner'"
+        ).fetchone()["id"]
+    deleted = client.request(
+        "DELETE", "/api/v1/admin/customers/" + str(account_id),
+        headers={"X-ERI-Admin-Key": os.environ["ERI_ADMIN_KEY"]},
+        json={"confirm_username": "f4owner"},
+    )
+    assert deleted.status_code == 200, deleted.text
+    with connection() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM f4_customer_jobs WHERE customer_id=?",
+            (account_id,),
+        ).fetchone()[0] == 0
+
     print("F4 opt-in, scoped jobs, real progress, strict links, and auth isolation: OK")
