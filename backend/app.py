@@ -1475,6 +1475,9 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
                 "(SELECT id FROM orders WHERE customer_id=?)", (customer_id,)
             )
             db.execute("DELETE FROM orders WHERE customer_id=?", (customer_id,))
+            # Remove user-scoped IPA requests and provider job IDs as well.
+            db.execute("DELETE FROM ipa_decrypt_requests WHERE customer_id=?", (customer_id,))
+            db.execute("DELETE FROM f4_customer_jobs WHERE customer_id=?", (customer_id,))
             db.execute("DELETE FROM customer_sessions WHERE customer_id=?", (customer_id,))
             db.execute("DELETE FROM customers WHERE id=?", (customer_id,))
         files_removed = 0
