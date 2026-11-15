@@ -8,7 +8,7 @@ const KINDS={
 const $=id=>document.getElementById(id);
 const TOKEN_KEY="eri_store_buyer_token";
 const state={
-  category:(["mod","ai","certificate","decrypt","sign"].includes(sessionStorage.getItem("eri.store.category"))?
+  category:(["mod","ai","certificate","certfree","decrypt","sign"].includes(sessionStorage.getItem("eri.store.category"))?
     sessionStorage.getItem("eri.store.category"):"mod"),modTab:"paid",modPlatform:"ipa",view:"store",items:[],
   token:sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||"",
   remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null,registrationMinName:2
@@ -134,7 +134,7 @@ function setView(view){
   if(!["store","orders","account"].includes(view))view="store";
   state.view=view;
   $("store").classList.toggle("hidden",view!=="store");
-  $("ipa-tools")?.classList.toggle("hidden",view!=="store" || !["decrypt","sign"].includes(state.category));
+  $("ipa-tools")?.classList.toggle("hidden",view!=="store" || !["decrypt","sign","certfree"].includes(state.category));
   $("hero").classList.toggle("hidden",view!=="store");
   document.querySelector(".features").classList.toggle("hidden",view!=="store");
   $("orders-view").classList.toggle("hidden",view!=="orders");
@@ -227,13 +227,14 @@ function renderCatalog(){
 }
 async function loadCatalog(){
   const category=state.category;
-  const toolSelected=category==="decrypt" || category==="sign";
+  const toolSelected=category==="decrypt" || category==="sign" || category==="certfree";
   $("catalog-heading")?.classList.toggle("hidden",toolSelected);
   $("products-toolbar")?.classList.toggle("hidden",toolSelected);
   $("products")?.classList.toggle("hidden",toolSelected);
   $("ipa-tools")?.classList.toggle("hidden",!toolSelected || state.view!=="store");
   $("ipa-decrypt-panel")?.classList.toggle("hidden",category!=="decrypt");
   $("ipa-sign-panel")?.classList.toggle("hidden",category!=="sign");
+  $("certificate-free-panel")?.classList.toggle("hidden",category!=="certfree");
   if(toolSelected){
     $("mod-subtabs")?.classList.add("hidden");
     $("mod-platform-tabs")?.classList.add("hidden");
@@ -525,6 +526,18 @@ document.addEventListener("DOMContentLoaded",()=>{
   $("header-account").addEventListener("click",()=>setView("account"));
   $("explore").addEventListener("click",()=>{$("store").scrollIntoView({behavior:"smooth"})});
   $("hero-orders").addEventListener("click",()=>setView("orders"));
+  $("hero-ipa")?.addEventListener("click",()=>{
+    state.category="decrypt";
+    try{sessionStorage.setItem("eri.store.category","decrypt");}catch{}
+    document.querySelectorAll("[data-kind]").forEach(tab=>{
+      const active=tab.dataset.kind==="decrypt";
+      tab.classList.toggle("selected",active);
+      tab.setAttribute("aria-selected",String(active));
+    });
+    setView("store");
+    loadCatalog();
+    $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
+  });
   $("reload").addEventListener("click",loadCatalog);
   document.querySelectorAll("[data-mod-mode]").forEach(tab=>tab.addEventListener("click",()=>{
     state.modTab=tab.dataset.modMode==="free"?"free":"paid";
