@@ -11,7 +11,6 @@ import ipaddress
 import json
 import os
 import re
-import shutil
 import tempfile
 import urllib.request
 import zipfile
@@ -20,8 +19,8 @@ from urllib.parse import urlsplit
 
 from ipa_tools import _inspect_archive
 
-MAX_DOWNLOAD = int(os.getenv("ERI_ACTIONS_MAX_IPA_BYTES", str(1024 * 1024 * 1024)))
-MAX_UNPACKED = int(os.getenv("ERI_ACTIONS_MAX_UNPACKED_BYTES", str(2 * 1024 * 1024 * 1024)))
+MAX_DOWNLOAD = int(os.getenv("ERI_ACTIONS_MAX_IPA_BYTES", str(5 * 1024 * 1024 * 1024)))
+MAX_UNPACKED = int(os.getenv("ERI_ACTIONS_MAX_UNPACKED_BYTES", str(10 * 1024 * 1024 * 1024)))
 MAX_MEMBERS = 20000
 CHUNK_SIZE = 1024 * 1024
 
@@ -132,7 +131,7 @@ def verify_ipa(path, expected_bundle, expected_version):
         bad = archive.testzip()
         if bad:
             raise ValueError("IPA lỗi CRC ZIP")
-    report = _inspect_archive(path)
+    report = _inspect_archive(path, max_expanded=MAX_UNPACKED)
     app = report.get("app") or {}
     if report.get("zip_password_protected"):
         raise ValueError("IPA được bảo vệ bằng mật khẩu")
@@ -149,7 +148,9 @@ def process(manifest_file, source_id, output_dir):
     entry = selected_source(manifest_file, source_id)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="eri-actions-") as temporary:
+    # Stage in the output filesystem, then atomically rename instead of
+    # duplicating multi-GB IPA files and exhausting a 14-GB Actions runner.
+    with tempfile.TemporaryDirectory(prefix=".eri-actions-", dir=output_dir) as temporary:
         temporary_path = Path(temporary) / "source.ipa"
         actual_sha, byte_size = retrieve(entry["url"], temporary_path)
         if actual_sha.lower() != entry["sha256"].lower():
@@ -158,7 +159,7 @@ def process(manifest_file, source_id, output_dir):
         final = output_dir / ("eri-" + source_id + ".ipa")
         if final.exists() or final.is_symlink():
             raise ValueError("Tệp đầu ra đã tồn tại")
-        shutil.copyfile(temporary_path, final)
+        os.replace(temporary_path, final)
         manifest = {
             "source_id": source_id,
             "name": str(entry.get("name") or app.get("name") or source_id)[:160],

@@ -59,8 +59,9 @@ def _write_upload(upload: UploadFile, target: Path, max_bytes: int, suffix: str)
     return count
 
 
-def _validate_ipa(archive: zipfile.ZipFile):
+def _validate_ipa(archive: zipfile.ZipFile, max_expanded: int | None = None):
     total, app_dirs = 0, set()
+    expanded_limit = MAX_EXPANDED if max_expanded is None else max_expanded
     for info in archive.infolist():
         name = info.filename
         path = Path(name)
@@ -82,8 +83,8 @@ def _validate_ipa(archive: zipfile.ZipFile):
                     or not resolved.startswith("Payload/")):
                 raise HTTPException(422, "IPA chứa liên kết ra ngoài ứng dụng")
         total += info.file_size
-        if total > MAX_EXPANDED:
-            raise HTTPException(413, "IPA giải nén vượt 2 GiB")
+        if total > expanded_limit:
+            raise HTTPException(413, "IPA giải nén vượt giới hạn được cấp cho tác vụ")
         match = re.fullmatch(r"Payload/([^/]+\.app)/Info\.plist", name)
         if match:
             app_dirs.add(match.group(1))
@@ -150,10 +151,10 @@ def _macho_encrypted(data: bytes) -> bool | None:
     return _slice_encryption(data, 0)
 
 
-def _inspect_archive(path: Path):
+def _inspect_archive(path: Path, max_expanded: int | None = None):
     try:
         with zipfile.ZipFile(path) as source:
-            app = _validate_ipa(source)
+            app = _validate_ipa(source, max_expanded=max_expanded)
             locked = any((i.flag_bits & 1) != 0 for i in source.infolist())
             metadata = {}
             encrypted = None
