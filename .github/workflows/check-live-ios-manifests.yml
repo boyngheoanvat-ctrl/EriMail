@@ -55,5 +55,18 @@ jobs:
               else:
                   assert 'install.setAttribute("href",item.url)' in text
                   assert 'product--certificate eri-free-card' in text
-          print("LIVE VERIFIED: single Chứng chỉ category with FREE/BÁN, paid purchase and iPhone/server signing choices")
+          print("LIVE VERIFIED: single Chứng chỉ category with FREE/BÁN")
+          with urllib.request.urlopen(base+"/sign-jobs.js?verify=uploadwhole1",timeout=30) as response:
+              assert response.status==200
+              js=response.read().decode("utf-8")
+          assert 'xhr.open("POST", API + "/api/v1/tools/ipa/sign", true);' in js
+          assert 'xhr.send(payload);' in js
+          assert 'payload.append("ipa", ipa, ipa.name);' in js
+          assert 'putChunk(' not in js and '/sign-jobs/' not in js
+          assert 'function uploadWholeIPA(form)' in js
+          with urllib.request.urlopen(base+"/?verify=uploadwhole1",timeout=30) as response:
+              live_html=response.read().decode("utf-8")
+          assert '/sign-jobs.js?v=20261115uploadwhole1' in live_html
+          assert 'data-sign-mode="iphone"' not in live_html
+          print("LIVE VERIFIED: one whole-IPA HTTPS upload, no 2-MB chunk requests")
           PY
