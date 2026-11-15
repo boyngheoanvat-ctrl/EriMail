@@ -1,0 +1,51 @@
+name: ERI Store approved IPA processor
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_id:
+        description: "ID nguồn IPA đã duyệt trong backend/eri_actions_sources.json"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eri-approved-ipa-${{ inputs.source_id }}
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_ID: ${{ inputs.source_id }}
+      ERI_IPA_SOURCE_HOSTS: ${{ vars.ERI_IPA_SOURCE_HOSTS }}
+    steps:
+      - name: Checkout ERI code and reviewed source catalog
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install IPA validators
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Validate and preserve approved IPA
+        run: |
+          python backend/actions_ipa_worker.py \
+            --source-id "$SOURCE_ID" \
+            --manifest backend/eri_actions_sources.json \
+            --out actions-ipa-output
+
+      - name: Upload verified artifact for authorized operators
+        uses: actions/upload-artifact@v4
+        with:
+          name: eri-ipa-${{ inputs.source_id }}
+          path: actions-ipa-output/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
