@@ -211,14 +211,22 @@
   }
   // A click checks ERI's real, exact-version IPA inventory. Never generate a
   // download from App Store metadata or a third-party app-detail page.
-  async function downloadFromERI(item) {
+  async function downloadFromERI(item, feedback = null) {
+    const report = (message, state = "info") => {
+      notice(message, state);
+      if (feedback) {
+        feedback.hidden = false;
+        feedback.textContent = message;
+        feedback.dataset.state = state;
+      }
+    };
     const bundle = String(item?.bundle_id || "").trim();
     const version = String(item?.version || "").trim();
     if (!/^[A-Za-z0-9._-]{3,255}$/.test(bundle) || !version) {
-      notice("Ứng dụng chưa có đủ thông tin để kiểm tra tệp IPA.", "error");
+      report("Ứng dụng chưa có đủ thông tin để kiểm tra tệp IPA.", "error");
       return;
     }
-    notice("Đang kiểm tra tệp IPA đúng phiên bản trên máy chủ ERI...");
+    report("Đang kiểm tra tệp IPA đúng phiên bản trên máy chủ ERI...");
     try {
       const matches = entry => entry &&
         String(entry.bundle_id || "").toLowerCase() === bundle.toLowerCase() &&
@@ -237,7 +245,7 @@
         verified = (Array.isArray(vault.items) ? vault.items : []).find(matches) || null;
       }
       if (verified) {
-        notice("Đã xác nhận tệp IPA trên ERI. Đang bắt đầu tải...", "success");
+        report("Đã xác nhận tệp IPA trên ERI. Đang bắt đầu tải...", "success");
         window.location.assign(apiUrl(verified.download_path));
         return;
       }
@@ -267,13 +275,13 @@
         const signed = await request(job.result.download_path,{auth:true});
         const url = trustedSignedR2(signed.download_url);
         if (!url) throw new Error("Máy chủ không cấp liên kết IPA hợp lệ.");
-        notice("Đã xác nhận file trên R2. Bắt đầu tải...", "success");
+        report("Đã xác nhận file trên R2. Bắt đầu tải...", "success");
         window.location.assign(url);
         return;
       }
-      notice("Hiện máy chủ ERI không có tệp IPA đã kiểm tra đúng phiên bản để tải trực tiếp.", "error");
+      report("Hiện máy chủ ERI không có tệp IPA đã kiểm tra đúng phiên bản để tải trực tiếp.", "error");
     } catch(error) {
-      notice(error.message, "error");
+      report(error.message, "error");
     }
   }
   // Other ERI Store tools can use the same validated download action.
@@ -296,10 +304,13 @@
     top.append(details);
     root.append(top);
     const actions = card("div", "eri-decrypt-actions");
-    actions.append(button("Tải IPA", () => downloadFromERI(item), true));
+    const feedback = card("p", "ipa-tool-result");
+    feedback.hidden = true;
+    actions.append(button("Tải IPA", () => downloadFromERI(item, feedback), true));
     const store = publicAppStorePage(item);
     if (store) actions.append(link("Cài qua App Store", store));
     root.append(actions);
+    root.append(feedback);
     return root;
   }
   // Public discovery metadata only. Never treat catalog matches as downloadable IPA.
