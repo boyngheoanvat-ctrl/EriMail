@@ -70,6 +70,12 @@ class PersistenceIntegration(unittest.TestCase):
                         archive.writestr("Payload/Test.app/data.bin",os.urandom(CHUNK_BYTES+2000))
                     data = body.getvalue()
                     admin = {"X-ERI-Admin-Key":env["ERI_ADMIN_KEY"]}
+                    denied = api.get("/api/v1/admin/backups/sqlite")
+                    self.assertEqual(denied.status_code,403)
+                    backup = api.get("/api/v1/admin/backups/sqlite", headers=admin)
+                    self.assertEqual(backup.status_code,200,backup.text[:200])
+                    self.assertTrue(backup.content.startswith(b"SQLite format 3\x00"))
+                    self.assertEqual(backup.headers.get("cache-control"),"private, no-store")
                     start = api.post("/api/v1/admin/upload-sessions",
                                      headers=admin,json={
                         "kind":"ipa","filename":"admin.ipa","size_bytes":len(data),
