@@ -37,4 +37,23 @@ jobs:
                   packages=[asset["url"] for item in manifest["items"] for asset in item["assets"] if asset["kind"]=="software-package"]
                   assert packages and all(p.startswith("https://website.khoindvn.io.vn/apps/") for p in packages)
           print("LIVE VERIFIED: all 34 ERI-hosted OTA manifests have correct XML MIME, metadata and original IPA URLs")
+          for suffix in ("/?certqa=1", "/app.js?certqa=1", "/free-certificates.js?certqa=1"):
+              req=urllib.request.Request(base+suffix,headers={"Cache-Control":"no-cache"})
+              with urllib.request.urlopen(req,timeout=30) as response:
+                  assert response.status==200
+                  text=response.read().decode("utf-8")
+              if suffix.startswith("/?"):
+                  assert text.count('data-kind="certificate"')==1
+                  assert 'data-kind="certfree"' not in text
+                  assert 'id="certificate-subtabs"' in text
+                  assert 'data-cert-mode="free"' in text
+                  assert 'data-cert-mode="paid"' in text
+                  assert 'id="ipa-sign-server"' in text and 'id="ipa-sign-iphone"' in text
+              elif "app.js" in suffix:
+                  assert 'openCategory("certificate",tab.dataset.certMode)' in text
+                  assert 'freeCertificates=category==="certificate"&&certMode==="free"' in text
+              else:
+                  assert 'install.setAttribute("href",item.url)' in text
+                  assert 'product--certificate eri-free-card' in text
+          print("LIVE VERIFIED: single Chứng chỉ category with FREE/BÁN, paid purchase and iPhone/server signing choices")
           PY
