@@ -561,6 +561,10 @@ document.addEventListener("DOMContentLoaded",()=>{
     loadCatalog();
   }));
   document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));
+  if(location.hash==="#certfree"){
+    state.category="certfree";
+    try { sessionStorage.setItem("eri.store.category","certfree"); } catch {}
+  }
   if(location.hash==="#ipa-tools"){
     state.category="decrypt";
     document.querySelectorAll("[data-kind]").forEach(tab=>{
@@ -573,6 +577,19 @@ document.addEventListener("DOMContentLoaded",()=>{
     const active=tab.dataset.kind===state.category;
     tab.classList.toggle("selected",active);
     tab.setAttribute("aria-selected",String(active));
+  });
+  window.addEventListener("hashchange",()=>{
+    if(location.hash!=="#certfree")return;
+    state.category="certfree";
+    try { sessionStorage.setItem("eri.store.category","certfree"); } catch {}
+    document.querySelectorAll("[data-kind]").forEach(tab=>{
+      const active=tab.dataset.kind==="certfree";
+      tab.classList.toggle("selected",active);
+      tab.setAttribute("aria-selected",String(active));
+    });
+    setView("store");
+    loadCatalog();
+    $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
   });
   updateHeader();loadCatalog();restoreSession();syncRegistrationLimits();
   if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js?v=20261115p3",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
