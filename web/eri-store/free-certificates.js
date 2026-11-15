@@ -13,7 +13,7 @@
     try{
       const manifest=new URL(item.url.slice(prefix.length));
       const path=manifest.pathname;
-      return manifest.protocol==="https:"&&manifest.hostname==="website.khoindvn.io.vn"&&
+      return manifest.protocol==="https:"&&manifest.hostname==="eri-store-web.onrender.com"&&
         path.startsWith("/plists/")&&path.endsWith(".plist")&&
         /^[a-z]+$/.test(path.slice("/plists/".length,-".plist".length));
     }catch(_){return false;}
