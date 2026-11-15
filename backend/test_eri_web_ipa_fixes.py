@@ -9,6 +9,7 @@ web = Path(__file__).resolve().parents[1] / "web" / "eri-store"
 html = (web / "index.html").read_text()
 tools = (web / "ipa-tools.js").read_text()
 chunks = (web / "sign-jobs.js").read_text()
+decrypt = (web / "decrypt-store.js").read_text()
 service = (web / "service-worker.js").read_text()
 
 for key in (
@@ -33,7 +34,12 @@ assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
 assert "eri-store-v26" in service
 assert "?v=20261115p3" in html
-assert "decrypt-store.js?v=20261115f4team3" in html
+assert "decrypt-store.js?v=20261115f4team4" in html
+assert "/api/v1/tools/ipa/decrypt/f4/capabilities" in decrypt
+assert "/api/v1/tools/ipa/decrypt/f4/start" in decrypt
+assert "/api/v1/tools/ipa/decrypt/f4/jobs/" in decrypt
+assert "renderF4Job" in decrypt
+assert "trustedF4Download" in decrypt
 assert "eri-decrypt-open-f4" not in html
 assert "eri-dec-f4-import" not in html
 assert "/api/v1/tools/ipa/decrypt/external?" in tools
