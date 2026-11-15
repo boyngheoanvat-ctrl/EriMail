@@ -399,6 +399,29 @@
     // view must request live inventory rather than copying 621 IPA entries.
     loadVaultLibrary(0);
   }
+  // Compatibility with the App Store lookup tab outside ERI DECRYPT.
+  // Its download button performs a fresh source-catalog lookup, not a fake file redirect.
+  window.ERIStoreIPA=Object.freeze({
+    download:async(item,feedback)=>{
+      const report=(message,kind="info")=>{
+        notice(message,kind);
+        if(feedback){feedback.hidden=false;feedback.textContent=message;feedback.dataset.state=kind;}
+      };
+      report("Đang kiểm tra kho IPA nguồn...");
+      try{
+        const q=String(item.bundle_id||item.app_store_url||item.app_id||"").trim();
+        if(!q)throw new Error("Thiếu Bundle ID hoặc link App Store.");
+        const params=new URLSearchParams({q,country:String(item.country||"auto").toLowerCase(),mode:"ios"});
+        const response=await providerRequest("/api/decrypt/search?"+params);
+        const match=(response.items||[]).map(normal).find(src=>
+          src.bundle_id.toLowerCase()===String(item.bundle_id||"").toLowerCase() &&
+          (!item.version||src.version===String(item.version))&&src.dl_url);
+        if(!match)throw new Error("Nguồn chưa cung cấp file IPA đúng phiên bản.");
+        report("Đã xác nhận link IPA từ nguồn. Đang bắt đầu tải...","success");
+        openDownload(match.dl_url);
+      }catch(error){report(error.message,"error");}
+    }
+  });
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init);
   else init();
   window.ERIF4Decrypt=Object.freeze({
