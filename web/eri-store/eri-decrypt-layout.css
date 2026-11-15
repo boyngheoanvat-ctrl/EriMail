@@ -288,3 +288,31 @@
 @media(prefers-reduced-motion:reduce){
  #ipa-decrypt-panel *{scroll-behavior:auto!important;animation:none!important}
 }
+
+/* F4-style sections restored for ERI visual branding. */
+#ipa-decrypt-panel .eri-v-job-panel{margin:18px 21px 0;padding:17px 20px;background:var(--v-card);border:1px solid var(--v-accent);border-radius:16px;color:var(--v-text)}
+#ipa-decrypt-panel .eri-v-job-panel.hidden{display:none!important}
+#ipa-decrypt-panel .eri-v-job-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+#ipa-decrypt-panel .eri-v-job-head h4{font-size:14px;margin:0;font-weight:800}
+#ipa-decrypt-panel .eri-v-job-head span{font-size:10px;font-weight:800;border-radius:99px;padding:4px 8px;background:#544ddf22;color:#b5a9ff}
+#ipa-decrypt-panel .eri-v-progress-track{background:var(--v-inner);border-radius:999px;overflow:hidden;height:8px;margin:14px 0 8px}
+#ipa-decrypt-panel .eri-v-progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--v-accent),var(--v-blue),var(--v-green));transition:width .3s ease}
+#ipa-decrypt-panel .eri-v-job-panel>p{font-size:12px;color:var(--v-sub);margin:0}
+#ipa-decrypt-panel .eri-v-versions-filter{display:flex;flex-direction:column;gap:5px;color:var(--v-sub);font-size:12px;font-weight:700;margin-bottom:10px}
+#ipa-decrypt-panel .eri-v-versions-filter input{height:36px;min-height:36px;background:var(--v-inner);color:var(--v-text);border:1px solid var(--v-border);border-radius:9px;padding:0 10px}
+#ipa-decrypt-panel #eri-v-versions-note{font-size:12px;color:var(--v-sub)}
+#ipa-decrypt-panel .eri-v-versions-list{max-height:390px;overflow-y:auto;display:flex;flex-direction:column;gap:7px}
+#ipa-decrypt-panel .eri-v-version-row{display:flex;justify-content:space-between;align-items:center;gap:9px;background:var(--v-inner);border:1px solid var(--v-border);padding:10px 13px;border-radius:11px}
+#ipa-decrypt-panel .eri-v-version-row strong{display:block;font-size:13px;color:var(--v-text)}
+#ipa-decrypt-panel .eri-v-version-row small{display:block;font-size:11px;color:var(--v-sub)}
+#ipa-decrypt-panel .eri-v-unavailable{font-size:11px;color:var(--v-muted)}
+#ipa-decrypt-panel .eri-v-description{color:var(--v-sub);font-size:12px;line-height:1.65}
+#ipa-decrypt-panel .eri-v-description p{white-space:pre-wrap}
+#ipa-decrypt-panel .eri-v-shots{display:flex;overflow-x:auto;gap:8px;padding-bottom:8px}
+#ipa-decrypt-panel .eri-v-shots img{height:220px;width:auto;border-radius:9px;flex:none}
+@media(max-width:680px){
+  #ipa-decrypt-panel .eri-v-job-panel{margin:13px 11px 0;padding:14px}
+  #ipa-decrypt-panel .eri-v-search-buttons{grid-template-columns:1.3fr 1fr 1fr}
+  #ipa-decrypt-panel .eri-v-search-buttons .btn{font-size:11px;padding:5px}
+  #ipa-decrypt-panel .eri-v-version-row{flex-wrap:wrap}
+}
