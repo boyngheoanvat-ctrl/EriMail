@@ -21,7 +21,7 @@ from pathlib import Path
 CHUNK_BYTES = 4 * 1024 * 1024
 MAX_PRODUCT_BYTES = 512 * 1024 * 1024
 MAX_SQLITE_BYTES = 64 * 1024 * 1024
-VAULT_BASE = "https://dahrbjjknmvwokruhnha.supabase.co/functions/v1/eri-private-vault"
+VAULT_BASE = os.getenv("ERI_VAULT_URL", "https://dahrbjjknmvwokruhnha.supabase.co/functions/v1/eri-private-vault")
 _NAME = re.compile(r"^[a-f0-9]{32}$")
 _HASH = re.compile(r"^[a-f0-9]{64}$")
 
