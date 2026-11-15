@@ -18,7 +18,7 @@ jobs:
           import plistlib, urllib.request
           base="https://eri-store-web.onrender.com"
           for slug in ["idjbbheelkpp","hegmnlhdholo"]:
-              url=f"{base}/plists/{slug}.plist"
+              url=f"{base}/plists/{slug}.xml"
               req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 ERI-Installer-QA"})
               with urllib.request.urlopen(req, timeout=30) as response:
                   mime=response.headers.get_content_type()
