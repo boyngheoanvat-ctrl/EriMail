@@ -7,9 +7,12 @@ const KINDS={
 };
 const $=id=>document.getElementById(id);
 const TOKEN_KEY="eri_store_buyer_token";
+const savedCategory=sessionStorage.getItem("eri.store.category");
 const state={
-  category:(["mod","ai","certificate","certfree","decrypt","sign"].includes(sessionStorage.getItem("eri.store.category"))?
-    sessionStorage.getItem("eri.store.category"):"mod"),modTab:"paid",modPlatform:"ipa",view:"store",items:[],
+  category:(["mod","ai","certificate","certfree","decrypt","sign"].includes(savedCategory)?
+    (savedCategory==="certfree"?"certificate":savedCategory):"mod"),
+  certTab:(savedCategory==="certfree"||sessionStorage.getItem("eri.store.certTab")==="free")?"free":"paid",
+  modTab:"paid",modPlatform:"ipa",view:"store",items:[],
   token:sessionStorage.getItem(TOKEN_KEY)||localStorage.getItem(TOKEN_KEY)||"",
   remembered:Boolean(localStorage.getItem(TOKEN_KEY)),buyer:null,pending:null,registrationMinName:2
 };
@@ -130,11 +133,37 @@ function button(label,cls,click){
   const b=element("button",cls,label);
   b.type="button";b.addEventListener("click",click);return b;
 }
+function isToolCategory(){
+  return state.category==="decrypt"||state.category==="sign"||
+    (state.category==="certificate"&&state.certTab==="free");
+}
+function syncCertTabs(){
+  document.querySelectorAll("[data-cert-mode]").forEach(tab=>{
+    const active=tab.dataset.certMode===state.certTab;
+    tab.classList.toggle("selected",active);
+    tab.setAttribute("aria-selected",String(active));
+  });
+}
+function openCategory(category,certMode){
+  state.category=category==="certfree"?"certificate":category;
+  if(state.category==="certificate"&&(certMode==="free"||certMode==="paid"))state.certTab=certMode;
+  try{
+    sessionStorage.setItem("eri.store.category",state.category);
+    sessionStorage.setItem("eri.store.certTab",state.certTab);
+  }catch{}
+  document.querySelectorAll("[data-kind]").forEach(tab=>{
+    const active=tab.dataset.kind===state.category;
+    tab.classList.toggle("selected",active);
+    tab.setAttribute("aria-selected",String(active));
+  });
+  syncCertTabs();
+  loadCatalog();
+}
 function setView(view){
   if(!["store","orders","account"].includes(view))view="store";
   state.view=view;
   $("store").classList.toggle("hidden",view!=="store");
-  $("ipa-tools")?.classList.toggle("hidden",view!=="store" || !["decrypt","sign","certfree"].includes(state.category));
+  $("ipa-tools")?.classList.toggle("hidden",view!=="store" || !isToolCategory());
   $("hero").classList.toggle("hidden",view!=="store");
   document.querySelector(".features").classList.toggle("hidden",view!=="store");
   $("orders-view").classList.toggle("hidden",view!=="orders");
@@ -164,7 +193,7 @@ function renderCatalog(){
     ?state.items.filter(item=>
       (state.modTab==="free" ? Number(item.price_vnd)===0 : Number(item.price_vnd)>0) &&
       (item.platform==="apk"?"apk":"ipa")===state.modPlatform)
-    :state.items;
+    :category==="certificate"?state.items.filter(item=>Number(item.price_vnd)>0):state.items;
   document.querySelectorAll("[data-mod-platform]").forEach(tab=>{
     const active=tab.dataset.modPlatform===state.modPlatform;
     tab.classList.toggle("selected",active);
@@ -177,7 +206,7 @@ function renderCatalog(){
   });
   $("catalog-message").textContent=items.length+" sản phẩm · "+
     (category==="mod" ? (state.modTab==="free" ? "Mod Game FREE" : "Mod Game BÁN")+
-      " · "+state.modPlatform.toUpperCase() : KINDS[category].title);
+      " · "+state.modPlatform.toUpperCase() : category==="certificate"?"Chứng chỉ BÁN":KINDS[category].title);
   if(!items.length){
     grid.append(element("div","empty",category==="mod"
       ? (state.modTab==="free" ? "Chưa có Mod Game miễn phí." : "Chưa có Mod Game trả phí.")
@@ -227,24 +256,28 @@ function renderCatalog(){
 }
 async function loadCatalog(){
   const category=state.category;
-  const toolSelected=category==="decrypt" || category==="sign" || category==="certfree";
+  const certMode=state.certTab;
+  const freeCertificates=category==="certificate"&&certMode==="free";
+  const toolSelected=isToolCategory();
+  $("certificate-subtabs")?.classList.toggle("hidden",category!=="certificate");
+  $("ipa-tools-heading-wrap")?.classList.toggle("hidden",freeCertificates);
+  syncCertTabs();
   $("catalog-heading")?.classList.toggle("hidden",toolSelected);
   $("products-toolbar")?.classList.toggle("hidden",toolSelected);
   $("products")?.classList.toggle("hidden",toolSelected);
   $("ipa-tools")?.classList.toggle("hidden",!toolSelected || state.view!=="store");
   $("ipa-decrypt-panel")?.classList.toggle("hidden",category!=="decrypt");
   $("ipa-sign-panel")?.classList.toggle("hidden",category!=="sign");
-  $("certificate-free-panel")?.classList.toggle("hidden",category!=="certfree");
-  $("certificate-free-shortcut")?.classList.toggle("hidden",category!=="certificate");
+  $("certificate-free-panel")?.classList.toggle("hidden",!freeCertificates);
   if(toolSelected){
-    if(category==="certfree"&&typeof window.loadFreeCertificates==="function")window.loadFreeCertificates();
+    if(freeCertificates&&typeof window.loadFreeCertificates==="function")window.loadFreeCertificates();
     $("mod-subtabs")?.classList.add("hidden");
     $("mod-platform-tabs")?.classList.add("hidden");
     $("certificate-udid")?.classList.add("hidden");
     return;
   }
   const udidPanel=$("certificate-udid");
-  if(udidPanel)udidPanel.classList.toggle("hidden",category!=="certificate");
+  if(udidPanel)udidPanel.classList.toggle("hidden",category!=="certificate"||certMode!=="paid");
   const modTabs=$("mod-subtabs");
   if(modTabs)modTabs.classList.toggle("hidden",category!=="mod");
   const platformTabs=$("mod-platform-tabs");
@@ -254,12 +287,12 @@ async function loadCatalog(){
   grid.replaceChildren(element("div","placeholder"),element("div","placeholder"),element("div","placeholder"));
   try{
     const data=await request("/api/v1/"+KINDS[category].endpoint);
-    if(category!==state.category)return;
+    if(category!==state.category||(category==="certificate"&&certMode!==state.certTab))return;
     if(!Array.isArray(data.items))throw new Error("Danh mục chưa đúng định dạng.");
     state.items=data.items;
     renderCatalog();
   }catch(e){
-    if(category!==state.category)return;
+    if(category!==state.category||(category==="certificate"&&certMode!==state.certTab))return;
     grid.replaceChildren(element("div","empty",errorMessage(e)));
     $("catalog-message").textContent="Không tải được sản phẩm";
     showBanner(errorMessage(e));
