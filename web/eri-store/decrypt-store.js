@@ -2,9 +2,9 @@
 /* ERI visual rebrand of the F4TEAM-facing public catalog flow.
    Uses source API /api/decrypt/* instead of substituting ERI's own data.
    Data and files remain hosted by their source; no copied F4 CSRF/session.
-   Provider must enable browser CORS or supply an authorized ERI proxy. */
+   Public GET requests are routed through the separate authorized ERI bridge. */
 (() => {
-  const PROVIDER = "https://decrypt.160-191-242-70.sslip.io";
+  const PROVIDER = "https://eri-f4-bridge.onrender.com";
   const $ = id => document.getElementById(id);
   const root = $("ipa-decrypt-panel");
   if (!root) return;
@@ -170,7 +170,7 @@
         body:body?JSON.stringify(body):undefined,credentials:"omit"});
     }catch(error){
       if(error.name==="AbortError")throw error;
-      throw new Error("Máy chủ nguồn chưa cho phép ERI đọc API từ tên miền khác (CORS), hoặc đang không kết nối được. Cần F4TEAM cấp quyền hoặc proxy API được ủy quyền.");
+      throw new Error("Không kết nối được máy chủ trung gian ERI. Kiểm tra dịch vụ ERI F4 Bridge hoặc thử lại.");
     }
     let json;
     try{json=await res.json();}catch{throw new Error("Nguồn trả phản hồi không phải JSON.");}

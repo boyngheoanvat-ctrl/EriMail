@@ -36,16 +36,17 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v32" in service
+assert "eri-store-v33" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
-assert "decrypt-store.js?v=20261115dashboard2" in html
+assert "decrypt-store.js?v=20261115f4bridge1" in html
 assert "eri-decrypt-layout.css?v=20261115dashboard2" in html
 
 # ERI hosts a branded view, but provider API data must stay sourced from
 # the F4TEAM host that served the supplied page, not empty ERI metadata.
-assert 'const PROVIDER = "https://decrypt.160-191-242-70.sslip.io"' in decrypt
-assert "connect-src" in html and "https://decrypt.160-191-242-70.sslip.io" in html
+assert 'const PROVIDER = "https://eri-f4-bridge.onrender.com"' in decrypt
+assert "connect-src" in html and "https://eri-f4-bridge.onrender.com" in html
+assert "Máy chủ nguồn chưa cho phép ERI đọc API" not in decrypt
 assert '/api/decrypt/search?' in decrypt
 assert '/api/decrypt/library?' in decrypt
 assert '/api/decrypt/versions?' in decrypt
