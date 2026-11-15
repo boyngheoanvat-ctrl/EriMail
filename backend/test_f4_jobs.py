@@ -7,7 +7,7 @@ from unittest.mock import patch
 with tempfile.TemporaryDirectory(prefix="eri-f4-jobs-") as root:
     os.environ["ERI_DB_PATH"] = str(Path(root) / "test.sqlite3")
     os.environ["ERI_UPLOAD_DIR"] = str(Path(root) / "uploads")
-    os.environ["ERI_ADMIN_KEY"] = "test-admin-key-f4-0123456789"
+    os.environ["ERI_ADMIN_KEY"] = "test-admin-key-f4-0123456789-0123456789"
     os.environ["ERI_SIGN_JOBS_DIR"] = str(Path(root) / "jobs")
     os.environ["ERI_SIGNED_IPA_DIR"] = str(Path(root) / "signed")
     os.environ.pop("ERI_F4_API_TOKEN", None)
