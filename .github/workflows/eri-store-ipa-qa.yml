@@ -30,4 +30,6 @@ jobs:
           python3 -m pip install -r backend/requirements.txt httpx
           cd backend
           python3 test_decrypt_catalog.py
+          python3 test_actions_ipa_worker.py
+          python3 test_actions_bridge.py
           python3 test_signing_jobs.py
