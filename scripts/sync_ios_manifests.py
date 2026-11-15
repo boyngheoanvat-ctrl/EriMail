@@ -25,7 +25,7 @@ def manifest_id(entry):
             ("website.khoindvn.io.vn", "eri-store-web.onrender.com")
             or u.query or u.fragment or u.username or u.password):
         raise ValueError("Invalid installer origin")
-    found = re.fullmatch(r"/plists/([a-z]{12})\.plist", u.path)
+    found = re.fullmatch(r"/plists/([a-z]{12})\.(?:plist|xml)", u.path)
     if not found:
         raise ValueError("Unexpected manifest path")
     return found.group(1)
@@ -91,10 +91,11 @@ def main():
     dest.mkdir(parents=True, exist_ok=True)
     for slug in ids:
         (dest / f"{slug}.plist").write_bytes(results[slug])
+        (dest / f"{slug}.xml").write_bytes(results[slug])
     for k in ("ksign", "esign"):
         for item in catalog[k]:
             slug = manifest_id(item)
-            item["url"] = f"{PREFIX}{SITE}/plists/{slug}.plist"
+            item["url"] = f"{PREFIX}{SITE}/plists/{slug}.xml"
     content = json.dumps(catalog, indent=2, ensure_ascii=False) + "\n"
     for path in (CATALOG, WEB_CATALOG):
         path.write_text(content, encoding="utf-8")
@@ -105,17 +106,18 @@ def main():
                         'hostname==="eri-store-web.onrender.com"')
     elif 'hostname==="eri-store-web.onrender.com"' not in js:
         raise ValueError("Installer host validation missing")
+    js = js.replace('".plist"', '".xml"')
     js_path.write_text(js, encoding="utf-8")
     html_path = ROOT / "web/eri-store/index.html"
     html = html_path.read_text("utf-8")
-    html = html.replace("free-certificates.js?v=20261115cert1",
-                        "free-certificates.js?v=20261115cert2")
+    html = html.replace("free-certificates.js?v=20261115cert2",
+                        "free-certificates.js?v=20261115cert3")
     html = html.replace("Liên kết cài đặt được cung cấp từ website.khoindvn.io.vn.",
                         "Manifest do ERI cung cấp; ứng dụng và chữ ký số vẫn do nguồn bên ngoài cung cấp.")
     html_path.write_text(html, encoding="utf-8")
     sw_path = ROOT / "web/eri-store/service-worker.js"
     sw = sw_path.read_text("utf-8").replace(
-        'const VERSION="eri-store-v36";', 'const VERSION="eri-store-v37";')
+        'const VERSION="eri-store-v37";', 'const VERSION="eri-store-v38";')
     sw_path.write_text(sw, encoding="utf-8")
     print("PASS: 34 local manifests. Original IPA package URLs were preserved.")
 
