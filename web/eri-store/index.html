@@ -135,7 +135,7 @@ document.addEventListener("submit", function(event) {
         <span class="eri-v-brand-tag">iOS</span>
       </div>
       <div class="eri-v-top-meta">
-        <span class="eri-v-chip eri-v-online"><i></i> ERI CLOUD</span>
+        <span class="eri-v-chip eri-v-online"><i></i> ERI ENGINE</span>
         <span class="eri-v-chip">Kho IPA: <strong id="eri-decrypt-header-vault-count">—</strong></span>
       </div>
       <button type="button" id="eri-decrypt-theme-toggle" class="eri-v-theme" aria-label="Đổi giao diện sáng hoặc tối" title="Đổi giao diện">☀</button>
@@ -170,7 +170,8 @@ document.addEventListener("submit", function(event) {
         </div>
         <div class="eri-v-search-buttons">
           <button type="submit" id="eri-decrypt-search-button" class="btn primary eri-v-main-btn">⌕ Tìm App Store</button>
-          <button type="button" id="eri-decrypt-open-vault" class="btn outline">Kho IPA có sẵn</button>
+          <button type="button" id="eri-v-direct-versions" class="btn outline" title="Xem các phiên bản đã lưu của ứng dụng">◷ Chọn Ver</button>
+          <button type="button" id="eri-v-direct-check" class="btn outline" title="Kiểm tra IPA đã có">♢ Kiểm tra IPA</button>
         </div>
       </form>
       <div class="eri-decrypt-preset eri-v-presets" aria-label="Tìm kiếm nhanh">
@@ -181,9 +182,23 @@ document.addEventListener("submit", function(event) {
         <button type="button" data-eri-decrypt-preset="Roblox">Roblox</button>
         <button type="button" data-eri-decrypt-preset="CapCut">CapCut</button>
         <button type="button" data-eri-decrypt-preset="Duolingo">Duolingo</button>
+        <button type="button" data-eri-decrypt-preset="Locket Widget">Locket</button>
+        <button type="button" data-eri-decrypt-preset="Goodnotes 6">Goodnotes</button>
+        <button type="button" data-eri-decrypt-preset="1.1.1.1">1.1.1.1 VPN</button>
         <button type="button" data-eri-decrypt-preset="Nghịch Thủy Hàn">Nghịch Thủy Hàn</button>
       </div>
       <div id="eri-decrypt-notice" class="ipa-tool-result" role="status" aria-live="polite"></div>
+    </section>
+
+    <!-- ERI-only file verification status; no simulated Apple decryption progress. -->
+    <section id="eri-v-job-panel" class="eri-v-job-panel hidden" role="status" aria-live="polite">
+      <div class="eri-v-job-head">
+        <h4 id="eri-v-job-title">Đang kiểm tra tệp IPA...</h4>
+        <span id="eri-v-job-badge">ERI CLOUD</span>
+      </div>
+      <div class="eri-v-progress-track"><div class="eri-v-progress-bar" id="eri-v-progress-bar"></div></div>
+      <p id="eri-v-job-stage">Kết nối máy chủ ERI...</p>
+      <div id="eri-v-job-actions" class="eri-decrypt-actions"></div>
     </section>
 
     <section id="eri-decrypt-result-section" class="eri-decrypt-section hidden eri-v-section" aria-label="Kết quả tìm kiếm App Store">
@@ -217,7 +232,9 @@ document.addEventListener("submit", function(event) {
         <button class="eri-v-cat" type="button" data-eri-cat="apps" aria-pressed="false">▣ Ứng dụng</button>
         <button class="eri-v-cat" type="button" data-eri-cat="education" aria-pressed="false">◈ Học tập</button>
         <button class="eri-v-cat" type="button" data-eri-cat="social" aria-pressed="false">♧ Mạng xã hội</button>
-        <button class="eri-v-cat" type="button" data-eri-cat="utilities" aria-pressed="false">⚙ Công cụ</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="photo_video" aria-pressed="false">◈ Ảnh &amp; Giải trí</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="utilities" aria-pressed="false">⚙ Công cụ &amp; VPN</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="productivity" aria-pressed="false">▣ Tiện ích</button>
       </div>
       <p class="eri-v-filter-note" id="eri-v-category-note" hidden>Bộ lọc thể loại áp dụng cho những IPA hiển thị trên trang hiện tại.</p>
       <div id="eri-decrypt-vault-grid" class="eri-decrypt-grid" aria-live="polite"></div>
@@ -232,6 +249,21 @@ document.addEventListener("submit", function(event) {
       <span>Hỗ trợ tải IPA từ nguồn được phép · TrollStore · ESign · Scarlet · Feather</span>
     </footer>
 
+    <div id="eri-v-versions-modal" class="eri-v-modal hidden" role="dialog" aria-modal="true" aria-labelledby="eri-v-versions-title" aria-hidden="true">
+      <div class="eri-v-dialog">
+        <div class="eri-v-dialog-head">
+          <h4 id="eri-v-versions-title">Phiên bản IPA trong kho ERI</h4>
+          <button type="button" class="eri-v-theme" id="eri-v-versions-close" aria-label="Đóng cửa sổ phiên bản">×</button>
+        </div>
+        <div class="eri-v-dialog-body">
+          <label class="eri-v-versions-filter">Lọc phiên bản
+            <input type="search" id="eri-v-versions-filter" placeholder="Ví dụ: 1.64">
+          </label>
+          <p id="eri-v-versions-note">Các phiên bản có tệp IPA thật trong kho ERI.</p>
+          <div id="eri-v-versions-list" class="eri-v-versions-list"></div>
+        </div>
+      </div>
+    </div>
     <div id="eri-v-detail-modal" class="eri-v-modal hidden" role="dialog" aria-modal="true" aria-labelledby="eri-v-detail-title" aria-hidden="true">
       <div class="eri-v-dialog">
         <div class="eri-v-dialog-head">
