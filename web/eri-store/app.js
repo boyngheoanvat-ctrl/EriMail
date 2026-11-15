@@ -235,6 +235,7 @@ async function loadCatalog(){
   $("ipa-decrypt-panel")?.classList.toggle("hidden",category!=="decrypt");
   $("ipa-sign-panel")?.classList.toggle("hidden",category!=="sign");
   $("certificate-free-panel")?.classList.toggle("hidden",category!=="certfree");
+  $("certificate-free-shortcut")?.classList.toggle("hidden",category!=="certificate");
   if(toolSelected){
     $("mod-subtabs")?.classList.add("hidden");
     $("mod-platform-tabs")?.classList.add("hidden");
