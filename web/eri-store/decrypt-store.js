@@ -83,10 +83,24 @@
       raw:item
     };
   }
+  function sourceLink(label,url,cls="btn primary") {
+    const checked=sourceDownload(url);
+    if(!checked)return null;
+    const anchor=link(label,checked,cls);
+    // In standalone iOS web apps, a top-level redirect to a binary URL can
+    // strand the Home Screen app. Open the HTTPS file in the browser instead.
+    anchor.target="_blank";
+    anchor.referrerPolicy="no-referrer";
+    anchor.setAttribute("aria-label",label+" — mở tải IPA trong trình duyệt");
+    return anchor;
+  }
   function openDownload(url) {
     const checked=sourceDownload(url);
     if(!checked){notice("Nguồn chưa cấp liên kết IPA hợp lệ cho file này.","error");return;}
-    window.location.assign(checked);
+    const a=sourceLink("Tải IPA",checked);
+    // Only called from a direct click; asynchronous searches must render
+    // a real anchor and wait for the user's tap to avoid popup blocking.
+    if(a)a.click();
   }
   function sideload(url) {
     const checked=sourceDownload(url);if(!checked)return null;
@@ -117,8 +131,8 @@
     add(card,tags,intro);
     const foot=el("div","eri-decrypt-actions");
     if(item.dl_url){
-      add(foot,action("⬇ Tải IPA"+(item.size_human?" ("+item.size_human+")":""),
-        ()=>openDownload(item.dl_url),"btn primary"));
+      add(foot,sourceLink("⬇ Tải IPA"+(item.size_human?" ("+item.size_human+")":""),
+        item.dl_url,"btn primary"));
       add(foot,action("◷",()=>showVersions(item),"btn outline eri-v-detail-action"));
       add(foot,action("ⓘ",()=>showDetails(item),"btn outline eri-v-detail-action"));
       add(foot,action("⎘",()=>navigator.clipboard?.writeText(item.dl_url)
@@ -143,7 +157,7 @@
     add(card,tags,add(el("div","eri-decrypt-card-top"),icon(item.icon_url),info));
     const foot=el("div","eri-decrypt-actions");
     if(item.dl_url){
-      add(foot,action("⬇ Tải IPA",()=>openDownload(item.dl_url),"btn primary"));
+      add(foot,sourceLink("⬇ Tải IPA",item.dl_url,"btn primary"));
       const sl=sideload(item.dl_url);if(sl)card._sideload=sl;
     }else if(item.price>0){
       add(foot,action("Ứng dụng trả phí",()=>notice("Tải bản trả phí cần quyền phân phối phù hợp.","error"),"btn outline"));
@@ -185,7 +199,7 @@
     const query=$("eri-decrypt-vault-filter")?.value.trim()||"";
     const sort=$("eri-decrypt-vault-sort")?.value||"newest";
     state.sort=sort;state.offset=Math.max(0,offset);
-    showEmpty(grid,"Đang kết nối kho IPA F4TEAM...");
+    showEmpty(grid,"Đang kết nối kho IPA ERI Nguyễn...");
     const qs=new URLSearchParams({q:query,category:state.category,sort,
       limit:String(state.limit),offset:String(state.offset)});
     try{
@@ -201,7 +215,7 @@
         if(n)n.textContent=fmt(count)+" IPA";
       });
       const summary=$("eri-v-vault-summary");
-      if(summary)summary.textContent="Hiển thị "+fmt(state.total)+" kết quả từ kho IPA F4TEAM";
+      if(summary)summary.textContent="Hiển thị "+fmt(state.total)+" IPA trong kho ERI Nguyễn · dữ liệu từ nguồn liên kết";
       const pages=Math.max(1,Math.ceil(state.total/state.limit));
       const page=Math.floor(state.offset/state.limit)+1;
       if($("eri-decrypt-page-label"))$("eri-decrypt-page-label").textContent="Trang "+page+" / "+pages;
@@ -313,17 +327,18 @@
         const file=found.exact;
         sayJob("IPA đã có trên nguồn · "+item.title,
           "Đã tìm thấy đường dẫn tải IPA "+(file.version?"v"+file.version:"")+".",100,"success");
-        if(actions)add(actions,action("⬇ Tải IPA"+(file.version?" v"+file.version:""),
-          ()=>openDownload(file.dl_url),"btn primary"));
+        if(actions)add(actions,sourceLink("⬇ Tải IPA"+(file.version?" v"+file.version:""),
+          file.dl_url,"btn primary"));
         notice("Đã tìm thấy tệp IPA có sẵn trong kho nguồn.","success");
-        openDownload(file.dl_url);
+        // No automatic redirect after an async lookup: iOS PWA blocks it.
+        // The user can tap the verified HTTPS IPA link above.
       }else if(found.alternate){
         const file=found.alternate;
         sayJob("Có IPA phiên bản khác · "+item.title,
           "Chưa thấy bản v"+(found.wanted||"được chọn")+
           ". Kho nguồn có bản "+(file.version?"v"+file.version:"không rõ phiên bản")+".",100);
-        if(actions)add(actions,action("⬇ Tải bản "+(file.version?"v"+file.version:"khác"),
-          ()=>openDownload(file.dl_url),"btn outline"));
+        if(actions)add(actions,sourceLink("⬇ Tải bản "+(file.version?"v"+file.version:"khác"),
+          file.dl_url,"btn outline"));
         notice("Kho có IPA nhưng chưa xác minh được phiên bản yêu cầu.","info");
       }else if(found.accessible){
         sayJob("Đã kiểm tra kho IPA · "+item.title,
@@ -369,7 +384,7 @@
       add(label,el("strong","","v"+String(v.version||v.external_version_id||"—")),
         el("small","",v.released_at||""));
       const cached=normal(v.cached||{});
-      if(cached.dl_url) add(row,label,action("Tải IPA",()=>openDownload(cached.dl_url),"btn primary"));
+      if(cached.dl_url) add(row,label,sourceLink("Tải IPA",cached.dl_url,"btn primary"));
       else add(row,label,el("span","eri-v-unavailable","Chưa có file tải"));
       list.append(row);
     });
@@ -392,7 +407,7 @@
     add(body,specs);
     const actions=el("div","eri-v-detail-actions");
     if(item.dl_url){
-      add(actions,action("⬇ Tải IPA",()=>openDownload(item.dl_url),"btn primary"));
+      add(actions,sourceLink("⬇ Tải IPA",item.dl_url,"btn primary"));
       const sl=sideload(item.dl_url);if(sl)body.append(sl);
     }else add(actions,action("Kiểm tra IPA",()=>checkOrStart(item),"btn primary"));
     add(actions,action("Chọn phiên bản",()=>{modal("eri-v-detail-modal",false);showVersions(item);}));
@@ -496,20 +511,38 @@
     download:async(item,feedback)=>{
       const report=(message,kind="info")=>{
         notice(message,kind);
-        if(feedback){feedback.hidden=false;feedback.textContent=message;feedback.dataset.state=kind;}
+        if(feedback){feedback.hidden=false;feedback.replaceChildren(document.createTextNode(message));
+          feedback.dataset.state=kind;}
       };
-      report("Đang kiểm tra kho IPA nguồn...");
+      report("Đang tra cứu IPA trong kho ERI Nguyễn...");
       try{
-        const q=String(item.bundle_id||item.app_store_url||item.app_id||"").trim();
-        if(!q)throw new Error("Thiếu Bundle ID hoặc link App Store.");
-        const params=new URLSearchParams({q,country:String(item.country||"auto").toLowerCase(),mode:"ios"});
-        const response=await providerRequest("/api/decrypt/search?"+params);
-        const match=(response.items||[]).map(normal).find(src=>
-          src.bundle_id.toLowerCase()===String(item.bundle_id||"").toLowerCase() &&
-          (!item.version||src.version===String(item.version))&&src.dl_url);
-        if(!match)throw new Error("Nguồn chưa cung cấp file IPA đúng phiên bản.");
-        report("Đã xác nhận link IPA từ nguồn. Đang bắt đầu tải...","success");
-        openDownload(match.dl_url);
+        const target={
+          title:item.title||item.name||"",
+          bundle_id:String(item.bundle_id||""),
+          version:String(item.version||""),
+          country:String(item.country||"VN"),
+          cached:item.cached||null,
+          store_url:item.app_store_url||""
+        };
+        if(!target.bundle_id)throw new Error("Thiếu Bundle ID để đối chiếu file IPA.");
+        const found=await findAvailableIPA(target);
+        const file=found.exact;
+        if(file){
+          report("Đã xác minh IPA "+(file.version?"v"+file.version:"")+
+            ". Nhấn Tải IPA bên dưới để tải trên iPhone.","success");
+          // iOS standalone does not guarantee downloads started from a delayed
+          // script navigation. User clicks the actual trusted link.
+          const a=sourceLink("⬇ Tải IPA"+(file.size_human?" ("+file.size_human+")":""),
+            file.dl_url,"btn primary");
+          if(feedback && a)feedback.append(document.createElement("p"),a);
+        }else if(found.alternate){
+          report("Chưa tìm thấy IPA v"+target.version+
+            ". Có phiên bản "+found.alternate.version+"; chỉ tải nếu bạn chọn bản này.","info");
+          const a=sourceLink("⬇ Tải bản "+found.alternate.version,found.alternate.dl_url,"btn outline");
+          if(feedback && a)feedback.append(document.createElement("p"),a);
+        }else if(!found.accessible){
+          throw new Error(found.lastError?.message||"Không truy cập được kho IPA ERI Nguyễn.");
+        }else throw new Error("Kho ERI Nguyễn chưa có IPA đã được xác minh đúng phiên bản.");
       }catch(error){report(error.message,"error");}
     }
   });
