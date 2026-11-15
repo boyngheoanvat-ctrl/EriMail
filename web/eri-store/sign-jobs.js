@@ -88,32 +88,54 @@
       throw e;
     } finally { clearTimeout(timer); }
   }
-  async function putChunk(jobId, index, blob, sha) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90000);
-    try {
-      const response = await fetch(API + "/api/v1/tools/ipa/sign-jobs/" + jobId + "/chunks/" + index, {
-        method: "PUT", cache: "no-store", signal: controller.signal,
-        headers: {
-          "Authorization": "Bearer " + token(), "Content-Type": "application/octet-stream",
-          "X-ERI-Chunk-SHA256": sha
-        },
-        body: blob
-      });
-      let json = {};
-      try { json = await response.json(); } catch {}
-      if (!response.ok) throw new Error(errorText(json, response.status));
-      if (json.index !== index || json.received_bytes !== blob.size) {
-        throw new Error("Máy chủ chưa xác nhận đủ phần " + (index + 1));
-      }
-    } catch (e) {
-      if (e.name === "AbortError") throw new Error("Gửi từng phần quá thời gian, có thể thử lại.");
-      throw e;
-    } finally { clearTimeout(timer); }
+  // XMLHttpRequest exposes actual *in-flight* upload bytes on iOS; fetch
+  // provides no upload progress. The main bar still counts server acknowledgments.
+  function putChunk(jobId,index,blob,sha,totalChunks) {
+    return new Promise((resolve,reject)=>{
+      const xhr=new XMLHttpRequest();
+      xhr.open("PUT",API+"/api/v1/tools/ipa/sign-jobs/"+jobId+"/chunks/"+index,true);
+      xhr.timeout=45000;
+      xhr.setRequestHeader("Authorization","Bearer "+token());
+      xhr.setRequestHeader("Content-Type","application/octet-stream");
+      xhr.setRequestHeader("X-ERI-Chunk-SHA256",sha);
+      xhr.upload.onprogress=e=>{
+        const amount=e.lengthComputable ? fmt(e.loaded)+" / "+fmt(e.total) :
+          fmt(e.loaded)+" đã gửi";
+        status("Đang gửi phần "+(index+1)+"/"+totalChunks+
+          ": "+amount+" (chưa được máy chủ xác nhận).");
+      };
+      xhr.onload=()=>{
+        let data={};
+        try{data=JSON.parse(xhr.responseText||"{}");}catch{}
+        if(xhr.status<200 || xhr.status>=300){
+          reject(new Error(errorText(data,xhr.status)));return;
+        }
+        if(data.index!==index || data.received_bytes!==blob.size){
+          reject(new Error("Máy chủ chưa xác nhận đủ phần "+(index+1)));return;
+        }
+        resolve();
+      };
+      xhr.onerror=()=>reject(new Error("Mất kết nối khi đang gửi phần "+(index+1)+"."));
+      xhr.ontimeout=()=>reject(new Error("Phần "+(index+1)+" quá 45 giây chưa được máy chủ xác nhận."));
+      xhr.onabort=()=>reject(new Error("Đã dừng gửi phần "+(index+1)+"."));
+      xhr.send(blob);
+    });
   }
   async function sha256(blob) {
     const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
     return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,"0")).join("");
+  }
+  async function timedSha256(blob) {
+    if(!crypto?.subtle?.digest)
+      throw new Error("iPhone hiện không hỗ trợ SHA-256 trên trang này. Mở ERI bằng Safari và thử lại.");
+    let timer;
+    try{
+      return await Promise.race([
+        sha256(blob),
+        new Promise((_,reject)=>{timer=setTimeout(()=>
+          reject(new Error("iPhone tính SHA-256 quá lâu. Hãy dùng Safari và chọn lại tệp IPA.")),20000);})
+      ]);
+    }finally{clearTimeout(timer);}
   }
   function resultLinks(result) {
     const el = $("ipa-sign-status");
@@ -195,8 +217,7 @@
       const profile = form.elements.namedItem("mobileprovision")?.files?.[0];
       const password = form.elements.namedItem("password")?.value;
       if (!file || !p12 || !profile || !password) throw new Error("Chọn đủ IPA, P12, mobileprovision và mật khẩu.");
-      showProgress(0, file.size, "uploading");
-      status("Đang chuẩn bị tải IPA: 0.0% · 0.0 MB / " + fmt(file.size));
+      status("Đang kiểm tra phiên IPA đã lưu trên máy chủ ERI. Chưa bắt đầu gửi dữ liệu...");
       const ready = getSaved();
       let job;
       if (ready && ready.name === file.name && ready.size === file.size) {
@@ -236,14 +257,17 @@
         if (received.has(i)) continue;
         if (!token()) throw new Error("Phiên đăng nhập đã mất. Đăng nhập lại rồi tiếp tục tải IPA.");
         const slice = file.slice(i * job.chunk_bytes, Math.min(file.size,(i+1)*job.chunk_bytes));
-        const digest = await sha256(slice);
+        status("Đang tính SHA-256 cho phần "+(i+1)+"/"+chunks+" (2 MB mỗi phần)...");
+        const digest = await timedSha256(slice);
         let sent = false;
         for (let retry=0;retry<3&&!sent;retry++) {
           try {
-            await putChunk(job.job_id,i,slice,digest);
+            status("Bắt đầu gửi phần "+(i+1)+"/"+chunks+" · lần thử "+(retry+1)+"/3...");
+            await putChunk(job.job_id,i,slice,digest,chunks);
             sent=true;
           } catch(e) {
             // A lost response doesn't mean the server lost the bytes.
+            status("Đang đối chiếu phần "+(i+1)+" với máy chủ sau lỗi: "+e.message);
             const remote = await api("/api/v1/tools/ipa/sign-jobs/" + job.job_id);
             if ((remote.received || []).includes(i)) sent=true;
             else if (retry===2) throw e;
