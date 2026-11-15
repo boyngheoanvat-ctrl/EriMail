@@ -1,0 +1,37 @@
+name: Publish ERI-hosted KSign ESign manifests
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/eri-ios-manifests.yml"
+      - "scripts/sync_ios_manifests.py"
+      - "ipa-catalog/install-tools.json"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Verify upstream manifests and prepare 34 ERI-hosted files
+        run: python3 scripts/sync_ios_manifests.py
+      - name: Check generated installers
+        run: |
+          python3 -m json.tool web/eri-store/install-tools.json > /dev/null
+          node --check web/eri-store/free-certificates.js
+          test "$(find web/eri-store/plists -maxdepth 1 -name '*.plist' | wc -l)" -eq 34
+      - name: Commit validated manifests to ERI Store
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ipa-catalog/install-tools.json web/eri-store/install-tools.json web/eri-store/plists web/eri-store/free-certificates.js web/eri-store/index.html web/eri-store/service-worker.js
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: serve 34 verified iOS manifests on ERI Store domain"
+            git push origin HEAD:main
+          else
+            echo "All manifests already synchronized"
+          fi
