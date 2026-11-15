@@ -5,6 +5,7 @@ on:
     paths:
       - 'web/eri-store/**'
       - 'backend/**'
+      - 'f4bridge/**'
       - '.github/workflows/eri-store-ipa-qa.yml'
   workflow_dispatch:
 
@@ -25,6 +26,8 @@ jobs:
           node --check web/eri-store/service-worker.js
       - name: Verify upload percentage and missing IPA UI contracts
         run: python3 backend/test_eri_web_ipa_fixes.py
+      - name: Test ERI F4 public catalog bridge
+        run: python3 f4bridge/test_server.py
       - name: Test backend IPA request paths
         run: |
           python3 -m pip install -r backend/requirements.txt httpx
