@@ -11,6 +11,8 @@
     sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY) || "";
   const fmt = bytes => (bytes / 1048576).toFixed(1) + " MB";
   let busy = false;
+  let maxTransmitted = 0;
+  let signedOk = false;
 
   function status(message, level = "info") {
     const node = $("ipa-sign-status");
@@ -37,6 +39,11 @@
     const percent = $("ipa-sign-progress-percent");
     const label = $("ipa-sign-progress-label");
     if (!pane || !bar || !percent || !label) return;
+    // Never erase visible upload progress on a network or auth failure.
+    // These are browser-transmitted bytes, NOT bytes durably saved on Render.
+    if (stage === "preparing") maxTransmitted = 0;
+    else if (stage === "error") bytes = maxTransmitted;
+    else maxTransmitted = Math.max(maxTransmitted, bytes);
     const value = Math.min(100, Math.max(0,
       Math.round(1000 * bytes / Math.max(total, 1)) / 10));
     pane.classList.remove("hidden");
@@ -81,7 +88,7 @@
     return "Máy chủ không hoàn thành yêu cầu (HTTP " + httpStatus + ").";
   }
 
-  function uploadWholeIPA(form) {
+  async function uploadWholeIPA(form) {
     if (busy) return;
     const ipa = form.elements.namedItem("ipa")?.files?.[0];
     const p12 = form.elements.namedItem("p12")?.files?.[0];
@@ -97,14 +104,46 @@
     }
     const auth = credential();
     if (!auth) {
-      status("Vui lòng đăng nhập ERI STORE trước khi ký IPA.", "error");
-      action("Đăng nhập", () =>
-        document.querySelector('[data-view="account"]')?.click());
+      status("Vui lòng đăng nhập trước khi ký IPA.", "error");
+      window.dispatchEvent(new Event("eri-store:auth-expired"));
       return;
     }
     busy = true;
+    signedOk = false;
     const submit = form.querySelector('button[type="submit"]');
     if (submit) submit.disabled = true;
+    // Authenticate via a tiny request BEFORE sending the large IPA. A Render
+    // restart may invalidate a session stored in its ephemeral SQLite DB.
+    const controller = new AbortController();
+    const preflightTimer = setTimeout(() => controller.abort(), 25000);
+    try {
+      const response = await fetch(API + "/api/v1/auth/me", {
+        method: "GET",
+        cache: "no-store",
+        credentials: "omit",
+        headers: {"Authorization": "Bearer " + auth},
+        signal: controller.signal
+      });
+      if (response.status === 401 || response.status === 403) {
+        status("Phiên đăng nhập hết hạn. Đăng nhập lại rồi bấm ký; IPA đã chọn vẫn giữ.", "error");
+        window.dispatchEvent(new Event("eri-store:auth-expired"));
+        return;
+      }
+      if (!response.ok) throw new Error("Không xác minh được phiên đăng nhập (HTTP " + response.status + ").");
+    } catch (error) {
+      const timeout = error?.name === "AbortError";
+      status(timeout ? "Kết nối máy chủ quá lâu. Thử lại, IPA đã chọn vẫn giữ." :
+        "Không thể kết nối máy chủ để kiểm tra đăng nhập. Thử lại.", "error");
+      return;
+    } finally {
+      clearTimeout(preflightTimer);
+      // Only release the form here when verification failed; successful
+      // upload takes ownership until XHR onloadend.
+      if ($("ipa-sign-status")?.dataset.state === "error") {
+        busy = false;
+        if (submit) submit.disabled = false;
+      }
+    }
     progress(0, ipa.size, "preparing");
     status("");
     const payload = new FormData();
@@ -139,17 +178,16 @@
       let body = {};
       try { body = JSON.parse(xhr.responseText || "{}"); } catch {}
       if (xhr.status < 200 || xhr.status >= 300) {
-        progress(0, ipa.size, "error");
-        status(serverError(body, xhr.status) +
-          " Upload một lần không thể tiếp tục từ phần đang dở.", "error");
-        if (xhr.status === 401) action("Đăng nhập lại", () =>
-          document.querySelector('[data-view="account"]')?.click());
+        progress(maxTransmitted, ipa.size, "error");
+        status(serverError(body, xhr.status) + " IPA đã chọn vẫn giữ để thử lại.", "error");
+        if (xhr.status === 401 || xhr.status === 403)
+          window.dispatchEvent(new Event("eri-store:auth-expired"));
         return;
       }
       try {
         renderLinksAfterSuccess(body);
       } catch (error) {
-        progress(0, ipa.size, "error");
+        progress(maxTransmitted, ipa.size, "error");
         status(error.message || "Không có kết quả ký hợp lệ.", "error");
       }
     };
@@ -159,27 +197,28 @@
           !/^\/api\/v1\/tools\/ipa\/install\/[A-Za-z0-9_-]{32,64}\/app\.ipa$/.test(result)) {
         throw new Error("Máy chủ chưa trả về đường dẫn IPA đã ký.");
       }
+      signedOk = true;
       progress(ipa.size, ipa.size, "complete");
       status("Ký IPA thành công", "success");
       renderLinks(body);
     }
     xhr.onerror = () => {
-      progress(0, ipa.size, "error");
-      status("Mất kết nối khi tải hoặc ký IPA. Cần gửi lại toàn bộ IPA.", "error");
+      progress(maxTransmitted, ipa.size, "error");
+      status("Mất kết nối. IPA đã chọn vẫn giữ; thử lại sẽ gửi từ đầu.", "error");
     };
     xhr.onabort = () => {
-      progress(0, ipa.size, "error");
-      status("Yêu cầu đã hủy. Upload lại toàn bộ IPA để thử tiếp.", "error");
+      progress(maxTransmitted, ipa.size, "error");
+      status("Yêu cầu đã hủy. IPA vẫn được chọn, có thể thử lại.", "error");
     };
     xhr.ontimeout = () => {
-      progress(0, ipa.size, "error");
-      status("Máy chủ vượt thời gian xử lý một lần. Có thể dùng phương án tải từng phần nếu cần.", "error");
+      progress(maxTransmitted, ipa.size, "error");
+      status("Máy chủ hết thời gian xử lý. IPA đã chọn vẫn giữ để thử lại.", "error");
     };
     xhr.onloadend = () => {
       busy = false;
       if (submit) submit.disabled = false;
       const pwd = form.elements.namedItem("password");
-      if (pwd) pwd.value = "";
+      if (pwd && signedOk) pwd.value = "";
     };
     try { xhr.send(payload); }
     catch (error) {

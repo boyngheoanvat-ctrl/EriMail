@@ -31,7 +31,7 @@ assert "Kiểm tra và tạo link tải IPA" not in html
 assert 'id="ipa-sign-panel"' in html
 assert 'name="ipa"' in html and 'name="p12"' in html
 assert 'name="mobileprovision"' in html and 'name="password"' in html
-assert 'sign-jobs.js?v=20261116cleanupload1' in html
+assert 'sign-jobs.js?v=20261116uploadfix2' in html
 assert 'const MAX_IPA = 512 * 1024 * 1024' in chunks
 assert 'function uploadWholeIPA(form)' in chunks
 assert 'xhr.open("POST", API + "/api/v1/tools/ipa/sign", true);' in chunks
@@ -54,6 +54,14 @@ assert 'https://eri-f4-bridge.onrender.com' not in chunks
 assert 'value.toFixed(1) + "%"' in chunks
 assert 'result.download_path' in chunks
 assert 'xhr.onloadend' in chunks
+# Authenticating BEFORE transmitting bytes prevents 401 after partial upload.
+assert 'await fetch(API + "/api/v1/auth/me"' in chunks
+assert 'window.dispatchEvent(new Event("eri-store:auth-expired"))' in chunks
+assert 'window.addEventListener("eri-store:auth-expired"' in (web / "app.js").read_text()
+assert 'progress(maxTransmitted, ipa.size, "error")' in chunks
+assert 'if (pwd && signedOk) pwd.value = ""' in chunks
+assert 'xhr.open("POST", API + "/api/v1/tools/ipa/sign", true)' in chunks
+assert 'putChunk(' not in chunks
 
 assert 'download.textContent = "Tải IPA"' in tools
 assert "window.ERIStoreIPA?.download" in tools
@@ -63,7 +71,7 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v42" in service
+assert "eri-store-v43" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
 assert "decrypt-store.js?v=20261115erivault3" in html
@@ -110,7 +118,7 @@ assert 'id="certificate-free-panel"' in html
 assert 'id="certificate-udid"' in html
 assert 'https://website.khoindvn.io.vn/apps.js' not in html
 assert 'eri-home-extras.css?v=20261115certificatetab1' in html
-assert 'app.js?v=20261115autosign1' in html
+assert 'app.js?v=20261116authfix2' in html
 app = (web / "app.js").read_text()
 assert 'openCategory("certificate",tab.dataset.certMode)' in app
 assert 'freeCertificates=category==="certificate"&&certMode==="free"' in app

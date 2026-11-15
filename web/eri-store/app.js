@@ -558,6 +558,12 @@ function showProfile(){
   root.append(button("Đăng xuất","btn danger",()=>signOut()));
 }
 document.addEventListener("DOMContentLoaded",()=>{
+  // A Render redeploy can invalidate sessions stored on ephemeral disk.
+  // Allow the user to log in again without resetting the selected IPA/P12.
+  window.addEventListener("eri-store:auth-expired",()=>{
+    signOut(false);
+    authModal(false);
+  });
   $("dialog-close").addEventListener("click",closeDialog);
   $("overlay").addEventListener("click",event=>{if(event.target===$("overlay"))closeDialog()});
   document.addEventListener("keydown",event=>{if(event.key==="Escape")closeDialog()});
