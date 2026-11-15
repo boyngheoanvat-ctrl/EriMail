@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-CHUNK_BYTES = 8 * 1024 * 1024
+CHUNK_BYTES = 4 * 1024 * 1024
 MAX_PRODUCT_BYTES = 512 * 1024 * 1024
 MAX_SQLITE_BYTES = 64 * 1024 * 1024
 VAULT_BASE = "https://dahrbjjknmvwokruhnha.supabase.co/functions/v1/eri-private-vault"
@@ -73,7 +73,7 @@ class ERIVault:
 
     def _put(self, kind: str, obj_id: str, index: int, data: bytes):
         self._valid_id(obj_id)
-        if kind not in ("files", "snapshots") or not 0 <= index < 128:
+        if kind not in ("files", "snapshots", "sessionmeta") or not 0 <= index < 128:
             raise VaultError("Invalid vault chunk path")
         if not 0 < len(data) <= CHUNK_BYTES:
             raise VaultError("Invalid chunk size")
@@ -90,12 +90,55 @@ class ERIVault:
 
     def _get(self, kind: str, obj_id: str, index: int) -> bytes:
         self._valid_id(obj_id)
-        if kind not in ("files", "snapshots") or not 0 <= index < 128:
+        if kind not in ("files", "snapshots", "sessionmeta") or not 0 <= index < 128:
             raise VaultError("Invalid vault chunk path")
         data = self._request("GET", f"/{kind}/{obj_id}/{index}")
         if not 0 < len(data) <= CHUNK_BYTES:
             raise VaultError("Vault returned an invalid chunk")
         return data
+
+    def chunk_exists(self, obj_id: str, index: int = 0, *, kind: str = "files") -> bool:
+        self._valid_id(obj_id)
+        if kind not in ("files", "snapshots", "sessionmeta") or not 0 <= index < 128:
+            raise VaultError("Invalid chunk locator")
+        try:
+            self._request("HEAD", f"/{kind}/{obj_id}/{index}")
+            return True
+        except FileNotFoundError:
+            return False
+
+    def put_session(self, obj_id: str, metadata: dict) -> None:
+        self._valid_id(obj_id)
+        data = json.dumps(metadata, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        if len(data) > 128 * 1024:
+            raise VaultError("Upload metadata too large")
+        self._put("sessionmeta", obj_id, 0, data)
+
+    def get_session(self, obj_id: str) -> dict:
+        self._valid_id(obj_id)
+        raw = self._get("sessionmeta", obj_id, 0)
+        if len(raw) > 128 * 1024:
+            raise VaultError("Upload session too large")
+        result = json.loads(raw)
+        if not isinstance(result, dict) or result.get("upload_id") != obj_id:
+            raise VaultError("Invalid upload session in cloud")
+        return result
+
+    def put_upload_part(self, obj_id: str, index: int, data: bytes) -> None:
+        self._put("files", obj_id, index, data)
+
+    def get_upload_part(self, obj_id: str, index: int) -> bytes:
+        return self._get("files", obj_id, index)
+
+    def delete_file(self, obj_id: str, size: int, *, kind: str = "files") -> None:
+        self._valid_id(obj_id)
+        if kind not in ("files", "snapshots", "sessionmeta"):
+            raise VaultError("Invalid delete kind")
+        count = (size + CHUNK_BYTES - 1) // CHUNK_BYTES
+        if size < 1 or count > 128:
+            raise VaultError("Invalid delete size")
+        for index in range(count):
+            self._request("DELETE", f"/{kind}/{obj_id}/{index}")
 
     def upload_file(self, local: Path, object_id: str, *, kind="files",
                     expected_sha256: str | None = None):

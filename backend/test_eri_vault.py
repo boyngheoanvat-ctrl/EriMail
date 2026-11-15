@@ -32,6 +32,13 @@ class MemoryVault(ERIVault):
             assert checksum == hashlib.sha256(body).hexdigest()
             self.objects[route] = body
             return json.dumps({"ok":True,"size":len(body),"sha256":checksum}).encode()
+        if method == "HEAD":
+            if route not in self.objects:
+                raise FileNotFoundError(route)
+            return b""
+        if method == "DELETE":
+            self.objects.pop(route, None)
+            return b'{"ok":true}'
         if method == "GET":
             if route not in self.objects:
                 raise FileNotFoundError(route)
@@ -53,7 +60,7 @@ class VaultTests(unittest.TestCase):
             original.write_bytes(payload)
             vault=MemoryVault()
             item=vault.upload_file(original,"a"*32)
-            self.assertEqual(item["chunks"],2)
+            self.assertEqual(item["chunks"],3)
             output=root/"restored.ipa"
             vault.restore_file(output,item["id"],item["size"],item["sha256"])
             self.assertEqual(output.read_bytes(),payload)
@@ -78,6 +85,18 @@ class VaultTests(unittest.TestCase):
                 self.assertEqual(c.execute("select username from customers").fetchone()[0],"existing")
             next_info=vault.snapshot_sqlite(path)
             self.assertGreater(next_info["generation"],info["generation"])
+
+    def test_upload_part_and_recovery_metadata(self):
+        vault = MemoryVault()
+        obj_id = "e" * 32
+        vault.put_session(obj_id, {"upload_id":obj_id, "size_bytes":12_000_000, "fast": True})
+        assert vault.get_session(obj_id)["fast"] is True
+        assert not vault.chunk_exists(obj_id)
+        vault.put_upload_part(obj_id, 0, b"first")
+        assert vault.chunk_exists(obj_id)
+        assert vault.get_upload_part(obj_id, 0) == b"first"
+        vault.delete_file(obj_id, 5)
+        assert not vault.chunk_exists(obj_id)
 
     def test_refuse_path_traversal(self):
         vault=MemoryVault()
