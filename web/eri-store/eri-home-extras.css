@@ -1,0 +1,23 @@
+/* ERI Store native homepage IPA entry and isolated free certificate link. */
+#hero .hero-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+#hero-ipa{white-space:nowrap}
+#certificate-free-panel.eri-cert-free{
+  max-width:860px;margin:0 auto;padding:22px;border:1px solid rgba(102,86,236,.22);
+  border-radius:20px;background:linear-gradient(145deg,#fff,#f5f4ff);
+  box-shadow:0 12px 36px rgba(33,30,75,.06);
+}
+#certificate-free-panel .eri-cert-free-icon{
+  width:48px;height:48px;display:grid;place-items:center;
+  border-radius:14px;background:linear-gradient(135deg,#7252ef,#3978ef);
+  color:#fff;margin-bottom:16px;
+}
+#certificate-free-panel .eri-cert-free-icon .icon{width:26px;height:26px}
+#certificate-free-panel h3{color:#241f4a;font-size:22px;margin:0 0 10px}
+#certificate-free-panel p{color:#62637c;line-height:1.7}
+#certificate-free-panel .ipa-tool-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+#certificate-free-panel .btn{max-width:100%;white-space:normal;text-align:center}
+#certificate-free-panel .small{font-size:12px;color:#74748c}
+@media(max-width:680px){
+  #hero .hero-buttons .btn{flex:1 1 calc(50% - 10px);justify-content:center}
+  #certificate-free-panel.eri-cert-free{padding:18px;border-radius:16px}
+}
