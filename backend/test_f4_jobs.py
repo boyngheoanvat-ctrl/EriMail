@@ -122,6 +122,29 @@ with tempfile.TemporaryDirectory(prefix="eri-f4-jobs-") as root:
             "ok": False, "status": "failed", "progress": 99
         })
         assert real_failure[0] == "failed" and real_failure[1] is None
+        # Confirmed F4 browser response: top-level job and stage fields.
+        observed = f4_jobs._provider_status({
+            "ok": True, "job": {
+                "status": "downloading", "progress": 67.7,
+                "stage_text": "Downloading IPA"
+            }
+        })
+        assert observed[0] == "processing" and observed[1] == 67
+        assert "Downloading" in observed[3]
+        nested_done = f4_jobs._provider_status({
+            "ok": True, "job": {
+                "status": "done", "progress": 100,
+                "dl_url": "/api/decrypt/download/" + "c" * 32
+            }
+        })
+        assert nested_done[0] == "completed" and nested_done[1] == 100
+        assert nested_done[2].endswith("c" * 32)
+        assert f4_jobs._provider_status({
+            "ok": True, "job": {"status": "done", "progress": 100}
+        })[0] == "failed"
+        assert client.get(route + "/capabilities").json()[
+            "provider_browser_auth_observed"
+        ] == "X-CSRF-TOKEN"
         no_progress = f4_jobs._provider_status({"status": "working"})
         assert no_progress[1] is None
 

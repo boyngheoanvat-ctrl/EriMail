@@ -208,6 +208,55 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
     assert f4.json()["version"] == "1.2.3"
     assert f4.json()["verification"]["file_exists"] is False
 
+    # F4 browser inspector 2026-11-15: public /search returns vault_entry,
+    # not vault_cached. Reject cross-app vault records and mark alternate
+    # versions explicitly instead of claiming they match App Store.
+    browser_f4 = {"ok": True, "mode": "direct", "target_mode": "ios",
+                  "items": [{"item_id": "6743144418", "title": "Nghịch Thủy Hàn",
+                             "bundle_id": "vng.game.nth", "version": "102.1.11820680",
+                             "vault_exact": True, "vault_entry": {
+                                 "item_id": "6743144418", "bundle_id": "vng.game.nth",
+                                 "target_mode": "ios", "version": "102.1.11820680",
+                                 "dl_url": f4_path, "total_size": 12345678}}]}
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(browser_f4)):
+        browser = client.get(base + "/external", params={"target": f4_target})
+    assert browser.status_code == 200, browser.text
+    assert browser.json()["download_ready"] is True
+    assert browser.json()["exact_version"] is True
+    assert browser.json()["vault_source"] == "vault_entry"
+    assert browser.json()["version"] == "102.1.11820680"
+    assert browser.json()["size_bytes"] == 12345678
+
+    browser_f4["items"][0]["vault_entry"]["item_id"] = "6743144419"
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(browser_f4)):
+        mismatch = client.get(base + "/external", params={"target": f4_target})
+    assert mismatch.json()["found"] is True
+    assert mismatch.json()["download_ready"] is False
+    browser_f4["items"][0].pop("vault_entry")
+
+    browser_f4["items"][0]["vault_exact"] = False
+    browser_f4["items"][0]["vault_alt_entry"] = {
+        "item_id": "6743144418", "bundle_id": "vng.game.nth",
+        "target_mode": "ios", "version": "102.1.OLD", "dl_url": f4_path
+    }
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(browser_f4)):
+        alternate = client.get(base + "/external", params={"target": f4_target})
+    assert alternate.status_code == 200
+    assert alternate.json()["download_ready"] is True
+    assert alternate.json()["exact_version"] is False
+    assert alternate.json()["vault_source"] == "vault_alt_entry"
+    assert alternate.json()["version"] == "102.1.OLD"
+
+    browser_f4["items"][0]["vault_alt_entry"]["dl_url"] = "https://evil.invalid/download"
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(browser_f4)):
+        invalid = client.get(base + "/external", params={"target": f4_target})
+    assert invalid.json()["download_ready"] is False
+    assert invalid.json()["download_link_present"] is True
+
     # A matching app with no cached IPA must not show a fake download.
     f4_missing = {"ok": True, "items": [{
         "app_id": 6743144418, "title": "Nghịch Thủy Hàn", "vault_cached": None

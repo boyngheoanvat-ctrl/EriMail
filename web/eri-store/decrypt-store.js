@@ -193,8 +193,18 @@
               ["decrypt.160-191-242-70.sslip.io", "160-191-242-70.sslip.io"].includes(parsed.hostname) &&
               !parsed.username && !parsed.password && !parsed.search && !parsed.hash &&
               (f4DownloadPath || f4LegacyPath)) {
-            status.textContent = "F4TEAM có IPA v" + (external.version || item.version || "—") +
-              " · Nguồn ngoài, ERI chưa kiểm định nội dung file.";
+            const exact = external.exact_version === true;
+            const availability = root.querySelector(".eri-decrypt-unavailable");
+            if (availability) {
+              availability.className = "eri-decrypt-available";
+              availability.textContent = exact ? "Có link IPA từ F4TEAM" : "F4 có IPA phiên bản khác";
+            }
+            status.textContent = exact
+              ? "F4TEAM có link IPA v" + (external.version || item.version || "—") +
+                " · Nguồn ngoài, ERI chưa kiểm định nội dung file."
+              : "F4TEAM có link IPA v" + (external.version || "—") +
+                ", không khẳng định trùng phiên bản v" + (item.version || "—") +
+                ". Kiểm tra trước khi tải.";
             root.append(link("Tải IPA từ F4TEAM" +
               (external.size_bytes ? " (" + pretty(external.size_bytes) + ")" : ""),
               parsed.href,true));
@@ -205,9 +215,18 @@
         status.textContent = "Không kiểm tra được kho F4TEAM lúc này. Thử lại sau; đây chưa phải xác nhận có hay không có IPA.";
         return;
       }
-      status.textContent = external.found
-        ? "F4TEAM đã nhận diện ứng dụng nhưng chưa trả về link tải IPA. Có thể bản này chưa có file trong kho F4."
-        : "F4TEAM chưa trả về IPA của ứng dụng này. API tìm thấy ứng dụng không có nghĩa là file đã sẵn sàng.";
+      status.textContent = external.download_link_present
+        ? "F4TEAM có trường link tải nhưng định dạng chưa được ERI xác thực. Không tự tạo link IPA."
+        : external.found
+          ? "F4TEAM đã nhận diện ứng dụng nhưng chưa trả về link tải IPA. Có thể bản này chưa có file trong kho F4."
+          : "F4TEAM chưa trả về IPA của ứng dụng này. API tìm thấy ứng dụng không có nghĩa là file đã sẵn sàng.";
+      if (external.found) {
+        const f4 = link("Mở F4TEAM để tạo tác vụ trong phiên trình duyệt",
+          "https://decrypt.160-191-242-70.sslip.io/");
+        f4.target = "_blank";
+        f4.referrerPolicy = "no-referrer";
+        root.append(f4);
+      }
     } catch (_) {
       status.textContent = "Không thể kiểm tra nguồn IPA lúc này.";
     }
@@ -520,7 +539,7 @@
         return;
       }
     }
-    notice("Chưa có quyền tác vụ F4TEAM; đang lưu yêu cầu vào kho ERI.");
+    notice("ERI chưa có quyền gọi tác vụ F4 qua máy chủ. Yêu cầu sẽ được lưu tại ERI; muốn tạo tác vụ bằng phiên F4 hiện tại, mở trang F4TEAM.");
     try {
       const job = await request("/api/v1/tools/ipa/decrypt/requests", {
         auth:true, body:{target,country:country?.toLowerCase()||"auto",version:version||""}
