@@ -19,10 +19,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: eri-approved-ipa-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   select-sources:
     runs-on: ubuntu-latest
@@ -44,6 +40,9 @@ jobs:
     if: needs.select-sources.outputs.has_sources == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    concurrency:
+      group: eri-source-${{ matrix.source_id }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -79,8 +78,10 @@ jobs:
           test -n "$ERI_R2_ACCOUNT_ID" &&
           test -n "$ERI_R2_BUCKET" &&
           test -n "$ERI_R2_ACCESS_KEY_ID" &&
-          test -n "$ERI_R2_SECRET_ACCESS_KEY" ||
-          { echo "::error::Set R2 account, bucket and scoped API key in Actions secrets"; exit 2; }
+          test -n "$ERI_R2_SECRET_ACCESS_KEY" &&
+          test -n "$ERI_ACTIONS_CALLBACK_TOKEN" &&
+          test -n "$ERI_ACTIONS_CALLBACK_URL" ||
+          { echo "::error::Set R2 and ERI callback credentials before auto-publishing"; exit 2; }
 
       - name: Fetch approved IPA, validate SHA/ZIP/Mach-O without repackaging
         run: |
