@@ -95,7 +95,8 @@ class ActionsTests(unittest.TestCase):
                     "https://evil.example/sample.ipa",
                     "https://127.0.0.1/sample.ipa",
                     "https://files.eri.example:8443/sample.ipa",
-                    "https://files.eri.example/sample.ipa#secret"):
+                    "https://files.eri.example/sample.ipa#secret",
+                    "https://files.eri.example/sample.ipa?token=private"):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 worker.validate_source(url)
         for bad_id in ("", "../secret", '"; echo bad', "many spaces"):
