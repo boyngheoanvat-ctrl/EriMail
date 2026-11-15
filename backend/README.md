@@ -169,4 +169,13 @@ Khi chạy thành công, GitHub Actions lưu `eri-<source_id>.ipa` cùng `valida
 
 Chạy kiểm thử: `cd backend && python3 test_actions_ipa_worker.py && python3 test_actions_bridge.py` sau khi cài `requirements.txt`.
 
+### Tình trạng website thật và IPA dung lượng lớn (15/11/2026)
+
+- Website ERI dùng trực tiếp POST /api/v1/tools/ipa/decrypt/requests và GET /api/v1/tools/ipa/decrypt/requests/{job_id}, tương thích API sản xuất cũ lẫn mã mới; không tạo 404 vô ích ở /start hay /job.
+- Các API /start và /job có trong mã nguồn backend nhưng sẽ chỉ hoạt động khi backend Render được triển khai an toàn. Không triển khai Render Free khi chưa sao lưu SQLite và các tệp upload từ phiên đang chạy.
+- GitHub Actions Worker có giới hạn mặc định **5 GiB cho file IPA tải xuống** và **10 GiB tổng kích thước ZIP chưa nén**, tách riêng giới hạn HTTP API/upload thấp hơn để tránh tốn tài nguyên Render. Các giá trị worker có thể thay bằng ERI_ACTIONS_MAX_IPA_BYTES và ERI_ACTIONS_MAX_UNPACKED_BYTES sau khi kiểm tra dung lượng runner và phí lưu trữ.
+- File đầu ra được di chuyển trong cùng filesystem (không tạo bản sao IPA thứ hai), phù hợp hơn cho file vài GB. GitHub hosted ubuntu-latest thường có khoảng **14 GB SSD**, nên việc chạy với file lớn vẫn phụ thuộc dung lượng trống, tốc độ tải, giới hạn GitHub Artifact và thời gian tác vụ.
+- Nghịch Thủy Hàn App Store báo khoảng 3,85 GB **không đồng nghĩa ERI đã có IPA đầu vào**. Danh sách backend/eri_actions_sources.json phải có source hợp lệ cùng Bundle ID, phiên bản, SHA-256 và quyền phân phối trước khi workflow có thể tải và kiểm tra file. Không nhận URL App Store làm file IPA.
+- 200 từ tìm kiếm, 201 khi yêu cầu và 200 khi xem trạng thái là thành công; "waiting_for_source" là trạng thái chưa có nguồn, **không phải đang giải mã hoặc lỗi API**.
+
 Về vận hành: GitHub Actions có hạn mức, thời gian chạy và retention; không mặc định không tốn phí ở mọi cấu hình. Không cho người dùng nhập URL tùy ý hoặc thực thi lệnh shell của họ.
