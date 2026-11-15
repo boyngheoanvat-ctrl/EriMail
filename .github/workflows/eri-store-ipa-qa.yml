@@ -31,6 +31,25 @@ jobs:
                       print('DIAG',url,'status',r.status,'type',r.headers.get('Content-Type'),'bytes',len(body))
                       if url.endswith('apps.js'):
                           print('HEAD',body[:1400].replace('\\n',' '))
+                          import json,base64
+                          m=re.search(r'window\\.apps\\s*=\\s*(\\{.*?\\})\\s*;',body,re.S)
+                          if m:
+                              try:
+                                  apps=json.loads(m.group(1))
+                                  slim={k:[{'name':x.get('name',''),'issuer':x.get('descriptions',''),'url':x.get('url','')} for x in v] for k,v in apps.items() if k in ('esign','ksign')}
+                                  print('CERT_DATA_B64='+base64.b64encode(json.dumps(slim,ensure_ascii=False,separators=(',',':')).encode()).decode())
+                                  print('CERT_COUNTS', {k:len(v) for k,v in slim.items()})
+                                  for k in ('esign','ksign'):
+                                      if slim.get(k):
+                                          from urllib.parse import urlparse,parse_qs
+                                          link=slim[k][0]['url']
+                                          manifest=parse_qs(urlparse(link).query).get('url',[''])[0]
+                                          try:
+                                              with urlopen(Request(manifest,headers={'User-Agent':'Mozilla/5.0'}),timeout=15) as pr:
+                                                  print('PLIST',k,pr.status,pr.headers.get('Content-Type'),pr.read(120)[:100])
+                                          except Exception as e:
+                                              print('PLIST ERROR',k,str(e)[:140])
+                              except Exception as e:print('CERT_PARSE_ERROR',str(e)[:250])
                           for pat in ['itms-services','manifest.plist','ipa','esign','ksign','Viet Nam Rubber']:
                               ix=body.lower().find(pat.lower())
                               print('PATTERN',pat,'found',ix>=0,'context',body[max(0,ix-120):ix+300].replace('\\n',' ')[:420] if ix>=0 else '')
