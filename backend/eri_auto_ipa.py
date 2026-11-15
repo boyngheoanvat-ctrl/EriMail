@@ -106,6 +106,13 @@ def maybe_dispatch(connection, job_id, bundle_id, version):
     if not _configured() or not ID.fullmatch(str(job_id)):
         return False
     if remote_for(connection, bundle_id, version):
+        with connection() as db:
+            db.execute(
+                "UPDATE ipa_decrypt_requests SET state='completed',progress=100,"
+                "message='IPA đã xác minh trong kho R2',updated_at=? "
+                "WHERE id=? AND state!='completed'",
+                (_now(), job_id)
+            )
         return True
     source = _manifest_entry(bundle_id, version)
     if not source:
