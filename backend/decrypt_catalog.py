@@ -19,6 +19,7 @@ from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from eri_auto_ipa import maybe_dispatch, remote_for, _manifest_entry
 from eri_ipa_pipeline import (
     setup as setup_pipeline, put_source, schedule as schedule_pipeline,
     schedule_matching as schedule_matching_pipeline
@@ -239,6 +240,10 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
     def source_exists(bundle_id: str, version: str) -> bool:
         if not bundle_id or not version:
             return False
+        if remote_for(connection, bundle_id, version):
+            return True
+        if _manifest_entry(bundle_id, version):
+            return True
         with connection() as db:
             return db.execute(
                 "SELECT 1 FROM ipa_decrypt_sources WHERE bundle_id=? COLLATE NOCASE "
@@ -458,6 +463,16 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         if free is None:
             free = _all_free_ipa(connection, upload_dir, mod_file)
         match = _match_vault(free, row["bundle_id"], row["version"])
+        remote = remote_for(connection, row["bundle_id"], row["version"]) if not match else None
+        if remote:
+            match = {
+                "name": row["name"], "bundle_id": row["bundle_id"],
+                "version": row["version"], "size_bytes": remote["size_bytes"],
+                "sha256": remote["sha256"],
+                "fairplay_verified": True, "source": "ERI verified private R2",
+                "download_path": "/api/v1/tools/ipa/decrypt/remote-url/" + row["id"],
+                "requires_signed_url": True,
+            }
         state = "completed" if match else row["state"] or "waiting_for_source"
         return {
             "job_id": row["id"], "app_id": row["app_id"], "name": row["name"],
@@ -479,6 +494,7 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         chosen_version = payload.version or app_info["version"]
         if not re.fullmatch(r"[A-Za-z0-9._+-]{1,60}", chosen_version):
             raise HTTPException(422, "Phiên bản không hợp lệ")
+        reused = False
         with connection() as db:
             existing = db.execute(
                 "SELECT * FROM ipa_decrypt_requests "
@@ -487,26 +503,33 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 (customer["id"], app_info["bundle_id"], chosen_version),
             ).fetchone()
             if existing is not None:
-                # Retry/resume when an operator-approved source is now available.
-                schedule_pipeline(connection, upload_dir, existing["id"])
-                return {**job_payload(existing), "reused": True}
-            current = db.execute(
-                "SELECT COUNT(*) FROM ipa_decrypt_requests WHERE customer_id=?",
-                (customer["id"],)
-            ).fetchone()[0]
-            if current >= 30:
-                raise HTTPException(429, "Tài khoản đã tạo quá 30 yêu cầu IPA")
-            job_id = secrets.token_hex(16)
-            now = datetime.now(timezone.utc).isoformat()
-            db.execute(
-                "INSERT INTO ipa_decrypt_requests(id,customer_id,app_id,bundle_id,name,"
-                "version,country,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                (job_id, customer["id"], app_info["app_id"], app_info["bundle_id"],
-                 app_info["name"], chosen_version, app_info["country"], now)
-            )
-            row = db.execute("SELECT * FROM ipa_decrypt_requests WHERE id=?", (job_id,)).fetchone()
+                reused = True
+                job_id = existing["id"]
+            else:
+                current = db.execute(
+                    "SELECT COUNT(*) FROM ipa_decrypt_requests WHERE customer_id=?",
+                    (customer["id"],)
+                ).fetchone()[0]
+                if current >= 30:
+                    raise HTTPException(429, "Tài khoản đã tạo quá 30 yêu cầu IPA")
+                job_id = secrets.token_hex(16)
+                now = datetime.now(timezone.utc).isoformat()
+                db.execute(
+                    "INSERT INTO ipa_decrypt_requests(id,customer_id,app_id,bundle_id,name,"
+                    "version,country,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (job_id, customer["id"], app_info["app_id"], app_info["bundle_id"],
+                     app_info["name"], chosen_version, app_info["country"], now)
+                )
+        # Run outside the SQLite transaction: native local worker or automatic
+        # approved-source Actions worker. Neither invents a file from metadata.
         schedule_pipeline(connection, upload_dir, job_id)
-        return job_payload(row)
+        maybe_dispatch(connection, job_id, app_info["bundle_id"], chosen_version)
+        with connection() as db:
+            latest = db.execute(
+                "SELECT * FROM ipa_decrypt_requests WHERE id=? AND customer_id=?",
+                (job_id, customer["id"])
+            ).fetchone()
+        return {**job_payload(latest), **({"reused": True} if reused else {})}
 
     @router.post("/api/v1/tools/ipa/decrypt/start", status_code=201)
     def native_start(payload: IPARequest, customer=Depends(require_customer)):
