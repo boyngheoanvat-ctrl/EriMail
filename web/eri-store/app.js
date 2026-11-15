@@ -270,6 +270,9 @@ async function loadCatalog(){
   $("ipa-sign-panel")?.classList.toggle("hidden",category!=="sign");
   $("certificate-free-panel")?.classList.toggle("hidden",!freeCertificates);
   if(toolSelected){
+    // Wake a sleeping Render instance while the user selects signing files.
+    // The health check contains no certificate, password, token or IPA bytes.
+    if(category==="sign")fetch(API+"/health",{cache:"no-store",credentials:"omit"}).catch(()=>{});
     if(freeCertificates&&typeof window.loadFreeCertificates==="function")window.loadFreeCertificates();
     $("mod-subtabs")?.classList.add("hidden");
     $("mod-platform-tabs")?.classList.add("hidden");
