@@ -1,5 +1,5 @@
 "use strict";
-// Resumable 2-MiB signing uploads. Do not store P12, password, or customer keys
+// Resumable concurrent 2-MiB signing uploads. Do not store P12, password, or customer keys
 // in IndexedDB/localStorage. The job ID is non-secret and scoped by server auth.
 (() => {
   const API = "https://eri-api-dag8.onrender.com";
@@ -236,41 +236,58 @@
       const confirmedBytes = () => Array.from(received).reduce((bytes, n) =>
         bytes + Math.max(0, Math.min(job.chunk_bytes, file.size - n * job.chunk_bytes)), 0);
       showProgress(confirmedBytes(), file.size, "uploading");
-      for (let i=0;i<chunks;i++) {
-        if (received.has(i)) continue;
-        if (!token()) throw new Error("Phiên đăng nhập đã mất. Đăng nhập lại rồi tiếp tục tải IPA.");
-        const slice = file.slice(i * job.chunk_bytes, Math.min(file.size,(i+1)*job.chunk_bytes));
-        status("Đang tính SHA-256 cho phần " + (i+1) + "/" + chunks +
-          " (" + fmt(slice.size) + "). Đã xác nhận " + fmt(confirmedBytes()) +
-          " / " + fmt(file.size) + ".");
-        const digest = await sha256(slice);
-        let sent = false;
-        for (let retry=0;retry<3&&!sent;retry++) {
-          try {
-            status("Đang gửi phần IPA " + (i+1) + "/" + chunks +
-              " (" + fmt(slice.size) + ") tới máy chủ" +
-              (retry?" · lần thử "+(retry+1):"")+
-              ". Đã xác nhận " + fmt(confirmedBytes()) + " / " + fmt(file.size) + ".");
-            await putChunk(job.job_id,i,slice,digest);
-            sent=true;
-          } catch(e) {
-            // A lost response doesn't mean the server lost the bytes.
-            const remote = await api("/api/v1/tools/ipa/sign-jobs/" + job.job_id);
-            if ((remote.received || []).includes(i)) sent=true;
-            else if (retry===2) throw e;
-            else await new Promise(done => setTimeout(done, 500 * (retry+1)));
+      // Upload at most 3 chunks concurrently. Each chunk keeps the existing
+      // SHA-256 acknowledgment, retry and resume contract with the server.
+      // This overlaps network latency without buffering the entire IPA.
+      const pending=Array.from({length:chunks},(_,i)=>i).filter(i=>!received.has(i));
+      const concurrency=Math.min(3,pending.length);
+      let cursor=0;
+      let failed=null;
+      async function uploadWorker(){
+        while(!failed){
+          // Increment synchronously before the first await so workers never
+          // send the same chunk within a single run.
+          const i=pending[cursor++];
+          if(i===undefined)return;
+          try{
+            if(!token())throw new Error("Phiên đăng nhập đã mất. Đăng nhập lại rồi tiếp tục tải IPA.");
+            const slice=file.slice(i*job.chunk_bytes,Math.min(file.size,(i+1)*job.chunk_bytes));
+            const digest=await sha256(slice);
+            let sent=false;
+            for(let retry=0;retry<3&&!sent;retry++){
+              try{
+                status("Đang gửi phần IPA "+(i+1)+"/"+chunks+" ("+fmt(slice.size)+")"+
+                  (retry?" · thử lại "+(retry+1):"")+
+                  ". Tải song song "+concurrency+" phần. Đã xác nhận "+fmt(confirmedBytes())+
+                  " / "+fmt(file.size)+".");
+                await putChunk(job.job_id,i,slice,digest);
+                sent=true;
+              }catch(error){
+                // An interrupted reply may still mean the server stored the bytes.
+                // Check the server's received marker before attempting a resend.
+                const remote=await api("/api/v1/tools/ipa/sign-jobs/"+job.job_id);
+                if((remote.received||[]).includes(i))sent=true;
+                else if(retry===2)throw error;
+                else await new Promise(done=>setTimeout(done,500*(retry+1)));
+              }
+            }
+            if(!sent)throw new Error("Máy chủ chưa xác nhận phần "+(i+1));
+            received.add(i);
+            const uploaded=confirmedBytes();
+            showProgress(uploaded,file.size,"uploading");
+            const pct=(100*uploaded/Math.max(1,file.size)).toFixed(1);
+            status("Đã nhận "+pct+"% · "+fmt(uploaded)+" / "+fmt(file.size)+
+              " (đã xác nhận "+received.size+"/"+chunks+" phần). Đừng đóng Safari.");
+          }catch(error){
+            // Wait for already running requests before enabling resume.
+            if(!failed)failed=error;
+            return;
           }
         }
-        received.add(i);
-        // Count real acknowledged ranges; final chunk can be shorter than 2 MiB.
-        const uploaded = confirmedBytes();
-        showProgress(uploaded, file.size, "uploading");
-        const pct = (100 * uploaded / Math.max(1, file.size)).toFixed(1);
-        status("Đã nhận " + pct + "% · " + fmt(uploaded) + " / " + fmt(file.size) +
-          " (phần " + (i+1) + "/" + chunks + "). Tệp vẫn đang được tải, đừng đóng Safari.");
-        // Give Safari time to update the display and process touch/visibility events.
-        await new Promise(done => setTimeout(done, 0));
       }
+      await Promise.all(Array.from({length:concurrency},()=>uploadWorker()));
+      if(failed)throw failed;
+      if(received.size!==chunks)throw new Error("IPA chưa tải đủ, hãy tiếp tục các phần còn thiếu.");
       showProgress(file.size, file.size, "signing");
       status("Đã nhận 100% dữ liệu IPA. Đang gửi chứng chỉ để bắt đầu ký; chữ ký chưa hoàn tất.");
       const args = new FormData();
