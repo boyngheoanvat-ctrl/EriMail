@@ -1,6 +1,8 @@
 """ERI NGUYEN backend — independently hosted API. No third-party scraping or fake signing."""
 import os
 import sqlite3
+import threading
+import logging
 import secrets
 import hmac
 import hashlib
@@ -14,11 +16,22 @@ from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
 
 DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
+from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
+_eri_db_guard = threading.RLock()
+_VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
+if _VAULT_MODE not in ("", "off", "required"):
+    raise RuntimeError("Invalid ERI_VAULT_MODE")
+_eri_vault = ERIVault() if _VAULT_MODE == "required" else None
+if _eri_vault is not None:
+    # Never initialize an empty database after Render restarts.
+    # First seed a verified backup from the existing server, then activate.
+    _eri_vault.restore_sqlite(DB)
+_log = logging.getLogger("eri.persistence")
 ADMIN_KEY = os.getenv("ERI_ADMIN_KEY", "")
 app = FastAPI(title="ERI NGUYEN API", version="0.1.0")
 # No wildcard CORS: native iOS clients do not require browser CORS.
@@ -26,16 +39,41 @@ origins = [x.strip() for x in os.getenv("ERI_CORS_ORIGINS", "").split(",") if x.
 if origins:
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-ERI-Admin-Key", "X-ERI-Upload-Offset", "X-ERI-Chunk-SHA256"], max_age=600)
 
+@app.exception_handler(VaultError)
+async def vault_unavailable(_request, _exc):
+    return JSONResponse(status_code=503, content={
+        "detail": "Kho lưu trữ an toàn đang gián đoạn; dữ liệu chưa được xác nhận."
+    })
+
 @contextmanager
 def connection():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB)
-    db.row_factory = sqlite3.Row
-    try:
-        yield db
-        db.commit()
-    finally:
-        db.close()
+    # Serialize writes and their durable snapshots to avoid lost updates.
+    with _eri_db_guard:
+        DB.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(DB, timeout=30)
+        db.row_factory = sqlite3.Row
+        initial = db.total_changes
+        try:
+            yield db
+            db.commit()
+            if _eri_vault is not None and db.total_changes != initial:
+                _eri_vault.snapshot_sqlite(DB)
+        finally:
+            db.close()
+
+def _persist_private_file(path: Path, item_id: str, digest: str):
+    if _eri_vault is not None:
+        _eri_vault.upload_file(path, item_id, expected_sha256=digest)
+
+def _restore_private_file(storage_name: str, size: int, digest: str):
+    if _eri_vault is None:
+        return None
+    match = re.fullmatch(r"([a-f0-9]{32})\\.[a-z0-9]{1,16}", storage_name)
+    if not match:
+        return None
+    output = UPLOAD_DIR / storage_name
+    _eri_vault.restore_file(output, match.group(1), int(size), digest)
+    return output
 
 def sale_price(base_price_vnd: int) -> int:
     """30% markup, rounded up to the next VND; never trust client pricing."""
