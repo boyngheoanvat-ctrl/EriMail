@@ -11,6 +11,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import tempfile
 import urllib.request
 import zipfile
@@ -19,8 +20,22 @@ from urllib.parse import urlsplit
 
 from ipa_tools import _inspect_archive
 
-MAX_DOWNLOAD = int(os.getenv("ERI_ACTIONS_MAX_IPA_BYTES", str(5 * 1024 * 1024 * 1024)))
-MAX_UNPACKED = int(os.getenv("ERI_ACTIONS_MAX_UNPACKED_BYTES", str(10 * 1024 * 1024 * 1024)))
+def _capacity_env(name, default):
+    text = (os.getenv(name) or "").strip()
+    if not text:
+        return default
+    value = int(text)
+    if value < 0:
+        raise ValueError("Giới hạn IPA không thể là số âm")
+    return value
+
+
+# 0 uses free runner SSD minus a safety reserve instead of a fixed IPA-size cap.
+MAX_DOWNLOAD = _capacity_env("ERI_ACTIONS_MAX_IPA_BYTES", 0)
+MAX_UNPACKED = _capacity_env("ERI_ACTIONS_MAX_UNPACKED_BYTES",
+                           10 * 1024 * 1024 * 1024)
+FREE_DISK_RESERVE = 1024 * 1024 * 1024
+
 MAX_MEMBERS = 20000
 CHUNK_SIZE = 1024 * 1024
 
@@ -86,6 +101,12 @@ class RestrictedRedirect(urllib.request.HTTPRedirectHandler):
 def retrieve(url, destination):
     hasher = hashlib.sha256()
     received = 0
+    # GitHub standard hosted runners have finite local storage. Check actual
+    # free space instead of promising a physically unlimited upload.
+    available = shutil.disk_usage(destination.parent).free - FREE_DISK_RESERVE
+    max_bytes = min(MAX_DOWNLOAD, available) if MAX_DOWNLOAD else available
+    if max_bytes <= 0:
+        raise ValueError("Runner không đủ dung lượng trống để nhận IPA")
     req = urllib.request.Request(validate_source(url), headers={
         "Accept": "application/octet-stream, application/zip",
         "User-Agent": "ERI-IPA-Actions/1.0",
@@ -93,13 +114,13 @@ def retrieve(url, destination):
     opener = urllib.request.build_opener(RestrictedRedirect())
     with opener.open(req, timeout=30) as response:
         length = response.headers.get("Content-Length", "")
-        if length.isdecimal() and int(length) > MAX_DOWNLOAD:
+        if length.isdecimal() and int(length) > max_bytes:
             raise ValueError("IPA vượt giới hạn kích thước")
         with destination.open("xb") as stream:
             os.chmod(destination, 0o600)
             while chunk := response.read(CHUNK_SIZE):
                 received += len(chunk)
-                if received > MAX_DOWNLOAD:
+                if received > max_bytes:
                     raise ValueError("IPA vượt giới hạn kích thước")
                 stream.write(chunk)
                 hasher.update(chunk)
