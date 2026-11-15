@@ -581,7 +581,7 @@
     document.addEventListener("visibilitychange",() => {
       if (document.visibilityState === "visible") {
         loadHistory();
-        if activeJob refreshJob();
+        if (activeJob) refreshJob();
       }
     });
     setInterval(() => {
