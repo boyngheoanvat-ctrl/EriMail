@@ -201,7 +201,7 @@ def _all_free_ipa(connection, upload_dir, mod_file, q: str = "", limit: int = 50
     with connection() as db:
         rows = db.execute(
             "SELECT i.id,i.name,i.version,i.bundle_id,i.description,i.price_vnd,i.platform,"
-            "p.storage_name,p.size_bytes,p.original_name,p.created_at "
+            "p.storage_name,p.size_bytes,p.sha256,p.original_name,p.created_at "
             "FROM ipa i JOIN private_product_uploads p ON "
             "p.product_id=i.id AND p.kind='ipa' "
             "WHERE i.authorized=1 AND i.price_vnd=0 AND i.platform='ipa' "
