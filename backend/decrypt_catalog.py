@@ -525,8 +525,10 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
                 )
         # Run outside the SQLite transaction: native local worker or automatic
         # approved-source Actions worker. Neither invents a file from metadata.
-        schedule_pipeline(connection, upload_dir, job_id)
-        maybe_dispatch(connection, job_id, app_info["bundle_id"], chosen_version)
+        # Prefer GitHub/R2 for approved sources when configured: do not also
+        # download a multi-GB IPA into Render's ephemeral storage.
+        if not maybe_dispatch(connection, job_id, app_info["bundle_id"], chosen_version):
+            schedule_pipeline(connection, upload_dir, job_id)
         with connection() as db:
             latest = db.execute(
                 "SELECT * FROM ipa_decrypt_requests WHERE id=? AND customer_id=?",
