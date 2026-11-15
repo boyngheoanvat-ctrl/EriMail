@@ -423,11 +423,8 @@
       const data = await request("/api/v1/tools/ipa/decrypt/requests",{auth:true});
       if (startingToken !== getToken()) return; // Account changed mid-request.
       grid.replaceChildren();
-      if (!data.items?.length) {
-        grid.append(card("p","small","Bạn chưa có yêu cầu IPA nào."));
-        return;
-      }
-      for (const job of data.items) {
+      // F4 history must still load when there are no ERI-source requests.
+      for (const job of (Array.isArray(data.items) ? data.items : [])) {
         const node = card("article","eri-decrypt-card");
         node.append(card("strong","",job.name || job.bundle_id));
         node.append(card("p","small",(job.bundle_id||"") + " · v" +
@@ -479,6 +476,7 @@
       } catch (_) {
         // An older ERI backend or unavailable F4 provider should not hide ERI history.
       }
+      if (!grid.children.length) grid.append(card("p","small","Bạn chưa có yêu cầu IPA nào."));
     } catch (error) {
       if (startingToken === getToken()) grid.replaceChildren(card("p","small",error.message));
     } finally {
