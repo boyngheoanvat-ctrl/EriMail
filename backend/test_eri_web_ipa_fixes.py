@@ -24,6 +24,27 @@ assert 'value.toFixed(1) + "%"' in tools
 assert 'percent.textContent = value.toFixed(1) + "%"' in chunks
 assert 'confirmedBytes()' in chunks
 assert '<div id="ipa-sign-progress" class="ipa-sign-progress"' in html
+# Legacy standalone IPA inspector is removed; signing is the ERI-only tool.
+assert 'id="eri-nonjb-panel"' not in html
+assert 'id="eri-nonjb-form"' not in html
+assert "Kiểm tra và tạo link tải IPA" not in html
+assert 'id="ipa-sign-panel"' in html
+assert 'name="ipa"' in html and 'name="p12"' in html
+assert 'name="mobileprovision"' in html and 'name="password"' in html
+assert 'sign-jobs.js?v=20261115signresume1' in html
+assert '"eri_store_signing_job_v2"' in chunks
+assert 'if (!busy)' in chunks
+assert 'if (polling || (busy && !activeSigner)) return;' in chunks
+assert 'action("Tiếp tục tải IPA", () => run(form))' in chunks
+assert 'if (received.has(i)) continue;' in chunks
+assert 'if (!token()) throw new Error' in chunks
+assert 'const confirmedBytes = () => Array.from(received).reduce' in chunks
+assert 'await putChunk(job.job_id,i,slice,digest);' in chunks
+assert 'const remote = await api("/api/v1/tools/ipa/sign-jobs/" + job.job_id);' in chunks
+assert 'await watch(job.job_id, true);' in chunks
+assert 'https://eri-api-dag8.onrender.com' in chunks
+assert 'decrypt.160-191-242-70.sslip.io' not in chunks
+assert 'https://eri-f4-bridge.onrender.com' not in chunks
 assert 'status("Đã nhận " + pct + "%' in chunks
 assert 'percentage + "% · "' in tools
 assert 'received.size * job.chunk_bytes' not in chunks
@@ -36,7 +57,7 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v33" in service
+assert "eri-store-v34" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
 assert "decrypt-store.js?v=20261115f4bridge1" in html
