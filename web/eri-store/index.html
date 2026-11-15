@@ -13,14 +13,14 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://eri-api-dag8.onrender.com https://cdn.decrypt.day; img-src 'self' data: https://eri-api-dag8.onrender.com https://*.mzstatic.com; script-src 'self' 'sha256-V430fCV6Z5JIco4X9WlUVTvFGM96GdBmY4o7o/iZQbs='; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
-<link rel="stylesheet" href="/styles.css?v=20261115p3"><link rel="stylesheet" href="/shop-theme.css?v=20261115p3">
+<link rel="stylesheet" href="/styles.css?v=20261115p3"><link rel="stylesheet" href="/shop-theme.css?v=20261115p3"><link rel="stylesheet" href="/eri-decrypt-layout.css?v=20261115dashboard1">
 <script defer src="/app.js?v=20261115p3"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js?v=20261115direct1"></script>
 <script>
 document.addEventListener("submit", function(event) {
   if (event.target && event.target.id === "eri-decrypt-search-form") event.preventDefault();
 }, true);
 </script>
-<script defer src="/decrypt-store.js?v=20261115direct1"></script><script defer src="/sign-jobs.js?v=20261115p3"></script>
+<script defer src="/decrypt-store.js?v=20261115dashboard1"></script><script defer src="/sign-jobs.js?v=20261115p3"></script>
 <title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
 </head>
 <body class="shop-v2">
@@ -126,19 +126,30 @@ document.addEventListener("submit", function(event) {
       <p class="section-lead">Kiểm tra IPA và ký ứng dụng bằng chứng chỉ của chính bạn. Dùng kết nối HTTPS của ERI.</p>
     </div>
   </div>
-   <div id="ipa-decrypt-panel" class="ipa-tool-panel eri-dec" data-theme="dark" role="tabpanel">
-     <div class="eri-dec-topbar">
-       <div class="eri-dec-brand"><span class="eri-dec-brand-mark">ER</span><span><strong>ERI DECRYPT</strong><small>BY ERI NGUYỄN · iOS IPA</small></span></div>
-       <div class="eri-dec-top-actions"><span class="eri-dec-count-pill">KHO IPA: <strong id="eri-decrypt-header-vault-count">—</strong></span><button type="button" class="eri-dec-icon-button" id="eri-decrypt-theme-toggle" aria-label="Đổi giao diện sáng hoặc tối">☀</button></div>
-     </div>
-     <div class="eri-dec-hero">
-       <span class="eri-dec-eyebrow">APP STORE DISCOVERY · IPA CLOUD VAULT</span>
-    <h3>ERI IPA · Tra cứu &amp; tải xuống</h3>
-    <form id="eri-decrypt-search-form" autocomplete="on">
-      <div class="eri-decrypt-search-row">
-        <label class="field">Khu vực App Store
+  <!-- ERI DECRYPT redesigned inside the existing ERI Store shell. -->
+  <div id="ipa-decrypt-panel" class="ipa-tool-panel eri-dec eri-vault-ui" data-theme="dark" role="tabpanel">
+    <header class="eri-v-topbar">
+      <div class="eri-v-brand" aria-label="ERI DECRYPT BY ERI NGUYỄN">
+        <span class="eri-v-brand-emblem">ER</span>
+        <span class="eri-v-brand-name"><strong>ERI<span>DECRYPT</span></strong><small>BY ERI NGUYỄN · IPA STORE</small></span>
+        <span class="eri-v-brand-tag">iOS</span>
+      </div>
+      <div class="eri-v-top-meta">
+        <span class="eri-v-chip eri-v-online"><i></i> ERI CLOUD</span>
+        <span class="eri-v-chip">Kho IPA: <strong id="eri-decrypt-header-vault-count">—</strong></span>
+      </div>
+      <button type="button" id="eri-decrypt-theme-toggle" class="eri-v-theme" aria-label="Đổi giao diện sáng hoặc tối" title="Đổi giao diện">☀</button>
+    </header>
+
+    <section class="eri-v-hero eri-dec-hero" aria-label="Tra cứu IPA">
+      <div class="eri-v-eyebrow">✦ APP STORE DISCOVERY · ERI CLOUD VAULT</div>
+      <h3>Tra cứu ứng dụng &amp; tải IPA</h3>
+      <p>Khám phá ứng dụng từ App Store, tìm IPA đã lưu trong kho ERI và tải về trên iPhone.</p>
+      <form id="eri-decrypt-search-form" class="eri-v-omnibar" autocomplete="on">
+        <label class="eri-v-region">
+          <span class="eri-v-sr">Khu vực App Store</span>
           <select id="eri-decrypt-region" name="country" aria-label="Chọn quốc gia App Store">
-            <option value="auto">Tự động (VN/US/JP)</option>
+            <option value="auto">Tự động (10 vùng)</option>
             <option value="vn">Việt Nam (VN)</option>
             <option value="us">Hoa Kỳ (US)</option>
             <option value="jp">Nhật Bản (JP)</option>
@@ -151,51 +162,85 @@ document.addEventListener("submit", function(event) {
             <option value="gb">Anh Quốc (GB)</option>
           </select>
         </label>
-        <label class="field">Tên ứng dụng, Bundle ID hoặc link App Store
-          <input type="text" id="eri-decrypt-query" name="query" required maxlength="500"
-            spellcheck="false" placeholder="Tên game / com.xxx.app / https://apps.apple.com/...">
-        </label>
-      </div>
-      <div class="ipa-tool-actions eri-decrypt-buttons">
-        <button class="btn primary" type="submit" id="eri-decrypt-search-button">⌕ Tìm App Store</button>
-        
-        <button class="btn outline" type="button" id="eri-decrypt-open-vault">Kho IPA có sẵn</button>
-      </div>
-      <div class="eri-decrypt-preset" aria-label="Tìm kiếm nhanh">
-        <span>Phổ biến:</span>
+        <div class="eri-v-querybox">
+          <span aria-hidden="true" class="eri-v-search-icon">⌕</span>
+          <input id="eri-decrypt-query" name="query" type="search" maxlength="500" required
+            autocomplete="off" spellcheck="false" aria-label="Tên ứng dụng, Bundle ID hoặc link App Store"
+            placeholder="Tên game, Bundle ID hoặc link App Store...">
+        </div>
+        <div class="eri-v-search-buttons">
+          <button type="submit" id="eri-decrypt-search-button" class="btn primary eri-v-main-btn">⌕ Tìm App Store</button>
+          <button type="button" id="eri-decrypt-open-vault" class="btn outline">Kho IPA có sẵn</button>
+        </div>
+      </form>
+      <div class="eri-decrypt-preset eri-v-presets" aria-label="Tìm kiếm nhanh">
+        <span>✦ Phổ biến:</span>
         <button type="button" data-eri-decrypt-preset="Liên Quân Mobile">Liên Quân</button>
         <button type="button" data-eri-decrypt-preset="Free Fire">Free Fire</button>
+        <button type="button" data-eri-decrypt-preset="PUBG Mobile">PUBG Mobile</button>
         <button type="button" data-eri-decrypt-preset="Roblox">Roblox</button>
         <button type="button" data-eri-decrypt-preset="CapCut">CapCut</button>
-        <button type="button" data-eri-decrypt-preset="PUBG Mobile">PUBG Mobile</button>
         <button type="button" data-eri-decrypt-preset="Duolingo">Duolingo</button>
+        <button type="button" data-eri-decrypt-preset="Nghịch Thủy Hàn">Nghịch Thủy Hàn</button>
       </div>
-    </form>
-    <div id="eri-decrypt-notice" class="ipa-tool-result" role="status" aria-live="polite"></div>
-     </div>
-    <section id="eri-decrypt-result-section" class="eri-decrypt-section hidden" aria-label="Kết quả App Store">
-      <div class="eri-decrypt-heading"><h4>Kết quả tìm kiếm App Store</h4><button type="button" class="btn outline eri-dec-small-button" id="eri-decrypt-results-close">× Đóng</button></div>
-      <div id="eri-decrypt-results" class="eri-decrypt-grid"></div>
+      <div id="eri-decrypt-notice" class="ipa-tool-result" role="status" aria-live="polite"></div>
     </section>
-    <section id="eri-decrypt-vault-section" class="eri-decrypt-section" aria-label="Kho IPA ERI">
-      <div class="eri-decrypt-heading"><h4>Kho IPA Có Sẵn</h4><span class="eri-decrypt-count" id="eri-decrypt-vault-count">—</span></div>
-      <div class="eri-decrypt-filter">
-        <input type="search" id="eri-decrypt-vault-filter" placeholder="Lọc tên ứng dụng hoặc Bundle ID" aria-label="Lọc kho IPA">
-        <select id="eri-decrypt-vault-sort" aria-label="Sắp xếp kho IPA">
-          <option value="newest">Mới đăng nhất</option>
-          <option value="size_desc">Dung lượng giảm dần</option>
-          <option value="size_asc">Dung lượng tăng dần</option>
-          <option value="title">Tên A–Z</option>
-        </select>
-        <button type="button" class="btn outline eri-dec-small-button" id="eri-decrypt-vault-refresh">↻ Làm mới</button>
+
+    <section id="eri-decrypt-result-section" class="eri-decrypt-section hidden eri-v-section" aria-label="Kết quả tìm kiếm App Store">
+      <div class="eri-decrypt-heading eri-v-section-head">
+        <div><h4>Kết quả tìm kiếm App Store</h4><p>Thông tin ứng dụng và tùy chọn tải từ kho ERI.</p></div>
+        <button type="button" id="eri-decrypt-results-close" class="btn outline eri-dec-small-button">× Đóng kết quả</button>
       </div>
-      <div id="eri-decrypt-vault-grid" class="eri-decrypt-grid"></div>
-      <div class="ipa-tool-actions eri-decrypt-pager">
-        <button type="button" class="btn outline" id="eri-decrypt-previous">Trang trước</button>
+      <div id="eri-decrypt-results" class="eri-decrypt-grid" aria-live="polite"></div>
+    </section>
+
+    <section id="eri-decrypt-vault-section" class="eri-decrypt-section eri-v-section eri-v-vault" aria-label="Kho IPA ERI">
+      <div class="eri-decrypt-heading eri-v-section-head">
+        <div>
+          <div class="eri-v-vault-title"><h4>Kho IPA có sẵn</h4><span class="eri-decrypt-count" id="eri-decrypt-vault-count">—</span></div>
+          <p id="eri-v-vault-summary">Danh mục IPA thực tế được trả từ máy chủ ERI.</p>
+        </div>
+        <div class="eri-decrypt-filter eri-v-toolbar">
+          <input id="eri-decrypt-vault-filter" type="search" placeholder="Lọc tên ứng dụng hoặc Bundle ID" aria-label="Lọc kho IPA">
+          <select id="eri-decrypt-vault-sort" aria-label="Sắp xếp kho IPA">
+            <option value="newest">Mới đăng nhất</option>
+            <option value="size_desc">Dung lượng lớn → nhỏ</option>
+            <option value="size_asc">Dung lượng nhỏ → lớn</option>
+            <option value="title">Tên A–Z</option>
+          </select>
+          <button type="button" class="btn outline eri-dec-small-button" id="eri-decrypt-vault-refresh">↻ Làm mới</button>
+        </div>
+      </div>
+      <div class="eri-v-categories" id="eri-v-category-bar" role="group" aria-label="Lọc thể loại trong trang kho IPA">
+        <button class="eri-v-cat active" type="button" data-eri-cat="all" aria-pressed="true">▦ Tất cả</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="games" aria-pressed="false">🎮 Trò chơi</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="apps" aria-pressed="false">▣ Ứng dụng</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="education" aria-pressed="false">◈ Học tập</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="social" aria-pressed="false">♧ Mạng xã hội</button>
+        <button class="eri-v-cat" type="button" data-eri-cat="utilities" aria-pressed="false">⚙ Công cụ</button>
+      </div>
+      <p class="eri-v-filter-note" id="eri-v-category-note" hidden>Bộ lọc thể loại áp dụng cho những IPA hiển thị trên trang hiện tại.</p>
+      <div id="eri-decrypt-vault-grid" class="eri-decrypt-grid" aria-live="polite"></div>
+      <div class="ipa-tool-actions eri-decrypt-pager eri-v-pager">
+        <button type="button" id="eri-decrypt-previous" class="btn outline">‹ Trang trước</button>
         <span id="eri-decrypt-page-label">Trang 1</span>
-        <button type="button" class="btn outline" id="eri-decrypt-next">Trang sau</button>
+        <button type="button" id="eri-decrypt-next" class="btn outline">Trang sau ›</button>
       </div>
     </section>
+    <footer class="eri-v-footer">
+      <span><strong>ERI DECRYPT</strong> · BY ERI NGUYỄN</span>
+      <span>Hỗ trợ tải IPA từ nguồn được phép · TrollStore · ESign · Scarlet · Feather</span>
+    </footer>
+
+    <div id="eri-v-detail-modal" class="eri-v-modal hidden" role="dialog" aria-modal="true" aria-labelledby="eri-v-detail-title" aria-hidden="true">
+      <div class="eri-v-dialog">
+        <div class="eri-v-dialog-head">
+          <h4 id="eri-v-detail-title">Chi tiết ứng dụng</h4>
+          <button type="button" class="eri-v-theme" id="eri-v-detail-close" aria-label="Đóng cửa sổ chi tiết">×</button>
+        </div>
+        <div id="eri-v-detail-body" class="eri-v-dialog-body"></div>
+      </div>
+    </div>
   </div>
   <div class="ipa-tool-panel" id="eri-nonjb-panel">
     <h3>Kiểm tra IPA cho iPhone chưa Jailbreak</h3>
