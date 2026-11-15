@@ -52,7 +52,7 @@ def _github(method, path, payload=None):
         with urllib.request.build_opener(NoRedirect()).open(req, timeout=12) as response:
             status = response.status
             if method == "POST" and status == 204:
-                return {"ok": True}
+                return {"ok": True, "workflow_run_id": None}
             if status != 200:
                 raise HTTPException(502, "GitHub Actions phản hồi không hợp lệ")
             raw = response.read(256 * 1024 + 1)
@@ -61,6 +61,13 @@ def _github(method, path, payload=None):
         data = json.loads(raw)
         if not isinstance(data, dict):
             raise HTTPException(502, "GitHub Actions response không hợp lệ")
+        if method == "POST":
+            # Newer GitHub APIs return HTTP 200 with a workflow_run_id,
+            # while older API versions may still return HTTP 204.
+            run_id = data.get("workflow_run_id")
+            if run_id is not None and (type(run_id) is not int or run_id <= 0):
+                raise HTTPException(502, "GitHub workflow_run_id không hợp lệ")
+            return {"ok": True, "workflow_run_id": run_id}
         return data
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403):
@@ -98,13 +105,14 @@ def install_actions_bridge(app, require_admin):
             selected_source(SOURCE_MANIFEST, body.source_id)
         except (ValueError, OSError, KeyError, TypeError) as exc:
             raise HTTPException(422, "Nguồn IPA chưa được ERI phê duyệt") from exc
-        _github("POST", "actions/workflows/" + WORKFLOW + "/dispatches", {
+        dispatched = _github("POST", "actions/workflows/" + WORKFLOW + "/dispatches", {
             "ref": "main", "inputs": {"source_id": body.source_id},
         })
         repo, _token = _settings()
         return {
             "accepted": True,
             "source_id": body.source_id,
+            "workflow_run_id": dispatched.get("workflow_run_id"),
             "workflow_url": "https://github.com/" + repo + "/actions/workflows/" + WORKFLOW,
             "message": "GitHub đã nhận tác vụ. Chưa có file tải đến khi workflow kiểm tra thành công.",
         }
