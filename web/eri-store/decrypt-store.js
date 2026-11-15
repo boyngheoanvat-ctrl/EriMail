@@ -143,7 +143,7 @@
     add(card,tags,add(el("div","eri-decrypt-card-top"),icon(item.icon_url),info));
     const foot=el("div","eri-decrypt-actions");
     if(item.dl_url){
-      add(foot,action("⬇ Tải IPA",()=>openDownload(item.dl_url),"btn primary"));
+      add(foot,action("⬇ Tải IPA"+(ipaVersion(item)?" v"+ipaVersion(item):""),()=>openDownload(item.dl_url),"btn primary"));
       const sl=sideload(item.dl_url);if(sl)card._sideload=sl;
     }else if(item.price>0){
       add(foot,action("Ứng dụng trả phí",()=>notice("Tải bản trả phí cần quyền phân phối phù hợp.","error"),"btn outline"));
@@ -235,6 +235,7 @@
       else state.searchItems.forEach(item=>grid.append(resultCard(item)));
       $("eri-decrypt-result-section")?.scrollIntoView({behavior:"smooth",block:"start"});
       notice("Đã tìm thấy "+fmt(state.searchItems.length)+" kết quả.","success");
+      return state.searchItems;
     }catch(error){
       if(error.name!=="AbortError"){
         showEmpty(grid,error.message);notice(error.message,"error");
@@ -246,11 +247,99 @@
     if(country && $("eri-decrypt-region"))$("eri-decrypt-region").value=country;
     searchStore(q,country);
   }
-  function checkOrStart(item) {
-    // F4TEAM /api/decrypt/start requires an authenticated CSRF session.
-    // The token embedded in another user's saved HTML is NOT a reusable API key.
-    sayJob("Đang kiểm tra quyền truy cập","Máy chủ nguồn chỉ cấp file qua phiên xác thực riêng. ERI chưa được cấp API POST hợp lệ.",0,"error");
-    notice("Muốn chạy giải mã qua F4TEAM ngay trong ERI, cần được họ cấp quyền tích hợp POST /api/decrypt/start và cơ chế CSRF hợp lệ.","error");
+  // Only offer an IPA after an actual public provider response contains a
+  // valid direct link. Checking the vault is not the same as decrypting an app.
+  function ipaVersion(item) {
+    return String(item?.raw?.vault_cached?.version ||
+      item?.raw?.cached?.version || item?.cachedVersion || item?.version || "");
+  }
+  function ipaMatches(items, target) {
+    const bundle=String(target.bundle_id||"").trim().toLowerCase();
+    const title=String(target.title||"").trim().toLowerCase();
+    return (Array.isArray(items)?items:[]).map(normal).filter(item=>
+      !!item.dl_url && (
+        (bundle && item.bundle_id.toLowerCase()===bundle) ||
+        (!bundle && title && item.title.toLowerCase()===title)
+      ));
+  }
+  async function lookupSourceIPA(target) {
+    const requestedVersion=String(target.version||"").trim();
+    let candidates=ipaMatches([target.raw||target],target);
+    const q=String(target.bundle_id||target.title||"").trim();
+    if(q){
+      const params=new URLSearchParams({q,category:"all",sort:"newest",limit:"48",offset:"0"});
+      const data=await providerRequest("/api/decrypt/library?"+params);
+      candidates.push(...ipaMatches(data.items||[],target));
+    }
+    if(!candidates.length && target.title && target.bundle_id &&
+       target.title.toLowerCase()!==target.bundle_id.toLowerCase()) {
+      const params=new URLSearchParams({q:target.title,category:"all",sort:"newest",limit:"48",offset:"0"});
+      const data=await providerRequest("/api/decrypt/library?"+params);
+      candidates.push(...ipaMatches(data.items||[],target));
+    }
+    if(target.bundle_id){
+      const params=new URLSearchParams({
+        target:target.bundle_id,country:String(target.country||"auto").toLowerCase()
+      });
+      const data=await providerRequest("/api/decrypt/versions?"+params);
+      for(const version of (Array.isArray(data.versions)?data.versions:[])){
+        const cache=version.cached||version.vault_cached;
+        if(!cache)continue;
+        const file=normal({...cache,
+          bundle_id:target.bundle_id,
+          title:target.title,
+          version:String(cache.version||version.version||""),
+          country:target.country
+        });
+        if(file.dl_url)candidates.push(file);
+      }
+    }
+    const unique=new Map();
+    candidates.forEach(candidate=>{
+      if(candidate.dl_url)unique.set(candidate.dl_url,candidate);
+    });
+    const files=[...unique.values()];
+    const exact=files.find(candidate=>
+      !requestedVersion || ipaVersion(candidate)===requestedVersion);
+    return {exact:exact||null,alternate:files[0]||null,requestedVersion};
+  }
+  let checkingIPA=false;
+  async function checkOrStart(item) {
+    if(checkingIPA)return;
+    checkingIPA=true;
+    const panel=$("eri-v-job-panel");
+    const actions=$("eri-v-job-actions");
+    clear(actions);
+    sayJob("Đang kiểm tra IPA: "+item.title,
+      "Đối chiếu Bundle ID và phiên bản với kho IPA F4TEAM...",15,"info");
+    panel?.scrollIntoView({behavior:"smooth",block:"center"});
+    try{
+      const found=await lookupSourceIPA(item);
+      if(found.exact){
+        const version=ipaVersion(found.exact);
+        sayJob("Tìm thấy IPA · "+item.title,
+          "Nguồn đã có file"+(version?" v"+version:"")+". Bắt đầu tải trực tiếp...",100,"success");
+        if(actions)add(actions,action("⬇ Tải IPA"+(version?" v"+version:""),
+          ()=>openDownload(found.exact.dl_url),"btn primary"));
+        notice("Đã tìm được IPA đúng phiên bản trên kho nguồn.","success");
+        openDownload(found.exact.dl_url);
+      }else if(found.alternate){
+        const version=ipaVersion(found.alternate);
+        sayJob("Có IPA phiên bản khác · "+item.title,
+          "Chưa thấy file v"+(found.requestedVersion||"đang chọn")+
+          ", nhưng kho nguồn có bản v"+(version||"không rõ phiên bản")+".",100,"info");
+        if(actions)add(actions,action("⬇ Tải bản v"+(version||"khác"),
+          ()=>openDownload(found.alternate.dl_url),"btn outline"));
+        notice("Đã kiểm tra: có IPA bản khác, chưa xác nhận đúng bản yêu cầu.","info");
+      }else{
+        sayJob("Đã kiểm tra: "+item.title,
+          "Kho F4TEAM chưa công bố tệp IPA tải được cho ứng dụng/phiên bản này. ERI chưa được cấp kết nối tạo bản giải mã mới.",100,"info");
+        notice("Kiểm tra hoàn tất: chưa tìm thấy đường dẫn IPA hợp lệ trong kho nguồn.","info");
+      }
+    }catch(error){
+      sayJob("Không thể kiểm tra kho IPA",error.message,0,"error");
+      notice(error.message,"error");
+    }finally{checkingIPA=false;}
   }
   async function showVersions(item){
     state.selected=item;state.versions=[];
@@ -387,13 +476,18 @@
       if(first)showVersions(normal(first));
       else notice("Tìm ứng dụng trước để xác định Bundle ID chính xác.","error");
     });
-    $("eri-v-direct-check")?.addEventListener("click",()=>{
-      const item=state.searchItems[0];
-      if(item){
-        const match=normal(item);
-        if(match.dl_url)openDownload(match.dl_url);
-        else checkOrStart(match);
-      }else notice("Hãy tìm ứng dụng trước để kiểm tra IPA.","error");
+    $("eri-v-direct-check")?.addEventListener("click",async()=>{
+      const q=String($("eri-decrypt-query")?.value||"").trim();
+      if(!q){notice("Nhập tên hoặc Bundle ID của ứng dụng trước.","error");return;}
+      const existing=state.searchItems.find(raw=>{
+        const n=normal(raw);
+        return [n.title,n.bundle_id,n.store_url,String(n.app_id)].some(x=>String(x).toLowerCase()===q.toLowerCase());
+      });
+      if(existing){checkOrStart(normal(existing));return;}
+      const results=await searchStore(q);
+      if(Array.isArray(results) && results.length===1)checkOrStart(normal(results[0]));
+      else if(Array.isArray(results)&&results.length>1)
+        notice("Có nhiều kết quả. Hãy bấm Kiểm tra IPA trên đúng ứng dụng bên dưới.","info");
     });
     // Original F4 homepage provided a server-rendered grid. The ERI-hosted
     // view must request live inventory rather than copying 621 IPA entries.
@@ -413,12 +507,16 @@
         if(!q)throw new Error("Thiếu Bundle ID hoặc link App Store.");
         const params=new URLSearchParams({q,country:String(item.country||"auto").toLowerCase(),mode:"ios"});
         const response=await providerRequest("/api/decrypt/search?"+params);
-        const match=(response.items||[]).map(normal).find(src=>
-          src.bundle_id.toLowerCase()===String(item.bundle_id||"").toLowerCase() &&
-          (!item.version||src.version===String(item.version))&&src.dl_url);
-        if(!match)throw new Error("Nguồn chưa cung cấp file IPA đúng phiên bản.");
+        const source=(response.items||[]).map(normal).find(src=>
+          src.bundle_id.toLowerCase()===String(item.bundle_id||"").toLowerCase());
+        if(!source)throw new Error("Không tìm thấy ứng dụng tương ứng trong nguồn F4TEAM.");
+        const target={...source,version:String(item.version||source.version)};
+        const match=await lookupSourceIPA(target);
+        if(!match.exact)throw new Error(match.alternate
+          ? "Nguồn chỉ có IPA phiên bản khác, chưa xác minh được bản bạn chọn."
+          : "Nguồn chưa cung cấp file IPA đúng phiên bản.");
         report("Đã xác nhận link IPA từ nguồn. Đang bắt đầu tải...","success");
-        openDownload(match.dl_url);
+        openDownload(match.exact.dl_url);
       }catch(error){report(error.message,"error");}
     }
   });
