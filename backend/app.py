@@ -24,13 +24,25 @@ DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
 from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
 _eri_db_guard = threading.RLock()
 _VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
-if _VAULT_MODE not in ("", "off", "required"):
+if _VAULT_MODE not in ("", "off", "required", "preview"):
     raise RuntimeError("Invalid ERI_VAULT_MODE")
-_eri_vault = ERIVault() if _VAULT_MODE == "required" else None
+if _VAULT_MODE == "preview" and (
+        os.getenv("ERI_PREVIEW_ALLOW_EMPTY_SEED") != "I_ACKNOWLEDGE_DATA_RESET"
+        or os.getenv("ERI_STORE_ENV") != "isolated-preview"):
+    raise RuntimeError("Preview seeding is forbidden outside isolated-preview")
+_eri_vault = ERIVault() if _VAULT_MODE in ("required", "preview") else None
+_preview_cloud_empty = False
 if _eri_vault is not None:
-    # Never initialize an empty database after Render restarts.
-    # First seed a verified backup from the existing server, then activate.
-    _eri_vault.restore_sqlite(DB)
+    if _VAULT_MODE == "preview":
+        pointer = _eri_vault.read_snapshot_pointer()
+        if pointer is not None:
+            _eri_vault.restore_sqlite(DB)
+        else:
+            _preview_cloud_empty = True
+    else:
+        # Production NEVER initializes a new customer database from scratch.
+        # Seed a verified snapshot from the original running server first.
+        _eri_vault.restore_sqlite(DB)
 _log = logging.getLogger("eri.persistence")
 ADMIN_KEY = os.getenv("ERI_ADMIN_KEY", "")
 app = FastAPI(title="ERI NGUYEN API", version="0.1.0")
@@ -188,6 +200,9 @@ def init():
         db.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer_created ON orders(customer_id, created_at)")
 
 init()
+if _preview_cloud_empty:
+    # A fresh isolated preview is the only mode allowed to create an empty DB.
+    _eri_vault.snapshot_sqlite(DB)
 
 def require_admin(x_eri_admin_key: str | None = Header(default=None)):
     if len(ADMIN_KEY) < 32 or not secrets.compare_digest(x_eri_admin_key or "", ADMIN_KEY):
