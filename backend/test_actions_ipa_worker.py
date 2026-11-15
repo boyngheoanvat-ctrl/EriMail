@@ -12,6 +12,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import actions_ipa_worker as worker
+from ipa_tools import _validate_ipa
+from fastapi import HTTPException
 
 
 def sample_ipa(bundle="com.eri.sample", version="1.2.3", cryptid=0, traversal=False):
@@ -82,7 +84,24 @@ class ActionsTests(unittest.TestCase):
         self.assertEqual((self.out / "eri-eri-test.ipa").read_bytes(), self.payload)
         self.assertTrue(result["signature_preserved"])
         self.assertFalse(result["fairplay_encrypted"])
+        self.assertEqual(list(self.out.glob(".eri-actions-*")), [])
         self.assertEqual(json.loads((self.out / "validation.json").read_text())["version"], "1.2.3")
+
+    def test_large_actions_budget_without_weakening_web_uploads(self):
+        # A 3.85-GB IPA cannot pass a 1-GiB Actions download cap.
+        self.assertGreater(worker.MAX_DOWNLOAD, 3_850_000_000)
+        self.assertGreater(worker.MAX_UNPACKED, 3_850_000_000)
+        info = zipfile.ZipInfo("Payload/ERI.app/Info.plist")
+        info.file_size = 3 * 1024 ** 3
+        class FakeArchive:
+            def infolist(self):
+                return [info]
+        with self.assertRaises(HTTPException):
+            _validate_ipa(FakeArchive())
+        self.assertEqual(
+            _validate_ipa(FakeArchive(), max_expanded=worker.MAX_UNPACKED),
+            "ERI.app",
+        )
 
     def test_fail_closed_if_no_authorization(self):
         self.entry["distribution_authorized"] = False
