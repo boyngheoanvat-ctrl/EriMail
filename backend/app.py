@@ -1477,7 +1477,10 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
             db.execute("DELETE FROM orders WHERE customer_id=?", (customer_id,))
             # Remove user-scoped IPA requests and provider job IDs as well.
             db.execute("DELETE FROM ipa_decrypt_requests WHERE customer_id=?", (customer_id,))
-            db.execute("DELETE FROM f4_customer_jobs WHERE customer_id=?", (customer_id,))
+            # Clean up legacy integration records only when the old table exists.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                          "AND name='f4_customer_jobs'").fetchone():
+                db.execute("DELETE FROM f4_customer_jobs WHERE customer_id=?", (customer_id,))
             db.execute("DELETE FROM customer_sessions WHERE customer_id=?", (customer_id,))
             db.execute("DELETE FROM customers WHERE id=?", (customer_id,))
         files_removed = 0
@@ -1514,9 +1517,5 @@ install_udid_routes(app, connection, require_customer, require_admin)
 from decrypt_catalog import register_decrypt_catalog
 register_decrypt_catalog(app, connection, UPLOAD_DIR, _eri_mod_file, require_customer, require_admin)
 
-# Optional, authorized F4TEAM task bridge. Disabled until a provider-approved
-# API token is configured server-side. Does not remove Apple's FairPlay DRM.
-from f4_jobs import install_f4_jobs
-from decrypt_catalog import _search_apps
-install_f4_jobs(app, connection, require_customer, _search_apps)
+# ERI's first-party IPA queue, source validation, and worker are registered above.
 
