@@ -574,21 +574,6 @@ document.addEventListener("DOMContentLoaded",()=>{
     $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
   });
   $("reload").addEventListener("click",loadCatalog);
-  $("open-sign-local")?.addEventListener("click",()=>{
-    openCategory("certificate","free");
-    setView("store");
-    $("certificate-subtabs")?.scrollIntoView({block:"start"});
-  });
-  document.querySelectorAll("[data-sign-mode]").forEach(tab=>tab.addEventListener("click",()=>{
-    const mode=tab.dataset.signMode==="iphone"?"iphone":"server";
-    document.querySelectorAll("[data-sign-mode]").forEach(item=>{
-      const active=item.dataset.signMode===mode;
-      item.classList.toggle("selected",active);
-      item.setAttribute("aria-selected",String(active));
-    });
-    $("ipa-sign-server")?.classList.toggle("hidden",mode!=="server");
-    $("ipa-sign-iphone")?.classList.toggle("hidden",mode!=="iphone");
-  }));
   document.querySelectorAll("[data-cert-mode]").forEach(tab=>tab.addEventListener("click",()=>{
     openCategory("certificate",tab.dataset.certMode);
   }));
