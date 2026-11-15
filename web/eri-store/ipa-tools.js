@@ -227,46 +227,34 @@
             }
           } catch (_) { /* Apple metadata still renders when inventory is offline. */ }
 
-          // Verified ERI IPA only. Do not redirect to a third-party catalog:
-          // Decrypt.day has no verified public direct-download API.
-          if (existingIPA) {
-            const download = document.createElement("a");
-            download.className = "btn primary";
-            download.href = API + existingIPA.download_path;
-            download.rel = "noopener noreferrer";
-            download.textContent = "Tải IPA";
-            actions.append(download);
-          } else {
-            const waiting = document.createElement("button");
-            waiting.type = "button";
-            waiting.className = "btn primary";
-            waiting.textContent = "Tải IPA";
-            waiting.disabled = true;
-            waiting.title = "Nguồn tải IPA trực tiếp đang được cập nhật";
-            waiting.setAttribute("aria-label", "Tải IPA chưa khả dụng: đang cập nhật nguồn");
-            actions.append(waiting);
-            const note = document.createElement("p");
-            note.className = "small";
-            note.textContent = "Nguồn tải trực tiếp đang được cập nhật. Chỉ tệp đã xác minh mới có thể tải.";
-            appStoreResult.append(note);
-          }
-
-          const decryptTab = document.querySelector('[data-kind="decrypt"]');
-          if (decryptTab && $("eri-decrypt-query")) {
-            const browseVault = () => {
-              const query = $("eri-decrypt-query");
-              query.value = link;
-              query.dispatchEvent(new Event("input", {bubbles: true}));
-              decryptTab.click();
-              $("eri-decrypt-search-form")?.requestSubmit();
-            };
-            const browse = document.createElement("button");
-            browse.type = "button";
-            browse.className = "btn outline";
-            browse.textContent = "Xem kho IPA ERI";
-            browse.addEventListener("click", browseVault);
-            actions.append(browse);
-          }
+          // Single first-party download button. The shared ERI Store checker
+          // validates exact Bundle ID/version and the actual IPA download path.
+          // No redirect to a third-party app page, no imaginary IPA URLs.
+          const downloadFeedback = document.createElement("p");
+          downloadFeedback.className = "ipa-tool-result";
+          downloadFeedback.hidden = true;
+          const download = document.createElement("button");
+          download.type = "button";
+          download.className = "btn primary";
+          download.textContent = "Tải IPA";
+          download.addEventListener("click", () => {
+            const handler = window.ERIStoreIPA?.download;
+            if (typeof handler !== "function") {
+              downloadFeedback.hidden = false;
+              downloadFeedback.textContent = "Công cụ tải IPA của ERI chưa sẵn sàng. Hãy tải lại trang.";
+              downloadFeedback.dataset.state = "error";
+              return;
+            }
+            handler({
+              app_id: Number(data.app_id) || Number(link.match(/id([0-9]{6,15})/)?.[1]) || 0,
+              bundle_id: bundle,
+              version,
+              country: data.country || "VN",
+              app_store_url: data.app_store_url || link,
+              cached: existingIPA,
+            }, downloadFeedback);
+          });
+          actions.append(download);
           if (typeof data.app_store_url === "string") {
             try {
               const destination = new URL(data.app_store_url);
@@ -282,6 +270,7 @@
             } catch { /* No unsafe destination. */ }
           }
           appStoreResult.append(actions);
+          appStoreResult.append(downloadFeedback);
         } catch (error) {
           display(appStoreResult, error.name === "AbortError"
             ? "App Store phản hồi quá lâu. Hãy thử lại."
