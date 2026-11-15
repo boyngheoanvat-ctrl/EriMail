@@ -89,7 +89,11 @@
       });
       let data = {};
       try { data = await result.json(); } catch {}
-      if (!result.ok) throw new Error(errorMessage(data, result.status));
+      if (!result.ok) {
+        const error = new Error(errorMessage(data, result.status));
+        error.status = result.status;
+        throw error;
+      }
       return data;
     } catch (error) {
       if (error.name === "AbortError") throw new Error("Kết nối quá thời gian, hãy thử lại.");
@@ -422,9 +426,20 @@
     }
     notice("Đang tạo tác vụ IPA trên máy chủ ERI...");
     try {
-      const job = await request("/api/v1/tools/ipa/decrypt/start", {
-        auth:true, body:{target,country:country?.toLowerCase()||"auto",version:version||""}
-      });
+      const payload = {target,country:country?.toLowerCase()||"auto",version:version||""};
+      let job;
+      try {
+        job = await request("/api/v1/tools/ipa/decrypt/start", {
+          auth:true, body:payload
+        });
+      } catch (error) {
+        if (error.status !== 404) throw error;
+        // Backward compatibility for an API still running before ERI Native.
+        // Both endpoints use the same validated ERI customer-owned request DB.
+        job = await request("/api/v1/tools/ipa/decrypt/requests", {
+          auth:true, body:payload
+        });
+      }
       activeJob = job.job_id;
       try { localStorage.setItem(ACTIVE_JOB, activeJob); } catch {}
       renderJob(job);
@@ -477,7 +492,13 @@
     if (pollInFlight || !activeJob || !getToken()) return;
     pollInFlight = true;
     try {
-      const result = await request("/api/v1/tools/ipa/decrypt/job/" + activeJob,{auth:true});
+      let result;
+      try {
+        result = await request("/api/v1/tools/ipa/decrypt/job/" + activeJob,{auth:true});
+      } catch (error) {
+        if (error.status !== 404) throw error;
+        result = await request("/api/v1/tools/ipa/decrypt/requests/" + activeJob,{auth:true});
+      }
       renderJob(result);
       if (result.state === "completed") loadHistory();
     } catch (error) {
