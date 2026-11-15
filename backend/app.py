@@ -1524,3 +1524,8 @@ register_decrypt_catalog(app, connection, UPLOAD_DIR, _eri_mod_file, require_cus
 from eri_actions_bridge import install_actions_bridge
 install_actions_bridge(app, require_admin)
 
+# Automatic publisher-authorized IPA -> GitHub Actions -> R2 workflow.
+# Disabled by default until scoped GitHub/R2 secrets and persistent DB are ready.
+from eri_auto_ipa import install_auto_ipa
+install_auto_ipa(app, connection, require_customer)
+

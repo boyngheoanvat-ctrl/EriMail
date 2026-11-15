@@ -32,17 +32,20 @@ assert 'Xử lý IPA' in tools
 assert 'if (createRequest) $("eri-decrypt-direct-request")?.click();' in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v28" in service
+assert "eri-store-v29" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115native1" in html
-assert "decrypt-store.js?v=20261115native3" in html
+assert "decrypt-store.js?v=20261115auto-r2" in html
 assert 'request("/api/v1/tools/ipa/decrypt/start"' not in decrypt
 assert 'request("/api/v1/tools/ipa/decrypt/job/"' not in decrypt
 assert '/api/v1/tools/ipa/decrypt/requests"' in decrypt
 assert '/api/v1/tools/ipa/decrypt/requests/"' in decrypt
 assert 'const job = await request("/api/v1/tools/ipa/decrypt/requests"' in decrypt
 assert "nativeSourceStatus" in decrypt
-assert "ERI đã có nguồn IPA được đăng ký" in decrypt
+assert "isRemoteDownload" in decrypt
+assert "trustedSignedR2" in decrypt
+assert "Tải IPA từ kho ERI R2" in decrypt
+assert "ERI đã nhận diện nguồn IPA được cấp quyền" in decrypt
 assert '"/api/v1/tools/ipa/decrypt/vault?q="' in tools
 assert "/api/v1/tools/ipa/decrypt/external?" not in tools
 assert "/api/v1/tools/ipa/decrypt/f4/" not in decrypt

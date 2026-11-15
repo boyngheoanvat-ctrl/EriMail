@@ -179,3 +179,29 @@ Chạy kiểm thử: `cd backend && python3 test_actions_ipa_worker.py && python
 - 200 từ tìm kiếm, 201 khi yêu cầu và 200 khi xem trạng thái là thành công; "waiting_for_source" là trạng thái chưa có nguồn, **không phải đang giải mã hoặc lỗi API**.
 
 Về vận hành: GitHub Actions có hạn mức, thời gian chạy và retention; không mặc định không tốn phí ở mọi cấu hình. Không cho người dùng nhập URL tùy ý hoặc thực thi lệnh shell của họ.
+
+## Tự động hóa IPA nhiều GB: GitHub Actions → Cloudflare R2 (15/11/2026)
+
+Workflow `.github/workflows/process-ipa.yml` tự chạy khi manifest nguồn được duyệt ở `backend/eri_actions_sources.json` thay đổi trên nhánh main. Không phải admin upload IPA từng file. Với backend mới đã cấu hình đầy đủ, thao tác **Yêu cầu IPA** của khách cũng tự phát GitHub `workflow_dispatch` khi đúng Bundle ID + version tồn tại trong manifest nguồn đã cấp quyền. Các yêu cầu trùng phiên bản được gộp lại, tránh nhân đôi tác vụ.
+
+Worker: `backend/actions_ipa_worker.py` tải file bằng luồng và kiểm tra SHA-256, ZIP CRC, Bundle ID, phiên bản, `cryptid`; `backend/actions_r2_publish.py` tự chuyển tệp đã xác minh sang bucket **R2 private** bằng multipart upload, không cần admin tải về rồi upload lại. GitHub Artifact chỉ lưu báo cáo JSON, không copy IPA nhiều GB.
+
+Backend: `backend/eri_auto_ipa.py` nhận callback nội bộ có token, xác nhận HEAD metadata/size từ R2, đánh dấu các yêu cầu của đúng ứng dụng/phiên bản hoàn tất. Người dùng đăng nhập ERI sẽ lấy link tải có chữ ký R2 tồn tại 15 phút qua `GET /api/v1/tools/ipa/decrypt/remote-url/{job_id}`, không thấy GitHub/R2 credentials. Bất kỳ callback nào không có token, sai manifest/SHA/bucket/object key đều bị từ chối. `GET /api/v1/tools/ipa/decrypt/auto-status` trả trạng thái cấu hình công khai, không lộ khóa.
+
+### Cấu hình cần có — không commit token vào GitHub
+
+GitHub repo **Secrets**: `ERI_R2_ACCOUNT_ID`, `ERI_R2_BUCKET`, `ERI_R2_ACCESS_KEY_ID`, `ERI_R2_SECRET_ACCESS_KEY`, `ERI_ACTIONS_CALLBACK_TOKEN` (token mạnh, tạo độc lập).
+
+GitHub repo **Variables**: `ERI_IPA_SOURCE_HOSTS` (domain nguồn IPA được cấp quyền), `ERI_ACTIONS_CALLBACK_URL=https://eri-api-dag8.onrender.com/api/v1/worker/ipa/complete`. Tuỳ chọn `ERI_ACTIONS_MAX_UNPACKED_BYTES` để đặt giới hạn an toàn dữ liệu ZIP chưa nén.
+
+Render API **Environment secrets**: `ERI_GH_ACTIONS_REPO=boyngheoanvat-ctrl/EriMail`, `ERI_GH_ACTIONS_TOKEN`, `ERI_AUTO_ACTIONS_ENABLED=true`, bốn giá trị R2 tương ứng và cùng giá trị `ERI_ACTIONS_CALLBACK_TOKEN` từ GitHub. Cần quyền GitHub Actions write để dispatch và quyền R2 đọc object + HEAD để cấp link tải.
+
+R2 bucket mặc định private. Không cần mở public access hoặc để file trong GitHub Releases. Đặt quyền bucket hẹp nhất có thể, duy trì quota và tránh log/commit secrets.
+
+### Giới hạn thực tế
+
+**Không có dung lượng vô hạn vật lý.** Worker không đặt giới hạn cứng 5 GiB cho tải IPA khi `ERI_ACTIONS_MAX_IPA_BYTES=0`, nhưng tự kiểm tra ổ trống của runner và luôn giữ tối thiểu 1 GiB dự phòng. Runner Ubuntu tiêu chuẩn có khoảng 14 GB SSD; file lớn hơn cần runner ổ lớn/self-hosted. R2 multipart tối đa khoảng 5 TiB/object. Vẫn phải kiểm tra ZIP bomb, thời gian thực thi, chi phí storage/bandwidth và quyền phân phối trước khi xử lý. `ERI_ACTIONS_MAX_UNPACKED_BYTES` vẫn mặc định giới hạn dữ liệu ZIP chưa nén 10 GiB để tránh tài nguyên quá lớn.
+
+**Chưa có nguồn**: `backend/eri_actions_sources.json` hiện trống; ngay cả khi workflow hoàn tất và secrets cấu hình, không thể tạo IPA cho Nghịch Thủy Hàn chỉ từ App Store URL. Apple Search API cho metadata chứ không cho IPA đã giải mã. Nhà phát hành/các nguồn được ủy quyền cần cung cấp file IPA đầu vào thực tế. Không tự động lấy cookie Apple hoặc bypass FairPlay.
+
+**Render Free**: backend sản xuất hiện sử dụng SQLite và file trên ổ tạm. Không deploy backend mới trước khi sao lưu thật dữ liệu tài khoản/đơn hàng và chuyển lưu trữ dài hạn. PR này là mã nguồn mới, chưa đồng nghĩa hệ thống sản xuất có token hoặc dữ liệu đã bền vững.

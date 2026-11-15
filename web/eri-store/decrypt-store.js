@@ -51,6 +51,21 @@
     if (!/^\/api\/v1\/mods\/[1-9][0-9]*\/download$/.test(path || "")) return null;
     return API + path;
   }
+  function isRemoteDownload(path) {
+    return /^\/api\/v1\/tools\/ipa\/decrypt\/remote-url\/[a-f0-9]{32}$/.test(path || "");
+  }
+  function downloadReady(path) {
+    return !!apiUrl(path) || isRemoteDownload(path);
+  }
+  function trustedSignedR2(url) {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === "https:" &&
+        /^[0-9a-f]{32}\.r2\.cloudflarestorage\.com$/i.test(parsed.hostname) &&
+        !parsed.username && !parsed.password && parsed.port === ""
+        ? parsed.href : null;
+    } catch { return null; }
+  }
   function safeStoreLink(url) {
     try {
       const parsed = new URL(url);
@@ -137,7 +152,26 @@
   }
 
   function installActions(parent, item) {
-    const url = apiUrl(item?.download_path);
+    const path = item?.download_path;
+    if (isRemoteDownload(path)) {
+      const actions = card("div","eri-decrypt-actions");
+      actions.append(button("Tải IPA từ kho ERI R2" +
+        (item.size_bytes ? " (" + pretty(item.size_bytes) + ")" : ""), async () => {
+        try {
+          notice("Đang tạo link tải riêng cho tài khoản của bạn...");
+          const result = await request(path,{auth:true});
+          const safe = trustedSignedR2(result.download_url);
+          if (!safe) throw new Error("Máy chủ không cấp link R2 đáng tin cậy.");
+          // Link is short-lived and never stored in the browser's localStorage.
+          window.location.assign(safe);
+        } catch(error) {
+          notice(error.message, "error");
+        }
+      }, true));
+      parent.append(actions);
+      return;
+    }
+    const url = apiUrl(path);
     if (!url) return;
     const actions = card("div", "eri-decrypt-actions");
     actions.append(link("Tải IPA " + (item.size_bytes ? "(" + pretty(item.size_bytes) + ")" : ""), url, true));
@@ -169,9 +203,11 @@
   // No requests are made to third-party IPA/decrypt services.
   function nativeSourceStatus(root, item) {
     if (item.cached?.download_path) return;
-    root.append(card("p", "small", item.source_available
-      ? "ERI đã có nguồn IPA được đăng ký cho phiên bản này. Bấm Xử lý IPA để chạy worker kiểm tra tệp."
-      : "Chưa có IPA thật trong kho ERI. Yêu cầu sẽ được lưu và tự xử lý khi có nguồn IPA được cấp quyền đúng phiên bản."));
+    root.append(card("p", "small", item.remote_available
+      ? "IPA đã được kiểm tra và lưu trên ERI R2. Đăng nhập và chọn Nhận IPA để lấy link tải riêng."
+      : item.source_available
+        ? "ERI đã nhận diện nguồn IPA được cấp quyền. Khi cấu hình tự động sẵn sàng, GitHub Actions sẽ tải và kiểm tra rồi lưu trên ERI R2."
+        : "Chưa có tệp IPA từ nguồn được cấp quyền. Link App Store chỉ cung cấp thông tin ứng dụng."));
   }
   function searchResult(item) {
     const root = card("article", "eri-decrypt-card");
@@ -196,9 +232,13 @@
       root.append(card("div", "eri-decrypt-available", "IPA sẵn sàng"));
       installActions(root, item.cached);
     } else {
-      root.append(card("div", "eri-decrypt-unavailable", "Chưa có IPA"));
+      root.append(card("div", item.remote_available ? "eri-decrypt-available" :
+        "eri-decrypt-unavailable", item.remote_available ?
+        "IPA đã sẵn sàng trên R2" : item.source_available ?
+        "Đã nhận nguồn IPA" : "Chưa có IPA"));
       nativeSourceStatus(root, item);
-      actions.append(button(item.source_available ? "Xử lý IPA" : "Yêu cầu IPA",
+      actions.append(button(item.remote_available ? "Nhận IPA" :
+        item.source_available ? "Xử lý IPA" : "Yêu cầu IPA",
         () => createJob(item.app_store_url || String(item.app_id), item.country, item.version), true));
     }
     if (Number(item.app_id) > 0)
@@ -390,7 +430,7 @@
         node.append(card("strong","",job.name || job.bundle_id));
         node.append(card("p","small",(job.bundle_id||"") + " · v" +
           (job.version||"—") + " · " + (job.country||"VN")));
-        const complete = job.state === "completed" && !!apiUrl(job.result?.download_path);
+        const complete = job.state === "completed" && downloadReady(job.result?.download_path);
         node.append(card("p",complete ? "eri-decrypt-available" : "eri-decrypt-unavailable",
           complete ? "Sẵn sàng tải IPA" :
             job.state === "processing" ? ("Đang xử lý" +
@@ -443,7 +483,7 @@
   function renderJob(job) {
     const section = $("eri-decrypt-request-section");
     section?.classList.remove("hidden");
-    const ready = job.state === "completed" && !!apiUrl(job.result?.download_path);
+    const ready = job.state === "completed" && downloadReady(job.result?.download_path);
     const processing = job.state === "processing";
     const value = Number(job.progress);
     const measured = processing && job.progress != null &&

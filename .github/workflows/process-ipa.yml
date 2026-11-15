@@ -1,51 +1,108 @@
-name: ERI Store approved IPA processor
+name: ERI Store automatic verified IPA to R2
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - backend/eri_actions_sources.json
   workflow_dispatch:
     inputs:
       source_id:
-        description: "ID nguồn IPA đã duyệt trong backend/eri_actions_sources.json"
+        description: "Nguồn đã duyệt; để trống để xử lý mọi nguồn trong manifest"
         type: string
-        required: true
+        required: false
+      job_id:
+        description: "ERI request ID (optional, for server-side customer dispatch)"
+        type: string
+        required: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: eri-approved-ipa-${{ inputs.source_id }}
-  cancel-in-progress: false
-
 jobs:
-  process:
+  select-sources:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      SOURCE_ID: ${{ inputs.source_id }}
-      ERI_IPA_SOURCE_HOSTS: ${{ vars.ERI_IPA_SOURCE_HOSTS }}
+    outputs:
+      ids: ${{ steps.prepare.outputs.source_ids }}
+      has_sources: ${{ steps.prepare.outputs.has_sources }}
     steps:
-      - name: Checkout ERI code and reviewed source catalog
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Select approved manifest sources
+        id: prepare
+        env:
+          REQUESTED_SOURCE: ${{ inputs.source_id }}
+        run: |
+          python3 backend/actions_ipa_matrix.py \
+            --source-id "$REQUESTED_SOURCE"
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+  process:
+    needs: select-sources
+    if: needs.select-sources.outputs.has_sources == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    concurrency:
+      group: eri-source-${{ matrix.source_id }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        source_id: ${{ fromJson(needs.select-sources.outputs.ids) }}
+    env:
+      SOURCE_ID: ${{ matrix.source_id }}
+      JOB_ID: ${{ inputs.job_id }}
+      ERI_IPA_SOURCE_HOSTS: ${{ vars.ERI_IPA_SOURCE_HOSTS }}
+      # 0 means runner-disk-aware download, not infinite physical storage.
+      ERI_ACTIONS_MAX_IPA_BYTES: "0"
+      ERI_ACTIONS_MAX_UNPACKED_BYTES: ${{ vars.ERI_ACTIONS_MAX_UNPACKED_BYTES }}
+      ERI_R2_ACCOUNT_ID: ${{ secrets.ERI_R2_ACCOUNT_ID }}
+      ERI_R2_BUCKET: ${{ secrets.ERI_R2_BUCKET }}
+      ERI_R2_ACCESS_KEY_ID: ${{ secrets.ERI_R2_ACCESS_KEY_ID }}
+      ERI_R2_SECRET_ACCESS_KEY: ${{ secrets.ERI_R2_SECRET_ACCESS_KEY }}
+      ERI_ACTIONS_CALLBACK_TOKEN: ${{ secrets.ERI_ACTIONS_CALLBACK_TOKEN }}
+      ERI_ACTIONS_CALLBACK_URL: ${{ vars.ERI_ACTIONS_CALLBACK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install IPA validators
-        run: python -m pip install -r backend/requirements.txt
+      - name: Install IPA inspection and R2 multipart transfer
+        run: |
+          python -m pip install -r backend/requirements.txt
+          python -m pip install "boto3>=1.34,<2"
 
-      - name: Validate and preserve approved IPA
+      - name: Verify R2 configuration before downloading any IPA
+        run: |
+          test -n "$ERI_R2_ACCOUNT_ID" &&
+          test -n "$ERI_R2_BUCKET" &&
+          test -n "$ERI_R2_ACCESS_KEY_ID" &&
+          test -n "$ERI_R2_SECRET_ACCESS_KEY" &&
+          test -n "$ERI_ACTIONS_CALLBACK_TOKEN" &&
+          test -n "$ERI_ACTIONS_CALLBACK_URL" ||
+          { echo "::error::Set R2 and ERI callback credentials before auto-publishing"; exit 2; }
+
+      - name: Fetch approved IPA, validate SHA/ZIP/Mach-O without repackaging
         run: |
           python backend/actions_ipa_worker.py \
             --source-id "$SOURCE_ID" \
             --manifest backend/eri_actions_sources.json \
             --out actions-ipa-output
 
-      - name: Upload verified artifact for authorized operators
+      - name: Upload verified IPA to private Cloudflare R2 via multipart
+        run: |
+          python backend/actions_r2_publish.py \
+            --validation actions-ipa-output/validation.json \
+            --output actions-ipa-output/r2-published.json \
+            --job-id "$JOB_ID"
+
+      - name: Store small validation reports only (not a second IPA copy)
         uses: actions/upload-artifact@v4
         with:
-          name: eri-ipa-${{ inputs.source_id }}
-          path: actions-ipa-output/
+          name: eri-validation-${{ matrix.source_id }}
+          path: |
+            actions-ipa-output/validation.json
+            actions-ipa-output/r2-published.json
           if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+          retention-days: 2

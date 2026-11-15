@@ -32,4 +32,5 @@ jobs:
           python3 test_decrypt_catalog.py
           python3 test_actions_ipa_worker.py
           python3 test_actions_bridge.py
+          python3 test_actions_r2_auto.py
           python3 test_signing_jobs.py
