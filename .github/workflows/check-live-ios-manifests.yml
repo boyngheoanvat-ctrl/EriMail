@@ -15,10 +15,17 @@ jobs:
       - name: Verify XML MIME type and signed app URLs on ERI Store domain
         run: |
           python3 - <<'PY'
-          import plistlib, urllib.request
+          import json, plistlib, urllib.request
           base="https://eri-store-web.onrender.com"
-          for slug in ["idjbbheelkpp","hegmnlhdholo"]:
-              url=f"{base}/plists/{slug}.xml"
+          with urllib.request.urlopen(base+"/install-tools.json",timeout=30) as response:
+              catalog=json.load(response)
+          all_entries=[item for kind in ("ksign","esign") for item in catalog[kind]]
+          assert len(catalog["ksign"])==17 and len(catalog["esign"])==17
+          assert len(set(item["url"] for item in all_entries))==34
+          for entry in all_entries:
+              url=entry["url"].split("download-manifest&url=",1)[1]
+              assert url.startswith(base+"/plists/") and url.endswith(".xml"),url
+              slug=url.rsplit("/",1)[1].removesuffix(".xml")
               req=urllib.request.Request(url,headers={"User-Agent":"Mozilla/5.0 ERI-Installer-QA"})
               with urllib.request.urlopen(req, timeout=30) as response:
                   mime=response.headers.get_content_type()
@@ -29,5 +36,5 @@ jobs:
                   manifest=plistlib.loads(data)
                   packages=[asset["url"] for item in manifest["items"] for asset in item["assets"] if asset["kind"]=="software-package"]
                   assert packages and all(p.startswith("https://website.khoindvn.io.vn/apps/") for p in packages)
-          print("LIVE VERIFIED: ERI-hosted KSign / ESign OTA manifests are XML with original signed IPA URLs")
+          print("LIVE VERIFIED: all 34 ERI-hosted OTA manifests have correct XML MIME, metadata and original IPA URLs")
           PY
