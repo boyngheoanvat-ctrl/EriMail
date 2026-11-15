@@ -111,30 +111,46 @@ def _call_f4(path, payload=None):
 
 
 def _provider_status(data):
-    """No invented percentages and no done state without a validated URL."""
+    """Normalize F4 responses without inventing progress or files.
+
+    The browser API returns status/progress on the top level and in job.
+    Older integrations also used result; accept all three shapes.
+    """
+    job = data.get("job") if isinstance(data.get("job"), dict) else {}
     result = data.get("result") if isinstance(data.get("result"), dict) else {}
-    state = str(data.get("status") or data.get("state") or result.get("status") or "").lower()
-    candidate = (
-        result.get("dl_url") or result.get("download_url")
-        or data.get("dl_url") or data.get("download_url")
-    )
-    if not candidate and isinstance(data.get("vault_cached"), dict):
-        candidate = data["vault_cached"].get("dl_url")
+    state = str(
+        data.get("status") or data.get("state")
+        or job.get("status") or result.get("status") or ""
+    ).lower()
+    candidate = None
+    for item in (data, job, result, data.get("vault_cached")):
+        if isinstance(item, dict):
+            candidate = item.get("dl_url") or item.get("download_url")
+            if candidate:
+                break
     url = _download_url(candidate)
-    message = str(data.get("stage_text") or data.get("message") or "")[:180]
+    stage = (data.get("stage_text") or job.get("stage_text")
+             or result.get("stage_text") or "")
+    message = str(stage or data.get("message") or job.get("message") or "")[:180]
     message = "".join(ch for ch in message if ch.isprintable())
-    if url and (state in ("done", "completed", "success", "succeeded")
-                or data.get("cached") is True):
-        return ("completed", 100, url, "F4TEAM trả về link IPA (ERI chưa xác minh file)")
+    cached = data.get("cached") is True or job.get("cached") is True
+    if url and (state in ("done", "completed", "success", "succeeded") or cached):
+        return ("completed", 100, url,
+                "F4TEAM trả về link IPA (ERI chưa xác minh nội dung hoặc quyền truy cập)")
     if state in ("failed", "error", "cancelled", "canceled"):
         return ("failed", None, None, "F4TEAM thông báo xử lý thất bại")
-    if state in ("done", "completed", "success", "succeeded") and not url:
+    if state in ("done", "completed", "success", "succeeded"):
         return ("failed", None, None, "F4TEAM báo hoàn tất nhưng không có link IPA hợp lệ")
-    raw_progress = data.get("progress", data.get("pct"))
+    raw_progress = data.get("progress")
+    if type(raw_progress) not in (int, float):
+        raw_progress = data.get("pct")
+    if type(raw_progress) not in (int, float):
+        raw_progress = job.get("progress", job.get("pct"))
     measured = None
     if type(raw_progress) in (int, float) and 0 <= raw_progress < 100:
         measured = int(raw_progress)
-    return ("processing", measured, None, message or "Đang chờ trạng thái tác vụ từ F4TEAM")
+    return ("processing", measured, None,
+            message or "Đang chờ trạng thái tác vụ từ F4TEAM")
 
 
 def _public(row):
@@ -171,9 +187,13 @@ def install_f4_jobs(app, connection, require_customer, search_apps):
         return {
             "enabled": _configured(),
             "start_supported": _configured(),
-            "notice": ("F4 API token đã cấu hình; kết quả còn phụ thuộc quyền phía F4."
+            "notice": ("ERI đã cấu hình token máy chủ. F4 dùng X-CSRF-TOKEN trong giao diện web; "
+                       "quyền Bearer cho tác vụ máy chủ chưa được xác minh."
                        if _configured() else
-                       "Chưa có API token F4 được cấp quyền; chỉ lưu yêu cầu vào kho ERI."),
+                       "F4 dùng X-CSRF-TOKEN trong trình duyệt. ERI chưa có "
+                       "thông tin xác thực máy chủ được F4 cấp; yêu cầu sẽ lưu vào kho ERI."),
+            "provider_browser_auth_observed": "X-CSRF-TOKEN",
+            "server_api_authorization_verified": False,
         }
 
     @router.post("/start", status_code=201)
