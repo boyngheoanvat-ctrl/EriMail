@@ -116,6 +116,7 @@
     // restart may invalidate a session stored in its ephemeral SQLite DB.
     const controller = new AbortController();
     const preflightTimer = setTimeout(() => controller.abort(), 25000);
+    let authorized = false;
     try {
       const response = await fetch(API + "/api/v1/auth/me", {
         method: "GET",
@@ -130,6 +131,7 @@
         return;
       }
       if (!response.ok) throw new Error("Không xác minh được phiên đăng nhập (HTTP " + response.status + ").");
+      authorized = true;
     } catch (error) {
       const timeout = error?.name === "AbortError";
       status(timeout ? "Kết nối máy chủ quá lâu. Thử lại, IPA đã chọn vẫn giữ." :
@@ -139,7 +141,7 @@
       clearTimeout(preflightTimer);
       // Only release the form here when verification failed; successful
       // upload takes ownership until XHR onloadend.
-      if ($("ipa-sign-status")?.dataset.state === "error") {
+      if (!authorized) {
         busy = false;
         if (submit) submit.disabled = false;
       }
