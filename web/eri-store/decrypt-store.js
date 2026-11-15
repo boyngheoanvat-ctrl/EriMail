@@ -179,8 +179,9 @@
         } catch (_) {}
       }
       // Read-only upstream catalog lookup through ERI backend (no CSRF/session leakage).
+      let external;
       try {
-        const external = await request("/api/v1/tools/ipa/decrypt/external?" +
+        external = await request("/api/v1/tools/ipa/decrypt/external?" +
           new URLSearchParams({target:url,country:"auto"}));
         if (external.download_ready && external.download_url) {
           const parsed = new URL(external.download_url);
