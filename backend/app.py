@@ -75,6 +75,42 @@ def _restore_private_file(storage_name: str, size: int, digest: str):
     _eri_vault.restore_file(output, match.group(1), int(size), digest)
     return output
 
+def _queue_cloud_deletion(db, storage_name: str, size: int):
+    if _eri_vault is None:
+        return
+    if (not isinstance(storage_name, str)
+            or not re.fullmatch(r"[a-f0-9]{32}\.[a-z0-9]{1,16}", storage_name)
+            or not isinstance(size, int) or not 0 < size <= 512 * 1024 * 1024):
+        raise VaultError("Cannot queue invalid private object deletion")
+    db.execute(
+        "INSERT OR IGNORE INTO vault_delete_queue(storage_name,size_bytes,created_at) "
+        "VALUES(?,?,?)",
+        (storage_name,size,datetime.now(timezone.utc).isoformat()),
+    )
+
+def _drain_cloud_deletions(limit: int = 40) -> dict:
+    if _eri_vault is None:
+        return {"deleted":0,"pending":0}
+    with connection() as db:
+        rows = db.execute(
+            "SELECT storage_name,size_bytes FROM vault_delete_queue "
+            "ORDER BY created_at LIMIT ?", (limit,)
+        ).fetchall()
+    done = 0
+    for row in rows:
+        try:
+            _eri_vault.delete_file(row["storage_name"][:32], row["size_bytes"])
+        except (VaultError, OSError, FileNotFoundError):
+            _log.warning("Cloud deletion pending; will retry later")
+            continue
+        with connection() as db:
+            db.execute("DELETE FROM vault_delete_queue WHERE storage_name=?",
+                       (row["storage_name"],))
+        done += 1
+    with connection() as db:
+        pending = db.execute("SELECT COUNT(*) AS n FROM vault_delete_queue").fetchone()["n"]
+    return {"deleted":done,"pending":pending}
+
 def sale_price(base_price_vnd: int) -> int:
     """30% markup, rounded up to the next VND; never trust client pricing."""
     return (base_price_vnd * 130 + 99) // 100
@@ -131,6 +167,10 @@ def init():
           order_id TEXT PRIMARY KEY, original_name TEXT NOT NULL,
           storage_name TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL,
           sha256 TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS vault_delete_queue (
+          storage_name TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL,
+          created_at TEXT NOT NULL
         );
         """)
         ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}
@@ -1354,9 +1394,11 @@ def admin_delete_catalog_product(kind: str, product_id: int):
         if row is None:
             raise HTTPException(404, "Sản phẩm không tồn tại")
         matches = db.execute(
-            "SELECT storage_name FROM private_product_uploads WHERE kind=? AND product_id=?",
+            "SELECT storage_name,size_bytes FROM private_product_uploads WHERE kind=? AND product_id=?",
             (kind, product_id)).fetchall()
         storage_names = [x["storage_name"] for x in matches]
+        for item in matches:
+            _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
         db.execute("DELETE FROM private_product_uploads WHERE kind=? AND product_id=?",
                    (kind, product_id))
         db.execute("DELETE FROM " + lookup[kind] + " WHERE id=?", (product_id,))
@@ -1365,7 +1407,9 @@ def admin_delete_catalog_product(kind: str, product_id: int):
     for name in storage_names:
         if Path(name).name == name and not name.startswith("."):
             (UPLOAD_DIR / name).unlink(missing_ok=True)
-    return {"deleted": True, "id": product_id, "kind": kind}
+    cleanup = _drain_cloud_deletions()
+    return {"deleted": True, "id": product_id, "kind": kind,
+            "cloud_cleanup_pending":cleanup["pending"]}
 
 
 # Authenticated delivery files, visible only to the buyer whose order is fulfilled.
@@ -1567,11 +1611,14 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
             order_ids = [r["id"] for r in db.execute(
                 "SELECT id FROM orders WHERE customer_id=?", (customer_id,)
             ).fetchall()]
-            deliveries = [r["storage_name"] for r in db.execute(
-                "SELECT d.storage_name FROM order_deliveries d "
+            delivery_rows = db.execute(
+                "SELECT d.storage_name,d.size_bytes FROM order_deliveries d "
                 "JOIN orders o ON o.id=d.order_id WHERE o.customer_id=?",
                 (customer_id,)
-            ).fetchall()]
+            ).fetchall()
+            deliveries = [r["storage_name"] for r in delivery_rows]
+            for item in delivery_rows:
+                _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
             # Delete UDID submissions and unexpired scan links for this customer.
             db.execute("DELETE FROM cert_order_udids WHERE customer_id=?", (customer_id,))
             db.execute("DELETE FROM cert_udid_sessions WHERE customer_id=?", (customer_id,))
