@@ -507,6 +507,20 @@
       }
       report("ERI Nguyễn đang tìm IPA theo Bundle ID và phiên bản trong kho...");
       try{
+        // Prefer the authenticated ERI inventory result when the first-party
+        // vault has already verified an exact, free download endpoint.
+        const own=item.cached||null;
+        const path=String(own?.download_path||"");
+        const exactOwned=own &&
+          String(own.bundle_id||"").toLowerCase()===bundle.toLowerCase() &&
+          String(own.version||"")===String(item.version||"") &&
+          /^\/api\/v1\/mods\/[1-9][0-9]*\/download$/.test(path) &&
+          (own.price_vnd===undefined || Number(own.price_vnd)===0);
+        if(exactOwned){
+          report("Kho ERI đã xác nhận IPA đúng Bundle ID và phiên bản. Bắt đầu tải...","success");
+          window.location.assign("https://eri-api-dag8.onrender.com"+path);
+          return;
+        }
         const target=normal({
           title:item.title||bundle,bundle_id:bundle,
           version:String(item.version||""),
