@@ -574,10 +574,24 @@ document.addEventListener("DOMContentLoaded",()=>{
     $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
   });
   $("reload").addEventListener("click",loadCatalog);
-  $("open-certificate-free")?.addEventListener("click",()=>{
-    document.querySelector('[data-kind="certfree"]')?.click();
-    $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
+  $("open-sign-local")?.addEventListener("click",()=>{
+    openCategory("certificate","free");
+    setView("store");
+    $("certificate-subtabs")?.scrollIntoView({block:"start"});
   });
+  document.querySelectorAll("[data-sign-mode]").forEach(tab=>tab.addEventListener("click",()=>{
+    const mode=tab.dataset.signMode==="iphone"?"iphone":"server";
+    document.querySelectorAll("[data-sign-mode]").forEach(item=>{
+      const active=item.dataset.signMode===mode;
+      item.classList.toggle("selected",active);
+      item.setAttribute("aria-selected",String(active));
+    });
+    $("ipa-sign-server")?.classList.toggle("hidden",mode!=="server");
+    $("ipa-sign-iphone")?.classList.toggle("hidden",mode!=="iphone");
+  }));
+  document.querySelectorAll("[data-cert-mode]").forEach(tab=>tab.addEventListener("click",()=>{
+    openCategory("certificate",tab.dataset.certMode);
+  }));
   document.querySelectorAll("[data-mod-mode]").forEach(tab=>tab.addEventListener("click",()=>{
     state.modTab=tab.dataset.modMode==="free"?"free":"paid";
     if(state.category==="mod")renderCatalog();
@@ -588,15 +602,13 @@ document.addEventListener("DOMContentLoaded",()=>{
   }));
   $("refresh-orders").addEventListener("click",loadOrders);
   document.querySelectorAll("[data-kind]").forEach(tab=>tab.addEventListener("click",()=>{
-    state.category=tab.dataset.kind;
-    try { sessionStorage.setItem("eri.store.category", state.category); } catch {}
-    document.querySelectorAll("[data-kind]").forEach(b=>{const active=b===tab;b.classList.toggle("selected",active);b.setAttribute("aria-selected",String(active))});
-    loadCatalog();
+    openCategory(tab.dataset.kind);
   }));
   document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>setView(b.dataset.view)));
-  if(location.hash==="#certfree"){
-    state.category="certfree";
-    try { sessionStorage.setItem("eri.store.category","certfree"); } catch {}
+  if(location.hash==="#certfree"||location.hash==="#certificate-free"){
+    state.category="certificate";state.certTab="free";
+  }else if(location.hash==="#certificate-paid"){
+    state.category="certificate";state.certTab="paid";
   }
   if(location.hash==="#ipa-tools"){
     state.category="decrypt";
@@ -612,18 +624,13 @@ document.addEventListener("DOMContentLoaded",()=>{
     tab.setAttribute("aria-selected",String(active));
   });
   window.addEventListener("hashchange",()=>{
-    if(location.hash!=="#certfree")return;
-    state.category="certfree";
-    try { sessionStorage.setItem("eri.store.category","certfree"); } catch {}
-    document.querySelectorAll("[data-kind]").forEach(tab=>{
-      const active=tab.dataset.kind==="certfree";
-      tab.classList.toggle("selected",active);
-      tab.setAttribute("aria-selected",String(active));
-    });
+    const free=location.hash==="#certfree"||location.hash==="#certificate-free";
+    if(!free&&location.hash!=="#certificate-paid")return;
+    openCategory("certificate",free?"free":"paid");
     setView("store");
-    loadCatalog();
-    $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
+    $("certificate-subtabs")?.scrollIntoView({block:"start"});
   });
+  syncCertTabs();
   updateHeader();loadCatalog();restoreSession();syncRegistrationLimits();
-  if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js?v=20261115p3",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
+  if("serviceWorker" in navigator && location.protocol==="https:")navigator.serviceWorker.register("/service-worker.js?v=20261115certificatetab1",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{});
 });
