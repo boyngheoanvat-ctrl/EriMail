@@ -427,19 +427,11 @@
     notice("Đang tạo tác vụ IPA trên máy chủ ERI...");
     try {
       const payload = {target,country:country?.toLowerCase()||"auto",version:version||""};
-      let job;
-      try {
-        job = await request("/api/v1/tools/ipa/decrypt/start", {
-          auth:true, body:payload
-        });
-      } catch (error) {
-        if (error.status !== 404) throw error;
-        // Backward compatibility for an API still running before ERI Native.
-        // Both endpoints use the same validated ERI customer-owned request DB.
-        job = await request("/api/v1/tools/ipa/decrypt/requests", {
-          auth:true, body:payload
-        });
-      }
+      // The stable, authenticated request API works on both the current
+      // production backend and ERI Native. Avoid the unsupported /start probe.
+      const job = await request("/api/v1/tools/ipa/decrypt/requests", {
+        auth:true, body:payload
+      });
       activeJob = job.job_id;
       try { localStorage.setItem(ACTIVE_JOB, activeJob); } catch {}
       renderJob(job);
@@ -492,13 +484,11 @@
     if (pollInFlight || !activeJob || !getToken()) return;
     pollInFlight = true;
     try {
-      let result;
-      try {
-        result = await request("/api/v1/tools/ipa/decrypt/job/" + activeJob,{auth:true});
-      } catch (error) {
-        if (error.status !== 404) throw error;
-        result = await request("/api/v1/tools/ipa/decrypt/requests/" + activeJob,{auth:true});
-      }
+      // Same stable endpoint for older and newer ERI API releases.
+      const result = await request(
+        "/api/v1/tools/ipa/decrypt/requests/" + activeJob,
+        {auth:true}
+      );
       renderJob(result);
       if (result.state === "completed") loadHistory();
     } catch (error) {
