@@ -66,41 +66,6 @@
         ? parsed.href : null;
     } catch { return null; }
   }
-  // Decrypt.day publishes app-detail pages at this documented route. A
-  // detail-page link is NOT a verified IPA binary or a direct install URL.
-  function decryptDayAppPage(item) {
-    const direct = String(item?.app_id || "");
-    const appleUrl = safeStoreLink(item?.app_store_url);
-    const storeId = appleUrl
-      ? new URL(appleUrl).pathname.match(/id([0-9]{6,15})/)?.[1]
-      : null;
-    const id = /^[0-9]{6,15}$/.test(direct) ? direct : storeId;
-    return id && /^[0-9]{6,15}$/.test(id)
-      ? "https://decrypt.day/app/id" + id : null;
-  }
-  function publicAppStorePage(item) {
-    const verified = safeStoreLink(item?.app_store_url);
-    if (verified) return verified;
-    const external = decryptDayAppPage(item);
-    const id = external?.match(/id([0-9]{6,15})$/)?.[1];
-    return id ? "https://apps.apple.com/app/id" + id : null;
-  }
-  function checkDecryptDayCatalogStatus(label, item) {
-    const page = decryptDayAppPage(item);
-    if (!page) return;
-    const id = page.match(/id([0-9]{6,15})$/)?.[1];
-    if (!id) return;
-    // Catalog discovery alone cannot verify a download or a specific version.
-    publicCatalog().then(rows => {
-      if (label.isConnected && rows.some(x => x && String(x.i) === "id" + id)) {
-        label.textContent = "Đã tìm thấy trang ứng dụng trong danh mục Decrypt.day. " +
-          "Phiên bản và link IPA cần kiểm tra trên trang nguồn.";
-      }
-    }).catch(() => {
-      // Third-party CORS / anti-bot protection can block lookups.
-      // Leave the official app-detail link usable without inventing availability.
-    });
-  }
   function safeStoreLink(url) {
     try {
       const parsed = new URL(url);
@@ -202,7 +167,7 @@
           notice(error.message, "error");
         }
       };
-      actions.append(button("Tải IPA từ ERI R2" +
+      actions.append(button("Tải IPA" +
         (item.size_bytes ? " (" + pretty(item.size_bytes) + ")" : ""),
         () => openR2(null), true));
       // Install managers must be installed separately; never imply the IPA
@@ -217,7 +182,7 @@
     const url = apiUrl(path);
     if (!url) return;
     const actions = card("div", "eri-decrypt-actions");
-    actions.append(link("Tải IPA " + (item.size_bytes ? "(" + pretty(item.size_bytes) + ")" : ""), url, true));
+    actions.append(link("Tải IPA" + (item.size_bytes ? " (" + pretty(item.size_bytes) + ")" : ""), url, true));
     parent.append(actions);
     const enc = encodeURIComponent(url);
     const sideload = card("div","eri-dec-sideload");
@@ -244,15 +209,11 @@
   }
   // Native ERI availability is derived from our own trusted source registry.
   // No requests are made to third-party IPA/decrypt services.
+  // The search card never implies a downloadable file from App Store metadata.
   function nativeSourceStatus(root, item) {
-    if (item.cached?.download_path) return;
-    const msg = card("p", "small", item.remote_available
-      ? "ERI đã kiểm tra IPA và lưu trong kho R2 riêng."
-      : "Chưa có IPA đã xác minh trong kho ERI. Có thể mở trang Decrypt.day " +
-        "để kiểm tra phiên bản và điều kiện tải trên dịch vụ đó.");
-    root.append(msg);
-    if (!item.remote_available && decryptDayAppPage(item))
-      checkDecryptDayCatalogStatus(msg, item);
+    if (item.cached?.download_path || item.remote_available) return;
+    root.append(card("p", "small",
+      "Nguồn tải trực tiếp đang được cập nhật. Nút Tải IPA chỉ hoạt động khi có tệp đã được xác minh."));
   }
   function searchResult(item) {
     const root = card("article", "eri-decrypt-card");
@@ -273,31 +234,22 @@
     top.append(details);
     root.append(top);
     const actions = card("div", "eri-decrypt-actions");
-    if (item.cached?.download_path) {
-      root.append(card("div", "eri-decrypt-available", "IPA sẵn sàng"));
+    if (item.cached?.download_path && apiUrl(item.cached.download_path)) {
       installActions(root, item.cached);
+    } else if (item.remote_available) {
+      actions.append(button("Tải IPA", () => openReadyRemoteIPA(item), true));
     } else {
-      root.append(card("div", item.remote_available ? "eri-decrypt-available" :
-        "eri-decrypt-unavailable", item.remote_available ?
-        "IPA đã sẵn sàng trên R2" : item.source_available ?
-        "Đã nhận nguồn IPA" : "Chưa có IPA"));
       nativeSourceStatus(root, item);
-      if (item.remote_available) actions.append(button(
-        "Tải IPA từ ERI R2",
-        () => openReadyRemoteIPA(item),
-        true
-      ));
+      // A disabled button is intentional: an App Store result cannot provide
+      // an IPA binary, and Decrypt.day has no verified direct-download API.
+      const waiting = card("button", "btn primary", "Tải IPA");
+      waiting.type = "button";
+      waiting.disabled = true;
+      waiting.title = "Nguồn IPA trực tiếp chưa sẵn sàng";
+      waiting.setAttribute("aria-label", "Tải IPA chưa khả dụng: nguồn đang được cập nhật");
+      actions.append(waiting);
     }
-    if (Number(item.app_id) > 0)
-      actions.append(button("Chọn phiên bản", () => loadVersions(item), false));
-    const providerPage = decryptDayAppPage(item);
-    if (providerPage) {
-      const browseIPA = link("Xem tải IPA trên Decrypt.day", providerPage,
-        !item.cached?.download_path && !item.remote_available);
-      browseIPA.target = "_blank";
-      actions.append(browseIPA);
-    }
-    const store = publicAppStorePage(item);
+    const store = safeStoreLink(item.app_store_url);
     if (store) actions.append(link("Cài qua App Store", store));
     root.append(actions);
     return root;
@@ -371,54 +323,6 @@
       if (serial === searchSerial) notice(error.message, "error");
     } finally { if (buttonNode) buttonNode.disabled = false; }
   }
-  async function loadVersions(item) {
-    const section = $("eri-decrypt-versions-section");
-    const grid = $("eri-decrypt-versions-grid");
-    section?.classList.remove("hidden");
-    if (grid) grid.replaceChildren();
-    text("eri-decrypt-versions-title", "Phiên bản: " + item.name);
-    if ($("eri-decrypt-version-filter")) $("eri-decrypt-version-filter").value = "";
-    notice("Đang kiểm tra những phiên bản có thể xác nhận...");
-    try {
-      let data;
-      try {
-        data = await request("/api/v1/tools/ipa/decrypt/versions?" +
-          new URLSearchParams({target:item.app_store_url || String(item.app_id), country:item.country.toLowerCase()}));
-      } catch (error) {
-        if (!/HTTP 404/.test(error.message)) throw error;
-        // Legacy API cannot discover historical Apple versions. Show current
-        // metadata (if available) and actual versions already on the ERI API.
-        const vault = await legacyVault("", "newest", 0, 100);
-        let app = item;
-        if (!app.bundle_id && safeStoreLink(item.app_store_url)) {
-          const oldLookup = await legacySearch(item.app_store_url, item.country.toLowerCase());
-          app = oldLookup.items[0] || item;
-        }
-        const matched = vault.items.filter(x =>
-          x.bundle_id && app.bundle_id && x.bundle_id.toLowerCase() === app.bundle_id.toLowerCase());
-        const versions = matched.map(x => ({
-          version:x.version, cached:x, source:"ERI authorized library"
-        }));
-        if (app.version && !versions.some(x => x.version === app.version))
-          versions.unshift({version:app.version,cached:null,source:"Apple current version metadata"});
-        data = {versions,notice:"Máy chủ đang dùng API cũ. Chỉ hiển thị phiên bản hiện tại và những IPA có tệp thật trong kho ERI."};
-      }
-      const entries = Array.isArray(data.versions) ? data.versions : [];
-      for (const entry of entries) {
-        const node = card("article","eri-decrypt-card");
-        node.dataset.version = entry.version || "";
-        node.append(card("strong", "", "Phiên bản " + (entry.version || "—")));
-        node.append(card("p", "small", entry.source === "ERI authorized library"
-          ? "Sẵn sàng tải." : "Chưa có IPA."));
-        if (entry.cached?.download_path) installActions(node, entry.cached);
-        else node.append(button(entry.source_available ? "Xử lý bản này" : "Yêu cầu bản này", () =>
-          createJob(item.app_store_url || String(item.app_id), item.country, entry.version), true));
-        grid?.append(node);
-      }
-      notice(data.notice || "Đã tải danh sách phiên bản.", "success");
-      section?.scrollIntoView({behavior:"smooth",block:"nearest"});
-    } catch(error) { notice(error.message, "error"); }
-  }
   async function loadVault() {
     const serial = ++vaultSerial;
     const q = String($("eri-decrypt-vault-filter")?.value || "").trim().slice(0,100);
@@ -440,7 +344,7 @@
       text("eri-decrypt-header-vault-count", String(vaultTotal));
       if (grid) grid.replaceChildren();
       if (!result.items?.length) grid?.append(card("p", "small",
-        "Chưa có IPA được cấp quyền phân phối và còn file trên máy chủ phù hợp bộ lọc này."));
+        "Kho tải hiện chưa có kết quả phù hợp bộ lọc."));
       else for(const item of result.items) {
         const node = card("article","eri-decrypt-card");
         node.append(card("div","eri-dec-vault-label","IPA đang có trong kho"));
@@ -489,7 +393,7 @@
           complete ? "Sẵn sàng tải IPA" :
             job.state === "processing" ? ("Đang xử lý" +
               (Number.isFinite(Number(job.progress)) && job.progress !== null ? " · " + job.progress + "%" : "")) :
-              job.state === "failed" ? "Xử lý thất bại" : "Chưa có nguồn IPA"));
+              job.state === "failed" ? "Xử lý thất bại" : "Đang cập nhật nguồn tải"));
         const actions = card("div","eri-decrypt-actions");
         actions.append(button("Xem trạng thái",() => {
           activeJob=job.job_id;
@@ -569,7 +473,7 @@
       Number.isFinite(value) && value >= 0 && value <= 99;
     const pct = ready ? 100 : measured ? value : null;
     text("eri-decrypt-job-pct", pct === null ?
-      (processing ? "Đang xử lý" : job.state === "failed" ? "Lỗi" : "Chưa có nguồn") :
+      (processing ? "Đang xử lý" : job.state === "failed" ? "Lỗi" : "Đang cập nhật") :
       String(Math.round(pct)) + "%");
     const bar = $("eri-decrypt-job-progress");
     if (bar) {
@@ -578,7 +482,7 @@
       bar.value = pct === null ? 0 : pct;
     }
     const stateName = ready ? "Hoàn tất" : processing ? "Đang xử lý" :
-      job.state === "failed" ? "Thất bại" : "Chưa có nguồn IPA";
+      job.state === "failed" ? "Thất bại" : "Đang cập nhật nguồn tải";
     text("eri-decrypt-job-stage",(job.name || "Ứng dụng") +
       " · v" + (job.version || "—") + " · " + stateName +
       (job.message ? "\n" + job.message : ""));
@@ -596,7 +500,7 @@
     } else if (processing) {
       notice("Máy chủ ERI đang xử lý IPA.", "info");
     } else {
-      notice("Yêu cầu đã lưu · Chưa có nguồn IPA để xử lý.", "info");
+      notice("Đang cập nhật nguồn tải IPA đã được xác minh.", "info");
     }
   }
   async function refreshJob() {
@@ -642,11 +546,6 @@
       const q = $("eri-decrypt-query").value.trim();
       if (q) search(q,$("eri-decrypt-region").value);
     });
-    $("eri-decrypt-direct-version")?.addEventListener("click", () => {
-      const q = $("eri-decrypt-query").value.trim();
-      if (!q) { notice("Nhập tên game, Bundle ID hoặc link App Store để chọn phiên bản.", "error"); $("eri-decrypt-query").focus(); return; }
-      loadVersions({name:q,app_store_url:q,app_id:q,country:$("eri-decrypt-region").value});
-    });
     $("eri-decrypt-theme-toggle")?.addEventListener("click", () => {
       const panel = $("ipa-decrypt-panel");
       const next = panel.dataset.theme === "dark" ? "light" : "dark";
@@ -662,12 +561,6 @@
       $("ipa-decrypt-panel").dataset.theme === "dark" ? "☀" : "☾";
     $("eri-decrypt-results-close")?.addEventListener("click",
       () => $("eri-decrypt-result-section")?.classList.add("hidden"));
-    $("eri-decrypt-version-filter")?.addEventListener("input", event => {
-      const query = event.target.value.trim().toLowerCase();
-      $("eri-decrypt-versions-grid")?.querySelectorAll("[data-version]").forEach(node => {
-        node.hidden = !!query && !node.dataset.version.toLowerCase().includes(query);
-      });
-    });
     document.querySelectorAll("[data-eri-decrypt-preset]").forEach(node => {
       node.addEventListener("click", () => {
         $("eri-decrypt-query").value = node.dataset.eriDecryptPreset;
@@ -688,7 +581,6 @@
     $("eri-decrypt-vault-sort")?.addEventListener("change",()=>{vaultOffset=0;loadVault();});
     $("eri-decrypt-previous")?.addEventListener("click",()=>{vaultOffset=Math.max(0,vaultOffset-vaultLimit);loadVault();});
     $("eri-decrypt-next")?.addEventListener("click",()=>{if(vaultOffset+vaultLimit<vaultTotal){vaultOffset+=vaultLimit;loadVault();}});
-    $("eri-decrypt-versions-close")?.addEventListener("click",()=>$("eri-decrypt-versions-section")?.classList.add("hidden"));
     loadVault();
     loadHistory();
     if (activeJob && getToken()) refreshJob();
