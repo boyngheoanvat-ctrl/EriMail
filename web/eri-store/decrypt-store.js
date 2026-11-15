@@ -6,16 +6,11 @@
   const TOKEN = "eri_store_buyer_token";
   const QUERY_DRAFT = "eri.decrypt.query.v1";
   const REGION_DRAFT = "eri.decrypt.region.v1";
-  const ACTIVE_JOB = "eri.decrypt.job.v1";
   const $ = id => document.getElementById(id);
   const getToken = () => sessionStorage.getItem(TOKEN) || localStorage.getItem(TOKEN) || "";
   let vaultOffset = 0;
   const vaultLimit = 24;
   let vaultTotal = 0;
-  let activeJob = null;
-  let pollInFlight = false;
-  let historyInFlight = false;
-  let historyQueued = false;
   let searchSerial = 0;
   let vaultSerial = 0;
 
@@ -420,164 +415,6 @@
       }
     }
   }
-  async function loadHistory() {
-    if (historyInFlight) { historyQueued = true; return; }
-    const grid = $("eri-decrypt-history-grid");
-    if (!grid) return;
-    if (!getToken()) {
-      grid.replaceChildren(card("p","small","Bạn cần đăng nhập ERI STORE để xem các yêu cầu IPA đã lưu."));
-      return;
-    }
-    historyInFlight = true;
-    const startingToken = getToken();
-    grid.replaceChildren(card("p","small","Đang khôi phục lịch sử yêu cầu từ máy chủ..."));
-    try {
-      const data = await request("/api/v1/tools/ipa/decrypt/requests",{auth:true});
-      if (startingToken !== getToken()) return; // Account changed mid-request.
-      grid.replaceChildren();
-      // Show independent ERI job history even when no IPA is currently available.
-      for (const job of (Array.isArray(data.items) ? data.items : [])) {
-        const node = card("article","eri-decrypt-card");
-        node.append(card("strong","",job.name || job.bundle_id));
-        node.append(card("p","small",(job.bundle_id||"") + " · v" +
-          (job.version||"—") + " · " + (job.country||"VN")));
-        const complete = job.state === "completed" && downloadReady(job.result?.download_path);
-        node.append(card("p",complete ? "eri-decrypt-available" : "eri-decrypt-unavailable",
-          complete ? "Sẵn sàng tải IPA" :
-            job.state === "processing" ? ("Đang xử lý" +
-              (Number.isFinite(Number(job.progress)) && job.progress !== null ? " · " + job.progress + "%" : "")) :
-              job.state === "failed" ? "Xử lý thất bại" : "Chưa có nguồn IPA"));
-        const actions = card("div","eri-decrypt-actions");
-        actions.append(button("Xem trạng thái",() => {
-          activeJob=job.job_id;
-          try {localStorage.setItem(ACTIVE_JOB,activeJob);}catch{}
-          renderJob(job);
-          $("eri-decrypt-request-section")?.scrollIntoView({behavior:"smooth",block:"center"});
-        }));
-        node.append(actions);
-        if (complete) installActions(node,job.result);
-        grid.append(node);
-      }
-      if (!grid.children.length) grid.append(card("p","small","Bạn chưa có yêu cầu IPA nào."));
-    } catch (error) {
-      if (startingToken === getToken()) grid.replaceChildren(card("p","small",error.message));
-    } finally {
-      historyInFlight = false;
-      if (historyQueued) { historyQueued = false; loadHistory(); }
-    }
-  }
-
-  async function createJob(target, country, version) {
-    if (!getToken()) {
-      notice("Đăng nhập ERI STORE trong tab Tài khoản để gửi yêu cầu IPA.", "error");
-      const msg = $("eri-decrypt-notice");
-      msg?.append(document.createElement("p"),
-        button("Đăng nhập", () => document.querySelector('[data-view="account"]')?.click(), true));
-      return;
-    }
-    notice("Đang tạo tác vụ IPA trên máy chủ ERI...");
-    try {
-      const payload = {target,country:country?.toLowerCase()||"auto",version:version||""};
-      // The stable, authenticated request API works on both the current
-      // production backend and ERI Native. Avoid the unsupported /start probe.
-      const job = await request("/api/v1/tools/ipa/decrypt/requests", {
-        auth:true, body:payload
-      });
-      activeJob = job.job_id;
-      try { localStorage.setItem(ACTIVE_JOB, activeJob); } catch {}
-      renderJob(job);
-      await loadHistory();
-    } catch(error) {
-      notice(error.message, "error");
-    }
-  }
-  async function openReadyRemoteIPA(item) {
-    const target = item.app_store_url || String(item.app_id);
-    if (!getToken()) {
-      notice("Đăng nhập ERI STORE để tải IPA trong kho riêng.", "error");
-      return;
-    }
-    try {
-      notice("Đang cấp link tải IPA trong kho ERI...");
-      const job = await request("/api/v1/tools/ipa/decrypt/requests", {
-        auth:true,
-        body:{target,country:item.country?.toLowerCase()||"auto",version:item.version||""}
-      });
-      if (job.state !== "completed" || !isRemoteDownload(job.result?.download_path)) {
-        activeJob=job.job_id;
-        renderJob(job);
-        return;
-      }
-      const signed = await request(job.result.download_path,{auth:true});
-      const download = trustedSignedR2(signed.download_url);
-      if (!download) throw new Error("Link tải R2 không đáng tin cậy.");
-      window.location.assign(download);
-    } catch(error) {
-      notice(error.message, "error");
-    }
-  }
-  function renderJob(job) {
-    const section = $("eri-decrypt-request-section");
-    section?.classList.remove("hidden");
-    const ready = job.state === "completed" && downloadReady(job.result?.download_path);
-    const processing = job.state === "processing";
-    const value = Number(job.progress);
-    const measured = processing && job.progress != null &&
-      Number.isFinite(value) && value >= 0 && value <= 99;
-    const pct = ready ? 100 : measured ? value : null;
-    text("eri-decrypt-job-pct", pct === null ?
-      (processing ? "Đang xử lý" : job.state === "failed" ? "Lỗi" : "Chưa có nguồn") :
-      String(Math.round(pct)) + "%");
-    const bar = $("eri-decrypt-job-progress");
-    if (bar) {
-      bar.hidden = pct === null;
-      bar.style.display = pct === null ? "none" : "";
-      bar.value = pct === null ? 0 : pct;
-    }
-    const stateName = ready ? "Hoàn tất" : processing ? "Đang xử lý" :
-      job.state === "failed" ? "Thất bại" : "Chưa có nguồn IPA";
-    text("eri-decrypt-job-stage",(job.name || "Ứng dụng") +
-      " · v" + (job.version || "—") + " · " + stateName +
-      (job.message ? "\n" + job.message : ""));
-    const controls = $("eri-decrypt-job-actions");
-    if (controls) controls.replaceChildren();
-    if (ready) {
-      if (controls) installActions(controls,job.result);
-      notice("IPA sẵn sàng tải.", "success");
-    } else if (job.state === "failed") {
-      if (controls) {
-        controls.append(button("Thử lại", () =>
-          createJob(job.bundle_id,job.country,job.version)));
-      }
-      notice("Xử lý IPA thất bại.", "error");
-    } else if (processing) {
-      notice("Máy chủ ERI đang xử lý IPA.", "info");
-    } else {
-      notice("Yêu cầu đã lưu · Chưa có nguồn IPA để xử lý.", "info");
-    }
-  }
-  async function refreshJob() {
-    if (pollInFlight || !activeJob || !getToken()) return;
-    pollInFlight = true;
-    try {
-      // Same stable endpoint for older and newer ERI API releases.
-      const result = await request(
-        "/api/v1/tools/ipa/decrypt/requests/" + activeJob,
-        {auth:true}
-      );
-      renderJob(result);
-      if (result.state === "completed") loadHistory();
-    } catch (error) {
-      if (/không tìm thấy yêu cầu|404/.test(error.message)) {
-        activeJob = null;
-        try {localStorage.removeItem(ACTIVE_JOB);} catch {}
-      } else {
-        notice(error.message, "error");
-      }
-    } finally { pollInFlight = false; }
-  }
-  // A version-picker is information lookup; no invented Apple CDN IPA URLs.
-
   function init() {
     const form = $("eri-decrypt-search-form");
     if (!form) return;
@@ -586,7 +423,6 @@
       const saved = localStorage.getItem(REGION_DRAFT);
       if ([...$("eri-decrypt-region").options].some(o=>o.value===saved))
         $("eri-decrypt-region").value = saved;
-      activeJob = localStorage.getItem(ACTIVE_JOB);
     } catch {}
     $("eri-decrypt-query").addEventListener("input", () => {
       try {localStorage.setItem(QUERY_DRAFT,$("eri-decrypt-query").value.slice(0,500));} catch{}
@@ -635,28 +471,6 @@
     $("eri-decrypt-previous")?.addEventListener("click",()=>{vaultOffset=Math.max(0,vaultOffset-vaultLimit);loadVault();});
     $("eri-decrypt-next")?.addEventListener("click",()=>{if(vaultOffset+vaultLimit<vaultTotal){vaultOffset+=vaultLimit;loadVault();}});
     loadVault();
-    loadHistory();
-    if (activeJob && getToken()) refreshJob();
-    $("eri-decrypt-refresh-history")?.addEventListener("click",loadHistory);
-    window.addEventListener("eri-store:session-changed", () => {
-      // Never leave a previous customer's requests visible after logout.
-      if (!getToken()) {
-        activeJob = null;
-        $("eri-decrypt-request-section")?.classList.add("hidden");
-        try {localStorage.removeItem(ACTIVE_JOB);}catch{}
-      }
-      loadHistory();
-      if (activeJob && getToken()) refreshJob();
-    });
-    document.addEventListener("visibilitychange",() => {
-      if (document.visibilityState === "visible") {
-        loadHistory();
-        if (activeJob) refreshJob();
-      }
-    });
-    setInterval(() => {
-      if (activeJob && document.visibilityState === "visible" && !document.hidden) refreshJob();
-    },4000);
   }
   document.addEventListener("DOMContentLoaded",init);
 })();
