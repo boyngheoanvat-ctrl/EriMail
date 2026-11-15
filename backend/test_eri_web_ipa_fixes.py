@@ -14,7 +14,7 @@ service = (web / "service-worker.js").read_text()
 
 for key in (
     "ipa-sign-progress", "ipa-sign-progress-bar", "ipa-sign-progress-percent",
-    "eri-decrypt-direct-request", "eri-decrypt-query", "eri-decrypt-search-form",
+    "eri-decrypt-query", "eri-decrypt-search-form",
 ):
     assert f'id="{key}"' in html, key
 
@@ -28,24 +28,34 @@ assert 'status("Đã nhận " + pct + "%' in chunks
 assert 'percentage + "% · "' in tools
 assert 'received.size * job.chunk_bytes' not in chunks
 
-assert 'Xử lý IPA' in tools
-assert 'if (createRequest) $("eri-decrypt-direct-request")?.click();' in tools
+assert 'Xem tải IPA trên Decrypt.day' in tools
+assert 'https://decrypt.day/app/id' in tools
+assert 'Hãy tạo yêu cầu IPA' not in tools
+assert 'id="eri-decrypt-direct-request"' not in html
+assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v29" in service
+assert "eri-store-v30" in service
 assert "?v=20261115p3" in html
-assert "ipa-tools.js?v=20261115native1" in html
-assert "decrypt-store.js?v=20261115auto-r2" in html
+assert "ipa-tools.js?v=20261115decryptday1" in html
+assert "decrypt-store.js?v=20261115decryptday1" in html
 assert 'request("/api/v1/tools/ipa/decrypt/start"' not in decrypt
 assert 'request("/api/v1/tools/ipa/decrypt/job/"' not in decrypt
 assert '/api/v1/tools/ipa/decrypt/requests"' in decrypt
 assert '/api/v1/tools/ipa/decrypt/requests/"' in decrypt
 assert 'const job = await request("/api/v1/tools/ipa/decrypt/requests"' in decrypt
 assert "nativeSourceStatus" in decrypt
+assert "decryptDayAppPage" in decrypt
+assert "checkDecryptDayCatalogStatus" in decrypt
+assert "openReadyRemoteIPA" in decrypt
+assert "Cài qua App Store" in decrypt
+assert "Xem tải IPA trên Decrypt.day" in decrypt
+assert 'id="eri-decrypt-direct-request"' not in html
+assert "Yêu cầu IPA" not in decrypt.split("function searchResult(item) {")[1].split("function publicCatalog()")[0]
 assert "isRemoteDownload" in decrypt
 assert "trustedSignedR2" in decrypt
-assert "Tải IPA từ kho ERI R2" in decrypt
-assert "ERI đã nhận diện nguồn IPA được cấp quyền" in decrypt
+assert "Tải IPA từ ERI R2" in decrypt
+assert "Chưa có IPA đã xác minh trong kho ERI" in decrypt
 assert '"/api/v1/tools/ipa/decrypt/vault?q="' in tools
 assert "/api/v1/tools/ipa/decrypt/external?" not in tools
 assert "/api/v1/tools/ipa/decrypt/f4/" not in decrypt
@@ -79,4 +89,4 @@ else:
     assert not (admin_html.is_file() ^ admin_js.is_file()), "Admin upload UI must include both HTML and JS"
     print("ERI Admin uploader is absent from this checkout; skipping its independent checks.")
 
-print("ERI STORE: native IPA queue, progress, cache-bust, backend vault lookup and request UI OK")
+print("ERI STORE: direct verified IPA, Decrypt.day app links, App Store installs and safe vault UI OK")

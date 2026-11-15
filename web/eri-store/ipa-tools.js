@@ -231,8 +231,9 @@
           if (!existingIPA) {
             const note = document.createElement("p");
             note.className = "small";
-            note.textContent = "ERI chưa có IPA được kiểm định cho ứng dụng này. "
-              + "Hãy tạo yêu cầu IPA trong kho ERI; worker sẽ xử lý khi có nguồn được cấp quyền.";
+            note.textContent = "ERI chưa có IPA đã kiểm định cho ứng dụng này. "
+              + "Bạn có thể kiểm tra ngay trang ứng dụng trên Decrypt.day; "
+              + "tính sẵn có của file và phiên bản cần xác minh tại nguồn.";
             appStoreResult.append(note);
           }
 
@@ -245,29 +246,40 @@
             actions.append(download);
           }
 
+          // Open the provider's verified app-detail route, never a made-up
+          // direct .ipa/download URL or a request/decrypt endpoint.
+          let externalAppId = /^[0-9]{6,15}$/.test(String(data.app_id || ""))
+            ? String(data.app_id) : null;
+          if (!externalAppId) {
+            try {
+              const appStore = new URL(data.app_store_url || link);
+              if (appStore.protocol === "https:" && appStore.hostname === "apps.apple.com")
+                externalAppId = appStore.pathname.match(/id([0-9]{6,15})/)?.[1] || null;
+            } catch {}
+          }
+          if (externalAppId && !existingIPA) {
+            const external = document.createElement("a");
+            external.className = "btn primary";
+            external.href = "https://decrypt.day/app/id" + externalAppId;
+            external.target = "_blank";
+            external.rel = "noopener noreferrer";
+            external.textContent = "Xem tải IPA trên Decrypt.day";
+            actions.append(external);
+          }
           const decryptTab = document.querySelector('[data-kind="decrypt"]');
           if (decryptTab && $("eri-decrypt-query")) {
-            const openDecrypt = createRequest => {
+            const browseVault = () => {
               const query = $("eri-decrypt-query");
               query.value = link;
               query.dispatchEvent(new Event("input", {bubbles: true}));
               decryptTab.click();
-              if (createRequest) $("eri-decrypt-direct-request")?.click();
-              else $("eri-decrypt-search-form")?.requestSubmit();
+              $("eri-decrypt-search-form")?.requestSubmit();
             };
-            if (!existingIPA) {
-              const request = document.createElement("button");
-              request.type = "button";
-              request.className = "btn primary";
-              request.textContent = "Xử lý IPA";
-              request.addEventListener("click", () => openDecrypt(true));
-              actions.append(request);
-            }
             const browse = document.createElement("button");
             browse.type = "button";
             browse.className = "btn outline";
-            browse.textContent = "Kho IPA / chọn phiên bản";
-            browse.addEventListener("click", () => openDecrypt(false));
+            browse.textContent = "Xem kho IPA ERI / phiên bản";
+            browse.addEventListener("click", browseVault);
             actions.append(browse);
           }
           if (typeof data.app_store_url === "string") {
