@@ -54,7 +54,7 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "Yêu cầu IPA" not in decrypt.split("function searchResult(item) {")[1].split("function publicCatalog()")[0]
 assert "isRemoteDownload" in decrypt
 assert "trustedSignedR2" in decrypt
-assert "Tải IPA từ kho ERI R2" in decrypt
+assert "Tải IPA từ ERI R2" in decrypt
 assert "ERI đã nhận diện nguồn IPA được cấp quyền" in decrypt
 assert '"/api/v1/tools/ipa/decrypt/vault?q="' in tools
 assert "/api/v1/tools/ipa/decrypt/external?" not in tools
