@@ -79,7 +79,7 @@ assert 'providerRequest("/api/decrypt/start"' not in decrypt
 assert "manageOwnJobs()" in chunks
 assert '"DELETE"' in chunks
 assert 'Xem và hủy phiên IPA bỏ dở' in chunks
-assert 'if (getSaved()?.id===job.job_id)clear();' in chunks
+assert 'if(getSaved()?.id===job.job_id)clear();' in chunks
 assert '/api/decrypt/search?' in decrypt
 assert '/api/decrypt/library?' in decrypt
 assert '/api/decrypt/versions?' in decrypt
