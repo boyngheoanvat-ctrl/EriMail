@@ -28,34 +28,47 @@ assert 'status("Đã nhận " + pct + "%' in chunks
 assert 'percentage + "% · "' in tools
 assert 'received.size * job.chunk_bytes' not in chunks
 
-assert 'Xem tải IPA trên Decrypt.day' in tools
-assert 'https://decrypt.day/app/id' in tools
+assert '"Xem tải IPA trên Decrypt.day"' not in tools
+assert "https://decrypt.day/app/id" not in tools
 assert 'Hãy tạo yêu cầu IPA' not in tools
 assert 'id="eri-decrypt-direct-request"' not in html
+assert 'id="eri-decrypt-direct-version"' not in html
+assert 'id="eri-decrypt-versions-section"' not in html
+assert 'loadVersions(' not in decrypt
+assert "Chọn phiên bản" not in decrypt
+assert "Chưa có IPA" not in decrypt
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v30" in service
+assert 'waiting.disabled = true' in tools
+assert 'waiting.disabled = true' in decrypt
+assert 'download.textContent = "Tải IPA"' in tools
+assert 'actions.append(button("Tải IPA", () => openReadyRemoteIPA(item), true))' in decrypt
+assert '"https://cdn.decrypt.day/resources/apps/indexed.json"' in decrypt
+assert '"https://decrypt.day/app/id"' not in decrypt
+assert '"https://decrypt.day/app/id"' not in tools
+
+assert "eri-store-v31" in service
 assert "?v=20261115p3" in html
-assert "ipa-tools.js?v=20261115decryptday1" in html
-assert "decrypt-store.js?v=20261115decryptday1" in html
+assert "ipa-tools.js?v=20261115directipa1" in html
+assert "decrypt-store.js?v=20261115directipa1" in html
 assert 'request("/api/v1/tools/ipa/decrypt/start"' not in decrypt
 assert 'request("/api/v1/tools/ipa/decrypt/job/"' not in decrypt
 assert '/api/v1/tools/ipa/decrypt/requests"' in decrypt
 assert '/api/v1/tools/ipa/decrypt/requests/"' in decrypt
 assert 'const job = await request("/api/v1/tools/ipa/decrypt/requests"' in decrypt
 assert "nativeSourceStatus" in decrypt
-assert "decryptDayAppPage" in decrypt
-assert "checkDecryptDayCatalogStatus" in decrypt
+assert "decryptDayAppPage" not in decrypt
+assert "checkDecryptDayCatalogStatus" not in decrypt
 assert "openReadyRemoteIPA" in decrypt
 assert "Cài qua App Store" in decrypt
-assert "Xem tải IPA trên Decrypt.day" in decrypt
+assert "Xem tải IPA trên Decrypt.day" not in decrypt
 assert 'id="eri-decrypt-direct-request"' not in html
 assert "Yêu cầu IPA" not in decrypt.split("function searchResult(item) {")[1].split("function publicCatalog()")[0]
 assert "isRemoteDownload" in decrypt
 assert "trustedSignedR2" in decrypt
-assert "Tải IPA từ ERI R2" in decrypt
-assert "Chưa có IPA đã xác minh trong kho ERI" in decrypt
+assert 'card("button", "btn primary", "Tải IPA")' in decrypt
+assert "Nguồn tải trực tiếp đang được cập nhật" in decrypt
 assert '"/api/v1/tools/ipa/decrypt/vault?q="' in tools
 assert "/api/v1/tools/ipa/decrypt/external?" not in tools
 assert "/api/v1/tools/ipa/decrypt/f4/" not in decrypt
