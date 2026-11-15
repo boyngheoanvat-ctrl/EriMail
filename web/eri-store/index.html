@@ -20,7 +20,7 @@ document.addEventListener("submit", function(event) {
   if (event.target && event.target.id === "eri-decrypt-search-form") event.preventDefault();
 }, true);
 </script>
-<script defer src="/decrypt-store.js?v=20261115f4bridge1"></script><script defer src="/sign-jobs.js?v=20261115p3"></script>
+<script defer src="/decrypt-store.js?v=20261115f4bridge1"></script><script defer src="/sign-jobs.js?v=20261115signresume1"></script>
 <title>SHOP MOD BY ERI NGUYỄN — Cửa hàng Mod Game</title>
 </head>
 <body class="shop-v2">
@@ -123,7 +123,7 @@ document.addEventListener("submit", function(event) {
 <section id="ipa-tools" class="section hidden" aria-labelledby="ipa-tools-heading">
   <div class="heading">
     <div><span class="overline">TIỆN ÍCH iOS · IPA</span><h2 id="ipa-tools-heading">Công cụ IPA<span class="heading-dot">.</span></h2>
-      <p class="section-lead">Kiểm tra IPA và ký ứng dụng bằng chứng chỉ của chính bạn. Dùng kết nối HTTPS của ERI.</p>
+      <p class="section-lead">Tra cứu IPA và ký ứng dụng bằng chứng chỉ của chính bạn. Chức năng ký sử dụng máy chủ ERI độc lập.</p>
     </div>
   </div>
   <!-- ERI DECRYPT redesigned inside the existing ERI Store shell. -->
@@ -273,16 +273,6 @@ document.addEventListener("submit", function(event) {
         <div id="eri-v-detail-body" class="eri-v-dialog-body"></div>
       </div>
     </div>
-  </div>
-  <div class="ipa-tool-panel" id="eri-nonjb-panel">
-    <h3>Kiểm tra IPA cho iPhone chưa Jailbreak</h3>
-    <p>Chọn IPA bạn có quyền sử dụng. Hệ thống kiểm tra cấu trúc, CRC và FairPlay rồi cung cấp file tải thật. Để cài trên iPhone, cần ký bằng chứng chỉ và provisioning profile hợp lệ.</p>
-    <form id="eri-nonjb-form">
-      <label for="eri-nonjb-file">File IPA (tối đa 512 MB)</label>
-      <input id="eri-nonjb-file" name="ipa" type="file" accept=".ipa" required>
-      <button class="btn primary" type="submit">Kiểm tra và tạo link tải IPA</button>
-    </form>
-    <div id="eri-nonjb-status" class="ipa-tool-result" role="status" aria-live="polite"></div>
   </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>
