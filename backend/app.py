@@ -1519,3 +1519,8 @@ register_decrypt_catalog(app, connection, UPLOAD_DIR, _eri_mod_file, require_cus
 
 # ERI's first-party IPA queue, source validation, and worker are registered above.
 
+# Optional GitHub Actions compute for operator-approved IPA sources only.
+# API credentials remain server-side; no public customer dispatch privileges.
+from eri_actions_bridge import install_actions_bridge
+install_actions_bridge(app, require_admin)
+
