@@ -1572,6 +1572,25 @@ def delivery_download(order_id: str, customer=Depends(require_customer)):
 # Customer management. Deleting a selected customer permanently removes their
 # sessions, orders, delivery records and private uploaded delivery files.
 # Backups, provider logs and external payment records are not affected.
+@app.get("/api/v1/admin/vault/status", dependencies=[Depends(require_admin)])
+def admin_vault_status():
+    if _eri_vault is None:
+        return {"enabled": False, "ready": False, "detail": "Not activated"}
+    pointer = _eri_vault.read_snapshot_pointer()
+    if pointer is None:
+        return {"enabled": True, "ready": False, "detail": "Snapshot not initialized"}
+    with connection() as db:
+        pending = db.execute("SELECT COUNT(*) AS n FROM vault_delete_queue").fetchone()["n"]
+        customers = db.execute("SELECT COUNT(*) AS n FROM customers").fetchone()["n"]
+        uploads = db.execute("SELECT COUNT(*) AS n FROM private_product_uploads").fetchone()["n"]
+    return {"enabled": True, "ready": True, "generation": pointer["generation"],
+            "customers": customers, "uploads": uploads, "cleanup_pending": pending}
+
+@app.post("/api/v1/admin/vault/cleanup", dependencies=[Depends(require_admin)])
+def admin_vault_cleanup():
+    return _drain_cloud_deletions()
+
+
 @app.get("/api/v1/admin/customers", dependencies=[Depends(require_admin)])
 def admin_customers():
     with connection() as db:
@@ -1656,9 +1675,11 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
                     part = meta.with_name(meta.name[:-len(".delivery.json")] + ".delivery.part")
                     part.unlink(missing_ok=True)
                     meta.unlink(missing_ok=True)
+    cleanup = _drain_cloud_deletions()
     return {
         "deleted": True, "deleted_orders": len(order_ids),
-        "deleted_delivery_files": files_removed
+        "deleted_delivery_files": files_removed,
+        "cloud_cleanup_pending": cleanup["pending"]
     }
 
 # Consent-based Apple profile scan for certificate orders only.
