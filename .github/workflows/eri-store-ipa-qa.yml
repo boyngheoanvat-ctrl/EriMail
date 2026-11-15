@@ -34,7 +34,7 @@ jobs:
                           for pat in ['itms-services','manifest.plist','ipa','esign','ksign','Viet Nam Rubber']:
                               ix=body.lower().find(pat.lower())
                               print('PATTERN',pat,'found',ix>=0,'context',body[max(0,ix-120):ix+300].replace('\\n',' ')[:420] if ix>=0 else '')
-                          print('URLs',list(dict.fromkeys(re.findall(r'https?://[^\\s"\\'<>]{3,150}',body)))[:20])
+                          print('URLs',re.findall(r'https?://[^ ]{3,150}',body.replace(chr(10),' '))[:20])
               except Exception as e:
                   print('DIAG ERROR',url,str(e)[:250])
           PY
