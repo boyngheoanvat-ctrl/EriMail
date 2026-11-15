@@ -68,7 +68,7 @@ def _persist_private_file(path: Path, item_id: str, digest: str):
 def _restore_private_file(storage_name: str, size: int, digest: str):
     if _eri_vault is None:
         return None
-    match = re.fullmatch(r"([a-f0-9]{32})\\.[a-z0-9]{1,16}", storage_name)
+    match = re.fullmatch(r"([a-f0-9]{32})\.[a-z0-9]{1,16}", storage_name)
     if not match:
         return None
     output = UPLOAD_DIR / storage_name
