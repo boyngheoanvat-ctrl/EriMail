@@ -255,7 +255,10 @@ def register_decrypt_catalog(app, connection, upload_dir, mod_file, require_cust
         for item in items:
             match = _match_vault(free, item["bundle_id"], item["version"])
             item["cached"] = match
-            item["ipa_available"] = match is not None
+            item["remote_available"] = remote_for(
+                connection, item["bundle_id"], item["version"]
+            ) is not None
+            item["ipa_available"] = match is not None or item["remote_available"]
             item["source_available"] = source_exists(item["bundle_id"], item["version"])
         return items
 
