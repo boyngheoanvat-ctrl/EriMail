@@ -179,8 +179,9 @@
         } catch (_) {}
       }
       // Read-only upstream catalog lookup through ERI backend (no CSRF/session leakage).
+      let external;
       try {
-        const external = await request("/api/v1/tools/ipa/decrypt/external?" +
+        external = await request("/api/v1/tools/ipa/decrypt/external?" +
           new URLSearchParams({target:url,country:"auto"}));
         if (external.download_ready && external.download_url) {
           const parsed = new URL(external.download_url);
@@ -198,8 +199,13 @@
             return;
           }
         }
-      } catch (_) {}
-      status.textContent = "Chưa có IPA được xác minh trong kho ERI hoặc nguồn F4TEAM.";
+      } catch (error) {
+        status.textContent = "Không kiểm tra được kho F4TEAM lúc này. Thử lại sau; đây chưa phải xác nhận có hay không có IPA.";
+        return;
+      }
+      status.textContent = external.found
+        ? "F4TEAM đã nhận diện ứng dụng nhưng chưa trả về link tải IPA. Có thể bản này chưa có file trong kho F4."
+        : "F4TEAM chưa trả về IPA của ứng dụng này. API tìm thấy ứng dụng không có nghĩa là file đã sẵn sàng.";
     } catch (_) {
       status.textContent = "Không thể kiểm tra nguồn IPA lúc này.";
     }
