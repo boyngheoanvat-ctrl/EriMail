@@ -125,3 +125,48 @@ Luồng dịch vụ:
 Đây là bộ điều phối IPA do ERI sở hữu, không sử dụng F4TEAM, cookie, CSRF hay khóa giải mã bên thứ ba. App Store URL chỉ cho phép lấy metadata; không tự tạo IPA đã giải mã từ Apple. Quy trình gỡ DRM FairPlay không được triển khai. Nếu xử lý ứng dụng thuộc quyền sở hữu của mình, hãy lấy IPA qua phương thức phân phối hợp lệ và đưa tệp hoặc nguồn có cấp quyền vào ERI.
 
 Triển khai: ERI_DB_PATH và ERI_UPLOAD_DIR cần trỏ tới lưu trữ bền vững. Render Free dùng ổ tạm; hãy sao lưu tài khoản, đơn hàng, kho IPA trước khi triển khai lại backend.
+
+## ERI Store – GitHub Actions IPA Automation (nguồn được duyệt)
+
+Workflow: `.github/workflows/process-ipa.yml`; worker: `backend/actions_ipa_worker.py`; manifest: `backend/eri_actions_sources.json`.
+Đây là worker thay thế tài nguyên tính toán Render cho các IPA đã có nguồn hợp lệ, không lấy/gỡ FairPlay trực tiếp từ Apple App Store.
+
+### Chuẩn bị nguồn
+
+Trong manifest (duyệt thay đổi bằng pull request), thêm một mục ví dụ:
+
+```json
+{
+  "items": [
+    {
+      "id": "eri-demo-1",
+      "name": "ERI Demo",
+      "bundle_id": "com.eri.demo",
+      "version": "1.0.0",
+      "url": "https://files.your-domain.example/eri-demo.ipa",
+      "sha256": "thay-bằng-64-ký-tự-hex-của-tệp",
+      "distribution_authorized": true
+    }
+  ]
+}
+```
+
+Không dùng URL App Store làm URL IPA đầu vào. Chỉ đăng ký file do bạn sở hữu/được phép phân phối và hash SHA-256 của file thật.
+Trong GitHub Settings → Secrets and variables → Actions → **Variables**, tạo `ERI_IPA_SOURCE_HOSTS` với danh sách hostname HTTPS được cho phép (ví dụ `files.your-domain.example`). Nếu chưa cấu hình host hoặc manifest còn trống, workflow sẽ từ chối chạy; đó là hành vi an toàn.
+
+### Kích hoạt
+
+- Thủ công: GitHub → Actions → **ERI Store approved IPA processor** → Run workflow, nhập `source_id` đã tồn tại trong manifest.
+- Qua API riêng của ERI: quản trị viên gọi `POST /api/v1/admin/decrypt/actions/dispatch` với `X-ERI-Admin-Key` và JSON `{"source_id":"eri-demo-1"}`. Backend gửi workflow_dispatch tới GitHub. Không cung cấp GitHub token cho trình duyệt/khách hàng.
+- Cấu hình **Render backend secrets**: `ERI_GH_ACTIONS_REPO=boyngheoanvat-ctrl/EriMail` và `ERI_GH_ACTIONS_TOKEN` (GitHub fine-grained token có quyền Actions: Read and write đúng repository này). Không commit token.
+- Xem nguồn đã duyệt: `GET /api/v1/admin/decrypt/actions/sources`. Xem trạng thái workflow: `GET /api/v1/admin/decrypt/actions/runs`. Các route đều chỉ dành cho quản trị viên.
+
+### Output & giới hạn
+
+Worker chỉ xử lý ID nguồn trong manifest, tải HTTPS qua allowlist, kiểm tra dung lượng, SHA-256, ZIP CRC, nguy cơ zip bomb, Info.plist, Bundle ID, version và Mach-O `cryptid`. IPA còn FairPlay hoặc không xác minh được bị từ chối. **Không xóa** `SC_Info` và `_CodeSignature`, không tự động ký; tệp gốc được giữ nguyên để không làm hỏng chữ ký.
+
+Khi chạy thành công, GitHub Actions lưu `eri-<source_id>.ipa` cùng `validation.json` vào Artifact (mặc định 1 ngày). Artifact là tệp riêng của run, **không phải liên kết IPA công khai vĩnh viễn**. Cần thêm Cloudflare R2/S3 và cơ chế liên kết tải có xác thực nếu muốn khách trên ERI Store tải trực tiếp từ giao diện sau khi GitHub xử lý. Hiện endpoint trigger chỉ dành cho admin và chưa tự động nhập artifact vào kho ERI.
+
+Chạy kiểm thử: `cd backend && python3 test_actions_ipa_worker.py && python3 test_actions_bridge.py` sau khi cài `requirements.txt`.
+
+Về vận hành: GitHub Actions có hạn mức, thời gian chạy và retention; không mặc định không tốn phí ở mọi cấu hình. Không cho người dùng nhập URL tùy ý hoặc thực thi lệnh shell của họ.
