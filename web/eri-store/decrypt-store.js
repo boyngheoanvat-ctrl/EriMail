@@ -66,41 +66,6 @@
         ? parsed.href : null;
     } catch { return null; }
   }
-  // Decrypt.day publishes app-detail pages at this documented route. A
-  // detail-page link is NOT a verified IPA binary or a direct install URL.
-  function decryptDayAppPage(item) {
-    const direct = String(item?.app_id || "");
-    const appleUrl = safeStoreLink(item?.app_store_url);
-    const storeId = appleUrl
-      ? new URL(appleUrl).pathname.match(/id([0-9]{6,15})/)?.[1]
-      : null;
-    const id = /^[0-9]{6,15}$/.test(direct) ? direct : storeId;
-    return id && /^[0-9]{6,15}$/.test(id)
-      ? "https://decrypt.day/app/id" + id : null;
-  }
-  function publicAppStorePage(item) {
-    const verified = safeStoreLink(item?.app_store_url);
-    if (verified) return verified;
-    const external = decryptDayAppPage(item);
-    const id = external?.match(/id([0-9]{6,15})$/)?.[1];
-    return id ? "https://apps.apple.com/app/id" + id : null;
-  }
-  function checkDecryptDayCatalogStatus(label, item) {
-    const page = decryptDayAppPage(item);
-    if (!page) return;
-    const id = page.match(/id([0-9]{6,15})$/)?.[1];
-    if (!id) return;
-    // Catalog discovery alone cannot verify a download or a specific version.
-    publicCatalog().then(rows => {
-      if (label.isConnected && rows.some(x => x && String(x.i) === "id" + id)) {
-        label.textContent = "Đã tìm thấy trang ứng dụng trong danh mục Decrypt.day. " +
-          "Phiên bản và link IPA cần kiểm tra trên trang nguồn.";
-      }
-    }).catch(() => {
-      // Third-party CORS / anti-bot protection can block lookups.
-      // Leave the official app-detail link usable without inventing availability.
-    });
-  }
   function safeStoreLink(url) {
     try {
       const parsed = new URL(url);
@@ -202,7 +167,7 @@
           notice(error.message, "error");
         }
       };
-      actions.append(button("Tải IPA từ ERI R2" +
+      actions.append(button("Tải IPA" +
         (item.size_bytes ? " (" + pretty(item.size_bytes) + ")" : ""),
         () => openR2(null), true));
       // Install managers must be installed separately; never imply the IPA
@@ -217,7 +182,7 @@
     const url = apiUrl(path);
     if (!url) return;
     const actions = card("div", "eri-decrypt-actions");
-    actions.append(link("Tải IPA " + (item.size_bytes ? "(" + pretty(item.size_bytes) + ")" : ""), url, true));
+    actions.append(link("Tải IPA" + (item.size_bytes ? " (" + pretty(item.size_bytes) + ")" : ""), url, true));
     parent.append(actions);
     const enc = encodeURIComponent(url);
     const sideload = card("div","eri-dec-sideload");
@@ -244,15 +209,11 @@
   }
   // Native ERI availability is derived from our own trusted source registry.
   // No requests are made to third-party IPA/decrypt services.
+  // The search card never implies a downloadable file from App Store metadata.
   function nativeSourceStatus(root, item) {
-    if (item.cached?.download_path) return;
-    const msg = card("p", "small", item.remote_available
-      ? "ERI đã kiểm tra IPA và lưu trong kho R2 riêng."
-      : "Chưa có IPA đã xác minh trong kho ERI. Có thể mở trang Decrypt.day " +
-        "để kiểm tra phiên bản và điều kiện tải trên dịch vụ đó.");
-    root.append(msg);
-    if (!item.remote_available && decryptDayAppPage(item))
-      checkDecryptDayCatalogStatus(msg, item);
+    if (item.cached?.download_path || item.remote_available) return;
+    root.append(card("p", "small",
+      "Nguồn tải trực tiếp đang được cập nhật. Nút Tải IPA chỉ hoạt động khi có tệp đã được xác minh."));
   }
   function searchResult(item) {
     const root = card("article", "eri-decrypt-card");
@@ -273,31 +234,22 @@
     top.append(details);
     root.append(top);
     const actions = card("div", "eri-decrypt-actions");
-    if (item.cached?.download_path) {
-      root.append(card("div", "eri-decrypt-available", "IPA sẵn sàng"));
+    if (item.cached?.download_path && apiUrl(item.cached.download_path)) {
       installActions(root, item.cached);
+    } else if (item.remote_available) {
+      actions.append(button("Tải IPA", () => openReadyRemoteIPA(item), true));
     } else {
-      root.append(card("div", item.remote_available ? "eri-decrypt-available" :
-        "eri-decrypt-unavailable", item.remote_available ?
-        "IPA đã sẵn sàng trên R2" : item.source_available ?
-        "Đã nhận nguồn IPA" : "Chưa có IPA"));
       nativeSourceStatus(root, item);
-      if (item.remote_available) actions.append(button(
-        "Tải IPA từ ERI R2",
-        () => openReadyRemoteIPA(item),
-        true
-      ));
+      // A disabled button is intentional: an App Store result cannot provide
+      // an IPA binary, and Decrypt.day has no verified direct-download API.
+      const waiting = card("button", "btn primary", "Tải IPA");
+      waiting.type = "button";
+      waiting.disabled = true;
+      waiting.title = "Nguồn IPA trực tiếp chưa sẵn sàng";
+      waiting.setAttribute("aria-label", "Tải IPA chưa khả dụng: nguồn đang được cập nhật");
+      actions.append(waiting);
     }
-    if (Number(item.app_id) > 0)
-      actions.append(button("Chọn phiên bản", () => loadVersions(item), false));
-    const providerPage = decryptDayAppPage(item);
-    if (providerPage) {
-      const browseIPA = link("Xem tải IPA trên Decrypt.day", providerPage,
-        !item.cached?.download_path && !item.remote_available);
-      browseIPA.target = "_blank";
-      actions.append(browseIPA);
-    }
-    const store = publicAppStorePage(item);
+    const store = safeStoreLink(item.app_store_url);
     if (store) actions.append(link("Cài qua App Store", store));
     root.append(actions);
     return root;
