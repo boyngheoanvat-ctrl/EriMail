@@ -1,0 +1,290 @@
+/* ERI DECRYPT standalone-style layout embedded inside ERI STORE.
+   Keeps the outer store header, navigation and account/order UI intact.
+   Scoped styles prevent collisions with the host site's light theme. */
+#ipa-decrypt-panel.eri-vault-ui{
+ --v-bg:#090d16;--v-card:#121929;--v-elev:#0f1522;--v-inner:#172033;
+ --v-border:#26324b;--v-strong:#374765;--v-text:#f1f5f9;--v-sub:#94a3b8;
+ --v-muted:#64748b;--v-accent:#6052ef;--v-blue:#3679f5;--v-green:#10b981;
+ --v-green-soft:#0e3028;--v-shadow:0 4px 16px rgba(0,0,0,.16);
+ background:var(--v-bg);color:var(--v-text);border:1px solid var(--v-border);
+ border-radius:22px;padding:0 0 18px;max-width:100%;overflow:clip;
+ font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+ line-height:1.5;box-shadow:0 14px 34px rgba(15,23,42,.09)
+}
+#ipa-decrypt-panel.eri-vault-ui[data-theme="light"]{
+ --v-bg:#f3f6fb;--v-card:#fff;--v-elev:#fff;--v-inner:#f8fafc;
+ --v-border:#e2e8f0;--v-strong:#cbd5e1;--v-text:#0f172a;--v-sub:#475569;
+ --v-muted:#64748b;--v-accent:#5144d8;--v-blue:#2563eb;--v-green:#059669;
+ --v-green-soft:#e8fbf2;--v-shadow:0 4px 15px rgba(15,23,42,.05)
+}
+#ipa-decrypt-panel *{box-sizing:border-box}
+#ipa-decrypt-panel button,#ipa-decrypt-panel select,#ipa-decrypt-panel input{font-family:inherit}
+#ipa-decrypt-panel button:focus-visible,#ipa-decrypt-panel input:focus-visible,
+#ipa-decrypt-panel select:focus-visible,#ipa-decrypt-panel a:focus-visible{
+ outline:2px solid #818cf8;outline-offset:2px
+}
+#ipa-decrypt-panel .eri-v-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+#ipa-decrypt-panel .eri-v-topbar{
+ height:66px;padding:0 22px;display:flex;align-items:center;gap:11px;
+ justify-content:space-between;background:var(--v-elev);border-bottom:1px solid var(--v-border)
+}
+#ipa-decrypt-panel .eri-v-brand{display:flex;align-items:center;gap:10px;min-width:0}
+#ipa-decrypt-panel .eri-v-brand-emblem{
+ background:linear-gradient(145deg,#4338a4,#7470ff);color:#fff;font-size:16px;
+ font-weight:900;width:39px;height:39px;border-radius:10px;display:grid;place-items:center;
+ border:1px solid #958afd70;box-shadow:0 5px 13px #5540cd45;flex:none
+}
+#ipa-decrypt-panel .eri-v-brand-name{display:flex;flex-direction:column;min-width:0;gap:1px}
+#ipa-decrypt-panel .eri-v-brand-name strong{font-size:18px;letter-spacing:-.045em;line-height:1.1;color:var(--v-text);font-weight:950}
+#ipa-decrypt-panel .eri-v-brand-name strong span{
+ background:linear-gradient(115deg,#818cf8,#3b82f6);background-clip:text;
+ -webkit-background-clip:text;-webkit-text-fill-color:transparent
+}
+#ipa-decrypt-panel .eri-v-brand-name small{
+ font-size:9.3px;letter-spacing:.11em;color:#989aff;font-weight:850;white-space:nowrap
+}
+#ipa-decrypt-panel .eri-v-brand-tag{
+ font-size:9px;border:1px solid #6366f150;color:#a5b4fc;background:#6366f115;
+ padding:4px 6px;border-radius:7px;font-weight:800;white-space:nowrap
+}
+#ipa-decrypt-panel .eri-v-top-meta{display:flex;gap:8px;justify-content:flex-end;min-width:0;overflow:hidden}
+#ipa-decrypt-panel .eri-v-chip{
+ white-space:nowrap;color:var(--v-sub);font-size:11px;font-weight:700;
+ border:1px solid var(--v-border);border-radius:999px;min-height:29px;
+ display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:var(--v-inner)
+}
+#ipa-decrypt-panel .eri-v-chip strong{color:var(--v-text);font-size:11px}
+#ipa-decrypt-panel .eri-v-online i{width:7px;height:7px;border-radius:50%;background:var(--v-green);box-shadow:0 0 0 3px #10b98126}
+#ipa-decrypt-panel .eri-v-theme{
+ width:35px;height:35px;border-radius:10px;display:grid;place-items:center;
+ background:var(--v-inner);border:1px solid var(--v-border);font-size:18px;
+ color:var(--v-text);cursor:pointer;flex:none
+}
+#ipa-decrypt-panel .eri-v-hero{
+ margin:20px 21px 0;padding:22px 24px;background:var(--v-card);
+ border:1px solid var(--v-border);border-radius:19px;box-shadow:var(--v-shadow)
+}
+#ipa-decrypt-panel .eri-v-eyebrow{
+ font-size:11px;letter-spacing:.09em;font-weight:850;color:var(--v-green);text-transform:uppercase
+}
+#ipa-decrypt-panel .eri-v-hero>h3{
+ margin:7px 0 3px;letter-spacing:-.035em;font-size:clamp(19px,2.6vw,25px);
+ font-weight:900;color:var(--v-text)
+}
+#ipa-decrypt-panel .eri-v-hero>p{font-size:12.5px;line-height:1.55;color:var(--v-sub);margin:0 0 19px;max-width:660px}
+#ipa-decrypt-panel .eri-v-omnibar{
+ display:grid;grid-template-columns:177px minmax(0,1fr) auto;gap:9px;align-items:stretch
+}
+#ipa-decrypt-panel .eri-v-region{position:relative;margin:0;min-width:0}
+#ipa-decrypt-panel .eri-v-querybox{position:relative;display:flex;align-items:center;min-width:0}
+#ipa-decrypt-panel .eri-v-region select,#ipa-decrypt-panel .eri-v-querybox input{
+ width:100%;height:44px;min-height:44px;background:var(--v-inner);color:var(--v-text);
+ border:1px solid var(--v-border);border-radius:12px;font-size:13px;
+ font-weight:600;padding:0 12px;outline:none;box-shadow:none;margin:0
+}
+#ipa-decrypt-panel .eri-v-querybox input{padding-left:35px;font-weight:500}
+#ipa-decrypt-panel .eri-v-querybox input::placeholder{color:var(--v-muted)}
+#ipa-decrypt-panel .eri-v-search-icon{position:absolute;left:12px;z-index:1;font-size:20px;color:var(--v-muted);pointer-events:none}
+#ipa-decrypt-panel .eri-v-search-buttons{display:flex;gap:8px}
+#ipa-decrypt-panel .eri-v-search-buttons .btn{white-space:nowrap;min-height:44px;padding:0 14px;line-height:1.25}
+#ipa-decrypt-panel .eri-v-search-buttons .btn.primary{background:linear-gradient(135deg,var(--v-accent),var(--v-blue));border:0;color:white}
+#ipa-decrypt-panel .eri-v-presets{
+ display:flex;align-items:center;flex-wrap:nowrap;overflow-x:auto;gap:7px;
+ margin:17px 0 0;padding:14px 0 2px;border-top:1px solid var(--v-border);
+ scrollbar-width:none
+}
+#ipa-decrypt-panel .eri-v-presets::-webkit-scrollbar{display:none}
+#ipa-decrypt-panel .eri-v-presets>span{white-space:nowrap;color:var(--v-muted);font-size:12px;font-weight:700}
+#ipa-decrypt-panel .eri-v-presets button{
+ white-space:nowrap;flex:none;border:1px solid var(--v-border);padding:5px 11px;
+ border-radius:999px;background:var(--v-inner);font-size:11.5px;color:var(--v-sub)
+}
+#ipa-decrypt-panel .eri-v-presets button:hover{border-color:var(--v-accent);color:var(--v-text)}
+#ipa-decrypt-panel #eri-decrypt-notice{
+ margin:12px 0 0;background:var(--v-inner);color:var(--v-sub);border:1px solid var(--v-border);
+ padding:9px 12px;border-radius:10px;font-size:12px
+}
+#ipa-decrypt-panel #eri-decrypt-notice:empty{display:none}
+#ipa-decrypt-panel #eri-decrypt-notice[data-state="error"]{border-color:#e66c79;color:#f59da8}
+#ipa-decrypt-panel #eri-decrypt-notice[data-state="success"]{border-color:#15825a;color:var(--v-green)}
+#ipa-decrypt-panel .eri-v-section{
+ margin:24px 21px 0;padding:0;border:0;border-radius:0;background:transparent
+}
+#ipa-decrypt-panel .eri-v-section.hidden{display:none!important}
+#ipa-decrypt-panel .eri-v-section-head{
+ display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;
+ gap:13px;margin:0 0 14px
+}
+#ipa-decrypt-panel .eri-v-section-head h4{
+ color:var(--v-text);font-size:19px;font-weight:900;letter-spacing:-.025em;margin:0
+}
+#ipa-decrypt-panel .eri-v-section-head p{font-size:12px;color:var(--v-sub);margin:3px 0 0}
+#ipa-decrypt-panel .eri-v-vault-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#ipa-decrypt-panel .eri-v-section-head .eri-decrypt-count{
+ color:var(--v-green);border-color:var(--v-green);background:var(--v-green-soft);
+ font-size:11px;font-weight:800;padding:4px 10px;border-radius:999px
+}
+#ipa-decrypt-panel .eri-v-toolbar{
+ display:flex;align-items:center;gap:7px;flex-wrap:wrap;
+ grid-template-columns:none!important;min-width:0;max-width:100%;margin:0
+}
+#ipa-decrypt-panel .eri-v-toolbar input{
+ min-width:140px;max-width:250px;flex:1;height:36px;min-height:36px;
+ background:var(--v-card);border:1px solid var(--v-border);border-radius:9px;
+ color:var(--v-text);font-size:12px;padding:0 11px
+}
+#ipa-decrypt-panel .eri-v-toolbar select{
+ min-width:138px;max-width:185px;height:36px;min-height:36px;
+ background:var(--v-card);border:1px solid var(--v-border);border-radius:9px;
+ color:var(--v-text);font-size:12px;padding:0 9px
+}
+#ipa-decrypt-panel .eri-v-toolbar button{min-height:36px;padding:5px 10px;white-space:nowrap}
+#ipa-decrypt-panel .eri-v-categories{
+ display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none;
+ padding:5px;border:1px solid var(--v-border);border-radius:13px;
+ background:var(--v-card);margin:0 0 14px
+}
+#ipa-decrypt-panel .eri-v-categories::-webkit-scrollbar{display:none}
+#ipa-decrypt-panel .eri-v-cat{
+ flex:none;white-space:nowrap;background:transparent;border:1px solid transparent;
+ color:var(--v-sub);border-radius:9px;font-size:12px;font-weight:750;
+ padding:7px 11px;cursor:pointer
+}
+#ipa-decrypt-panel .eri-v-cat.active,#ipa-decrypt-panel .eri-v-cat[aria-pressed="true"]{
+ color:white;background:var(--v-accent)
+}
+#ipa-decrypt-panel .eri-v-filter-note{font-size:11px;color:var(--v-muted);margin:0 0 9px}
+#ipa-decrypt-panel .eri-decrypt-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
+#ipa-decrypt-panel .eri-decrypt-card{
+ min-width:0;border:1px solid var(--v-border);border-radius:15px;background:var(--v-card);
+ padding:14px;display:flex;flex-direction:column;gap:11px;justify-content:space-between;
+ box-shadow:var(--v-shadow);overflow:hidden;position:relative
+}
+#ipa-decrypt-panel .eri-decrypt-card:hover{border-color:var(--v-strong)}
+#ipa-decrypt-panel .eri-dec-app-meta{
+ display:flex;align-items:center;flex-wrap:wrap;gap:5px
+}
+#ipa-decrypt-panel .eri-dec-app-meta span{
+ min-height:22px;padding:3px 7px;font-size:10.5px;font-weight:750;
+ color:var(--v-sub);background:var(--v-inner);border:1px solid var(--v-border);border-radius:6px
+}
+#ipa-decrypt-panel .eri-dec-app-meta span:first-child{color:#a5b4fc;background:#5456dc18;border-color:#5456dc35}
+#ipa-decrypt-panel .eri-decrypt-card-top{display:flex;align-items:center;gap:12px;min-width:0}
+#ipa-decrypt-panel .eri-decrypt-app-icon{
+ width:56px;height:56px;border:1px solid var(--v-border);border-radius:13px;
+ object-fit:cover;flex:none;background:var(--v-inner)
+}
+#ipa-decrypt-panel .eri-decrypt-details{min-width:0;flex:1}
+#ipa-decrypt-panel .eri-decrypt-details strong{
+ display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+ color:var(--v-text);font-size:14px;line-height:1.4;font-weight:800
+}
+#ipa-decrypt-panel .eri-decrypt-details span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v-sub);font-size:11px}
+#ipa-decrypt-panel .eri-decrypt-details small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v-muted);font-size:10.8px;margin-top:4px}
+#ipa-decrypt-panel .eri-decrypt-actions{
+ margin:0;display:flex;gap:6px;align-items:stretch;flex-wrap:wrap;
+ padding-top:10px;border-top:1px solid var(--v-border)
+}
+#ipa-decrypt-panel .eri-decrypt-actions .btn{
+ min-height:34px;margin:0;padding:7px 10px;border-radius:9px;
+ flex:1 1 auto;text-align:center;font-size:11.5px;font-weight:800;
+ color:var(--v-text);border:1px solid var(--v-border);background:var(--v-inner)
+}
+#ipa-decrypt-panel .eri-decrypt-actions .btn.primary{
+ background:linear-gradient(135deg,var(--v-accent),var(--v-blue));color:#fff;
+ border-color:transparent;flex:1 1 100%
+}
+#ipa-decrypt-panel .eri-decrypt-actions .eri-v-detail-action{flex:0 0 34px;padding:6px}
+#ipa-decrypt-panel .eri-dec-sideload{
+ display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;
+ padding:0;margin:0
+}
+#ipa-decrypt-panel .eri-dec-sideload .btn{
+ display:grid;place-items:center;min-height:28px;border:1px solid var(--v-border);
+ background:var(--v-inner);border-radius:7px;padding:3px 1px;color:var(--v-sub);
+ font-size:10px;font-weight:700;min-width:0;white-space:nowrap;overflow:hidden
+}
+#ipa-decrypt-panel .eri-v-vault-item-head{display:flex;align-items:center;gap:11px;min-width:0}
+#ipa-decrypt-panel .eri-v-vault-item-head .eri-v-item-info{min-width:0;flex:1}
+#ipa-decrypt-panel .eri-v-vault-item-head strong{
+ color:var(--v-text);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+ font-size:14px;font-weight:800
+}
+#ipa-decrypt-panel .eri-v-vault-item-head p{color:var(--v-muted);font-size:11px;margin:4px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ipa-decrypt-panel .eri-v-empty{
+ grid-column:1/-1;border:1px solid var(--v-border);border-radius:14px;
+ color:var(--v-sub);padding:34px 16px;background:var(--v-card);
+ text-align:center;font-size:13px
+}
+#ipa-decrypt-panel .eri-v-empty .eri-v-empty-icon{display:block;font-size:30px;margin:0 0 8px}
+#ipa-decrypt-panel .eri-v-pager{
+ display:flex;align-items:center;justify-content:space-between;gap:10px;margin:17px 0 0
+}
+#ipa-decrypt-panel .eri-v-pager .btn{white-space:nowrap;padding:8px 12px;font-size:12px}
+#ipa-decrypt-panel .eri-v-pager span{font-size:12px;color:var(--v-sub)}
+#ipa-decrypt-panel .eri-v-footer{
+ margin:28px 21px 3px;border-top:1px solid var(--v-border);padding:16px 0 0;
+ display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:9px;
+ font-size:11px;color:var(--v-muted)
+}
+#ipa-decrypt-panel .eri-v-footer strong{font-size:12px;color:var(--v-text)}
+#ipa-decrypt-panel .eri-v-modal{
+ position:fixed;inset:0;z-index:1001;background:#060a14c9;
+ display:flex;align-items:center;justify-content:center;padding:15px
+}
+#ipa-decrypt-panel .eri-v-modal.hidden{display:none!important}
+#ipa-decrypt-panel .eri-v-dialog{
+ width:min(100%,740px);max-height:85dvh;display:flex;flex-direction:column;
+ border-radius:19px;border:1px solid var(--v-strong);background:var(--v-card);
+ color:var(--v-text);overflow:hidden;box-shadow:0 25px 75px #0008
+}
+#ipa-decrypt-panel .eri-v-dialog-head{
+ display:flex;align-items:center;justify-content:space-between;gap:10px;
+ padding:16px 19px;border-bottom:1px solid var(--v-border);background:var(--v-inner)
+}
+#ipa-decrypt-panel .eri-v-dialog-head h4{margin:0;font-size:16px;color:var(--v-text)}
+#ipa-decrypt-panel .eri-v-dialog-body{padding:19px;overflow-y:auto}
+#ipa-decrypt-panel .eri-v-detail-header{display:flex;align-items:center;gap:13px;margin-bottom:16px}
+#ipa-decrypt-panel .eri-v-detail-header .eri-decrypt-details strong{font-size:18px}
+#ipa-decrypt-panel .eri-v-detail-specs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:15px}
+#ipa-decrypt-panel .eri-v-detail-specs div{padding:11px;border:1px solid var(--v-border);border-radius:11px;background:var(--v-inner);min-width:0}
+#ipa-decrypt-panel .eri-v-detail-specs small{display:block;color:var(--v-muted);font-size:10px;font-weight:800;text-transform:uppercase}
+#ipa-decrypt-panel .eri-v-detail-specs strong{color:var(--v-text);font-size:12px;display:block;overflow-wrap:anywhere}
+#ipa-decrypt-panel .eri-v-detail-actions{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+#ipa-decrypt-panel .eri-v-detail-actions .btn{flex:1 1 140px}
+#ipa-decrypt-panel .ipa-tool-result[data-state="error"]{color:#ffaaa8}
+#ipa-decrypt-panel .ipa-tool-result[hidden]{display:none!important}
+@media(max-width:1050px){
+ #ipa-decrypt-panel .eri-v-omnibar{grid-template-columns:170px minmax(0,1fr)}
+ #ipa-decrypt-panel .eri-v-search-buttons{grid-column:1/-1}
+ #ipa-decrypt-panel .eri-v-search-buttons .btn.primary{flex:1}
+ #ipa-decrypt-panel .eri-decrypt-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:680px){
+ #ipa-decrypt-panel.eri-vault-ui{border-radius:17px}
+ #ipa-decrypt-panel .eri-v-topbar{padding:0 12px;gap:7px;height:62px}
+ #ipa-decrypt-panel .eri-v-brand-emblem{width:34px;height:34px;font-size:13px}
+ #ipa-decrypt-panel .eri-v-brand-name strong{font-size:15px}
+ #ipa-decrypt-panel .eri-v-brand-name small{font-size:8px}
+ #ipa-decrypt-panel .eri-v-brand-tag,#ipa-decrypt-panel .eri-v-online{display:none}
+ #ipa-decrypt-panel .eri-v-chip{padding:4px 8px;font-size:10px}
+ #ipa-decrypt-panel .eri-v-hero{margin:12px 11px 0;padding:17px 15px}
+ #ipa-decrypt-panel .eri-v-hero>h3{font-size:19px}
+ #ipa-decrypt-panel .eri-v-omnibar{grid-template-columns:minmax(0,1fr);gap:8px}
+ #ipa-decrypt-panel .eri-v-search-buttons{grid-column:auto;display:grid;grid-template-columns:1.3fr 1fr;gap:7px}
+ #ipa-decrypt-panel .eri-v-search-buttons .btn{min-height:41px;font-size:12px;padding:8px 7px;white-space:normal}
+ #ipa-decrypt-panel .eri-v-presets{margin-top:13px}
+ #ipa-decrypt-panel .eri-v-section{margin:20px 12px 0}
+ #ipa-decrypt-panel .eri-v-section-head h4{font-size:18px}
+ #ipa-decrypt-panel .eri-v-toolbar{width:100%}
+ #ipa-decrypt-panel .eri-v-toolbar input{min-width:0;max-width:none;flex:1 1 100%}
+ #ipa-decrypt-panel .eri-v-toolbar select{flex:1;min-width:0}
+ #ipa-decrypt-panel .eri-decrypt-grid{grid-template-columns:minmax(0,1fr);gap:10px}
+ #ipa-decrypt-panel .eri-decrypt-card{padding:14px}
+ #ipa-decrypt-panel .eri-v-detail-specs{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #ipa-decrypt-panel .eri-v-dialog-body{padding:14px}
+ #ipa-decrypt-panel .eri-v-footer{margin:24px 13px 0}
+}
+@media(prefers-reduced-motion:reduce){
+ #ipa-decrypt-panel *{scroll-behavior:auto!important;animation:none!important}
+}
