@@ -329,8 +329,8 @@ def admin_ipa_catalog():
         rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256,authorized,price_vnd,platform FROM ipa ORDER BY id DESC LIMIT 200").fetchall()
     return {"items": [dict(x) for x in rows]}
 
-def _eri_mod_file(row):
-    """Only advertise a free download if the actual file is still available."""
+def _eri_mod_file(row, *, restore: bool = False):
+    """Cloud-backed listing does not download a large IPA until requested."""
     storage_name = row["storage_name"]
     platform = row["platform"] if row["platform"] in ("ipa", "apk") else "ipa"
     if (not isinstance(storage_name, str)
@@ -339,8 +339,16 @@ def _eri_mod_file(row):
     if not storage_name.endswith("." + platform):
         return None
     path = UPLOAD_DIR / storage_name
-    if not path.is_file() or path.stat().st_size != row["size_bytes"]:
+    if path.is_file() and path.stat().st_size == row["size_bytes"]:
+        return path
+    if _eri_vault is None:
         return None
+    if not _eri_vault.chunk_exists(storage_name[:32]):
+        return None
+    if restore:
+        if "sha256" not in row.keys():
+            raise VaultError("Missing integrity hash for cloud download")
+        return _restore_private_file(storage_name, row["size_bytes"], row["sha256"])
     return path
 
 
@@ -349,7 +357,7 @@ def ipa_storage_status():
     """Admin-only integrity report for the self-hosted IPA vault."""
     with connection() as db:
         rows = db.execute(
-            "SELECT i.id,i.name,i.version,i.platform,p.storage_name,p.size_bytes "
+            "SELECT i.id,i.name,i.version,i.platform,p.storage_name,p.size_bytes,p.sha256 "
             "FROM ipa i LEFT JOIN private_product_uploads p "
             "ON p.product_id=i.id AND p.kind=i.platform "
             "WHERE i.platform='ipa' AND i.authorized=1 ORDER BY i.id DESC"
@@ -372,7 +380,7 @@ def public_mod_catalog():
     with connection() as db:
         rows = db.execute(
             "SELECT i.id,i.name,i.version,i.bundle_id,i.description,i.price_vnd,"
-            "i.platform,p.storage_name,p.size_bytes "
+            "i.platform,p.storage_name,p.size_bytes,p.sha256 "
             "FROM ipa i LEFT JOIN private_product_uploads p "
             "ON p.product_id=i.id AND p.kind=i.platform "
             "WHERE i.authorized=1 ORDER BY i.id DESC LIMIT 100"
@@ -395,7 +403,7 @@ def download_free_mod(product_id: int):
     # Only files that are authorized, FREE, and actually stored on server.
     with connection() as db:
         row = db.execute(
-            "SELECT p.storage_name,p.original_name,p.size_bytes,i.platform "
+            "SELECT p.storage_name,p.original_name,p.size_bytes,p.sha256,i.platform "
             "FROM ipa i JOIN private_product_uploads p "
             "ON p.kind=i.platform AND p.product_id=i.id "
             "WHERE i.id=? AND i.authorized=1 AND i.price_vnd=0",
@@ -403,7 +411,7 @@ def download_free_mod(product_id: int):
         ).fetchone()
     if row is None:
         raise HTTPException(404, "Free mod file not available")
-    path = _eri_mod_file(row)
+    path = _eri_mod_file(row, restore=True)
     if path is None:
         raise HTTPException(404, "File missing on server; ask admin to re-upload")
     return FileResponse(
@@ -866,6 +874,7 @@ async def upload_private_product(
             except zipfile.BadZipFile:
                 raise HTTPException(422, "Invalid ZIP or IPA file")
         os.replace(temporary_path, final_path)
+        _persist_private_file(final_path, storage_id, digest.hexdigest())
         with connection() as db:
             if kind in ("ipa", "apk"):
                 row = db.execute(
@@ -1167,6 +1176,12 @@ async def eri_finish_chunk_upload(upload_id: str):
         final = UPLOAD_DIR / (upload_id + meta["extension"])
         os.replace(part, final)
         try:
+            if _eri_vault is not None:
+                # Each 4-MiB cloud part was stored before its ACK.
+                count = (meta["size_bytes"] + VAULT_CHUNK_BYTES - 1) // VAULT_CHUNK_BYTES
+                for i in range(count):
+                    if not _eri_vault.chunk_exists(upload_id, i):
+                        raise VaultError("Cloud IPA part missing; product not published")
             with connection() as db:
                 if meta["kind"] in ("ipa", "apk"):
                     row = db.execute(
@@ -1413,6 +1428,7 @@ async def delivery_complete(order_id: str,upload_id: str):
         final=UPLOAD_DIR / (upload_id+meta["suffix"])
         os.replace(part,final)
         try:
+            _persist_private_file(final, upload_id, digest.hexdigest())
             with connection() as db:
                 order=db.execute("SELECT status,customer_id FROM orders WHERE id=?",(order_id,)).fetchone()
                 if order is None or order["status"]!="paid" or order["customer_id"] is None:
@@ -1441,15 +1457,20 @@ def delivery_download(order_id: str, customer=Depends(require_customer)):
         raise HTTPException(404,"Không tìm thấy tệp")
     with connection() as db:
         file=db.execute(
-            "SELECT d.original_name,d.storage_name FROM order_deliveries d "
+            "SELECT d.original_name,d.storage_name,d.size_bytes,d.sha256 FROM order_deliveries d "
             "JOIN orders o ON o.id=d.order_id "
             "WHERE o.id=? AND o.customer_id=? AND o.status='fulfilled'",
             (order_id,customer["id"])).fetchone()
     if file is None:
         raise HTTPException(404,"Đơn này chưa có tệp được giao")
     path=UPLOAD_DIR / file["storage_name"]
-    if path.name!=file["storage_name"] or not path.is_file():
-        raise HTTPException(410,"Tệp đã mất khỏi ổ tạm. Liên hệ Admin để nhận lại.")
+    if path.name!=file["storage_name"]:
+        raise HTTPException(404,"Tên tệp giao hàng không hợp lệ")
+    if not path.is_file() or path.stat().st_size!=file["size_bytes"]:
+        if _eri_vault is not None:
+            _restore_private_file(file["storage_name"], file["size_bytes"], file["sha256"])
+    if not path.is_file() or path.stat().st_size!=file["size_bytes"]:
+        raise HTTPException(410,"Tệp giao hàng không khả dụng trong kho.")
     return FileResponse(path,media_type="application/octet-stream",
         filename=file["original_name"],content_disposition_type="attachment",
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
