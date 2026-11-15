@@ -284,7 +284,7 @@
       nativeSourceStatus(root, item);
       if (item.remote_available) actions.append(button(
         "Tải IPA từ ERI R2",
-        () => createJob(item.app_store_url || String(item.app_id), item.country, item.version),
+        () => openReadyRemoteIPA(item),
         true
       ));
     }
@@ -530,6 +530,31 @@
       try { localStorage.setItem(ACTIVE_JOB, activeJob); } catch {}
       renderJob(job);
       await loadHistory();
+    } catch(error) {
+      notice(error.message, "error");
+    }
+  }
+  async function openReadyRemoteIPA(item) {
+    const target = item.app_store_url || String(item.app_id);
+    if (!getToken()) {
+      notice("Đăng nhập ERI STORE để tải IPA trong kho riêng.", "error");
+      return;
+    }
+    try {
+      notice("Đang cấp link tải IPA trong kho ERI...");
+      const job = await request("/api/v1/tools/ipa/decrypt/requests", {
+        auth:true,
+        body:{target,country:item.country?.toLowerCase()||"auto",version:item.version||""}
+      });
+      if (job.state !== "completed" || !isRemoteDownload(job.result?.download_path)) {
+        activeJob=job.job_id;
+        renderJob(job);
+        return;
+      }
+      const signed = await request(job.result.download_path,{auth:true});
+      const download = trustedSignedR2(signed.download_url);
+      if (!download) throw new Error("Link tải R2 không đáng tin cậy.");
+      window.location.assign(download);
     } catch(error) {
       notice(error.message, "error");
     }
