@@ -13,8 +13,8 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://eri-api-dag8.onrender.com https://eri-f4-bridge.onrender.com https://cdn.decrypt.day https://decrypt.160-191-242-70.sslip.io; img-src 'self' data: https://eri-api-dag8.onrender.com https://*.mzstatic.com; script-src 'self' 'sha256-V430fCV6Z5JIco4X9WlUVTvFGM96GdBmY4o7o/iZQbs='; style-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
-<link rel="stylesheet" href="/styles.css?v=20261115p3"><link rel="stylesheet" href="/shop-theme.css?v=20261115p3"><link rel="stylesheet" href="/eri-decrypt-layout.css?v=20261115dashboard2"><link rel="stylesheet" href="/eri-home-extras.css?v=20261115a">
-<script defer src="/app.js?v=20261115certfree2"></script><script defer src="/free-certificates.js?v=20261115cert3"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js?v=20261115direct1"></script>
+<link rel="stylesheet" href="/styles.css?v=20261115p3"><link rel="stylesheet" href="/shop-theme.css?v=20261115p3"><link rel="stylesheet" href="/eri-decrypt-layout.css?v=20261115dashboard2"><link rel="stylesheet" href="/eri-home-extras.css?v=20261115certificatetab1">
+<script defer src="/app.js?v=20261115certificatetab1"></script><script defer src="/free-certificates.js?v=20261115cert3"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js?v=20261115direct1"></script>
 <script>
 document.addEventListener("submit", function(event) {
   if (event.target && event.target.id === "eri-decrypt-search-form") event.preventDefault();
@@ -97,14 +97,17 @@ document.addEventListener("submit", function(event) {
   <div id="tabs" class="tabs" role="tablist" aria-label="Loại sản phẩm">
     <button class="tab selected" type="button" role="tab" aria-selected="true" data-kind="mod"><svg class="icon" aria-hidden="true"><use href="#ic-gamepad"></use></svg> <span>Mod Game</span></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-kind="ai"><svg class="icon" aria-hidden="true"><use href="#ic-sparkles"></use></svg> <span>AI Plus</span></button>
-    <button class="tab" type="button" role="tab" aria-selected="false" data-kind="certificate"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg> <span>Chứng chỉ iOS</span></button>
-    <button class="tab" type="button" role="tab" aria-selected="false" data-kind="certfree"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg> <span>Chứng chỉ Free</span></button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-kind="certificate"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg> <span>Chứng chỉ</span></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-kind="decrypt"> <span>Tải IPA</span></button>
     <button class="tab" type="button" role="tab" aria-selected="false" data-kind="sign"> <span>Ký IPA trực tiếp</span></button>
   </div>
   <div id="mod-subtabs" class="mod-subtabs" role="tablist" aria-label="Mod Game miễn phí hoặc trả phí">
     <button class="mod-subtab" type="button" role="tab" data-mod-mode="free" aria-selected="false"><svg class="icon" aria-hidden="true"><use href="#ic-download"></use></svg> FREE</button>
     <button class="mod-subtab selected" type="button" role="tab" data-mod-mode="paid" aria-selected="true"><svg class="icon" aria-hidden="true"><use href="#ic-bag"></use></svg> BÁN</button>
+  </div>
+  <div id="certificate-subtabs" class="mod-subtabs hidden" role="tablist" aria-label="Chứng chỉ miễn phí hoặc trả phí">
+    <button class="mod-subtab" type="button" role="tab" data-cert-mode="free" aria-selected="false"><svg class="icon" aria-hidden="true"><use href="#ic-download"></use></svg> FREE</button>
+    <button class="mod-subtab selected" type="button" role="tab" data-cert-mode="paid" aria-selected="true"><svg class="icon" aria-hidden="true"><use href="#ic-bag"></use></svg> BÁN</button>
   </div>
   <div id="mod-platform-tabs" class="mod-subtabs" role="tablist" aria-label="Định dạng trò chơi">
     <button class="mod-subtab selected" type="button" role="tab" data-mod-platform="ipa" aria-selected="true">iOS · IPA</button>
@@ -119,16 +122,11 @@ document.addEventListener("submit", function(event) {
       <button type="button" class="btn primary" id="start-udid"><svg class="icon" aria-hidden="true"><use href="#ic-phone"></use></svg> Lấy UDID thiết bị <svg class="icon" aria-hidden="true"><use href="#ic-arrow"></use></svg></button>
     </div>
   </div>
-  <div id="certificate-free-shortcut" class="eri-cert-free-shortcut hidden">
-    <div><strong>Chứng chỉ Free · ERI Nguyễn</strong>
-      <p>Nguồn cộng đồng để tham khảo chứng chỉ iOS miễn phí. Trạng thái và khả năng cài đặt phụ thuộc Apple và thiết bị.</p></div>
-    <button class="btn outline" id="open-certificate-free" type="button">Chọn KSign / ESign</button>
-  </div>
   <div id="products-toolbar" class="products-toolbar"><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><span class="products-toolbar-label"><svg class="icon" aria-hidden="true"><use href="#ic-circleCheck"></use></svg> Danh mục cập nhật từ máy chủ</span></div>
   <div id="products" class="products"></div>
 </section>
 <section id="ipa-tools" class="section hidden" aria-labelledby="ipa-tools-heading">
-  <div class="heading">
+  <div id="ipa-tools-heading-wrap" class="heading">
     <div><span class="overline">TIỆN ÍCH iOS · IPA</span><h2 id="ipa-tools-heading">Công cụ IPA<span class="heading-dot">.</span></h2>
       <p class="section-lead">Tra cứu IPA và ký ứng dụng bằng chứng chỉ của chính bạn. Chức năng ký sử dụng máy chủ ERI độc lập.</p>
     </div>
