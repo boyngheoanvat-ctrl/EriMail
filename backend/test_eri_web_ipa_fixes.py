@@ -31,7 +31,7 @@ assert "Kiểm tra và tạo link tải IPA" not in html
 assert 'id="ipa-sign-panel"' in html
 assert 'name="ipa"' in html and 'name="p12"' in html
 assert 'name="mobileprovision"' in html and 'name="password"' in html
-assert 'sign-jobs.js?v=20261115signresume1' in html
+assert 'sign-jobs.js?v=20261115queuefix2' in html
 assert '"eri_store_signing_job_v2"' in chunks
 assert 'if (!busy)' in chunks
 assert 'if (polling || (busy && !activeSigner)) return;' in chunks
@@ -57,10 +57,10 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v34" in service
+assert "eri-store-v35" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
-assert "decrypt-store.js?v=20261115f4bridge1" in html
+assert "decrypt-store.js?v=20261115vaultcheck2" in html
 assert "eri-decrypt-layout.css?v=20261115dashboard2" in html
 
 # ERI hosts a branded view, but provider API data must stay sourced from
@@ -68,6 +68,18 @@ assert "eri-decrypt-layout.css?v=20261115dashboard2" in html
 assert 'const PROVIDER = "https://eri-f4-bridge.onrender.com"' in decrypt
 assert "connect-src" in html and "https://eri-f4-bridge.onrender.com" in html
 assert "Máy chủ nguồn chưa cho phép ERI đọc API" not in decrypt
+# The button now checks verified IPA links from the public vault, not a
+# canned CSRF error. It must not call an unauthorized decrypt/start POST.
+assert "Muốn chạy giải mã qua F4TEAM ngay trong ERI" not in decrypt
+assert "findAvailableIPA(target)" in decrypt
+assert '"/api/decrypt/library?"' in decrypt
+assert '"/api/decrypt/versions?"' in decrypt
+assert "sourceDownload(file.dl_url)" not in decrypt or "openDownload(file.dl_url)" in decrypt
+assert 'providerRequest("/api/decrypt/start"' not in decrypt
+assert "manageOwnJobs()" in chunks
+assert '"DELETE"' in chunks
+assert 'Xem và hủy phiên IPA bỏ dở' in chunks
+assert 'if (getSaved()?.id===job.job_id)clear();' in chunks
 assert '/api/decrypt/search?' in decrypt
 assert '/api/decrypt/library?' in decrypt
 assert '/api/decrypt/versions?' in decrypt
