@@ -388,6 +388,8 @@ jobs:
       - run: |
           set -euo pipefail
           node --check web/eri-store/app.js
+          node --check web/eri-store/free-certificates.js
+          python3 -c 'import json; a=json.load(open("ipa-catalog/install-tools.json")); b=json.load(open("web/eri-store/install-tools.json")); assert a==b; assert all(len(a[k])==17 for k in ("ksign","esign")); assert len({i["url"] for k in a for i in a[k]})==34; assert a["esign"][-1]["url"].endswith("/hegmnlhdholo.plist")'
           node --check web/eri-store/udid.js
           grep -q 'id="certificate-udid"' web/eri-store/index.html
           grep -q 'id="start-udid"' web/eri-store/index.html

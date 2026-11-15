@@ -1,0 +1,210 @@
+{
+  "ksign": [
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/idjbbheelkpp.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Viet Nam Rubber"
+    },
+    {
+      "name": "KSign Viet Nam Rubber V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/gachcmkbfgpi.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Viet Nam Rubber"
+    },
+    {
+      "name": "KSign Viet Nam Rubber V2",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/kjbmlohbihbi.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Viet Nam Rubber"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/dphpgblmlojd.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "RAKUTEN"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/geadoiiloimh.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Vietnam Electricity"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/gdkhlfchmfof.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Beihang University"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/gmkhipcnkilk.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "VINWASH"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/pbemcddlcpho.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "HSBC Bank"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/mlieeiadepah.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Jiangsu Simcere"
+    },
+    {
+      "name": "KSign Jiangsu Simcere V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/lodjpjcljdpi.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Jiangsu Simcere"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/imppbfhicihh.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Moving Increasingly"
+    },
+    {
+      "name": "KSign Moving Increasingly V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/cmedecbjfimo.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "Moving Increasingly"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/phcfgoaomgja.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "China Telecom"
+    },
+    {
+      "name": "KSign China Telecom V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/aomjaecngfnl.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "China Telecom"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/mhgbkhplggio.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "National Oilwell"
+    },
+    {
+      "name": "KSign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/fbnokebbnpco.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "PowerChina"
+    },
+    {
+      "name": "KSign PowerChina V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/bbememhbfidk.plist",
+      "img": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTYlk6oHRX_isIEsA0183yypCcVuMNaseuGzSymQIUY1g&s",
+      "descriptions": "PowerChina"
+    }
+  ],
+  "esign": [
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/dgaefbobaeop.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Viet Nam Rubber"
+    },
+    {
+      "name": "ESign Viet Nam Rubber V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/jajfejcpifon.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Viet Nam Rubber"
+    },
+    {
+      "name": "ESign Viet Nam Rubber V2",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/ifaidfcbmgna.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Viet Nam Rubber"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/gcocahddcinl.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "RAKUTEN"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/fnenfnfigggm.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Vietnam Electricity"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/kagnpjhmkmjp.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Beihang University"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/kjjcnffojofo.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "VINWASH"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/idcpodehdgbm.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "HSBC Bank"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/namafilokpoh.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Jiangsu Simcere"
+    },
+    {
+      "name": "ESign Jiangsu Simcere V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/jgkbnpmnlaed.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Jiangsu Simcere"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/dgjfclelmbbj.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Moving Increasingly"
+    },
+    {
+      "name": "ESign Moving Increasingly V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/kpcbaajmkbon.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "Moving Increasingly"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/pghpdpcgblmp.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "China Telecom"
+    },
+    {
+      "name": "ESign China Telecom V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/bhpiamjijnip.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "China Telecom"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/kfccjimokhko.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "National Oilwell"
+    },
+    {
+      "name": "ESign",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/eoekkbmccjbc.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "PowerChina"
+    },
+    {
+      "name": "ESign PowerChina V1",
+      "url": "itms-services://?action=download-manifest&url=https://website.khoindvn.io.vn/plists/hegmnlhdholo.plist",
+      "img": "img/pf/profile-pic.png",
+      "descriptions": "PowerChina"
+    }
+  ]
+}

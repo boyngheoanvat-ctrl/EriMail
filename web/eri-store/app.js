@@ -237,6 +237,7 @@ async function loadCatalog(){
   $("certificate-free-panel")?.classList.toggle("hidden",category!=="certfree");
   $("certificate-free-shortcut")?.classList.toggle("hidden",category!=="certificate");
   if(toolSelected){
+    if(category==="certfree"&&typeof window.loadFreeCertificates==="function")window.loadFreeCertificates();
     $("mod-subtabs")?.classList.add("hidden");
     $("mod-platform-tabs")?.classList.add("hidden");
     $("certificate-udid")?.classList.add("hidden");
@@ -540,6 +541,10 @@ document.addEventListener("DOMContentLoaded",()=>{
     $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
   });
   $("reload").addEventListener("click",loadCatalog);
+  $("open-certificate-free")?.addEventListener("click",()=>{
+    document.querySelector('[data-kind="certfree"]')?.click();
+    $("ipa-tools")?.scrollIntoView({behavior:"smooth",block:"start"});
+  });
   document.querySelectorAll("[data-mod-mode]").forEach(tab=>tab.addEventListener("click",()=>{
     state.modTab=tab.dataset.modMode==="free"?"free":"paid";
     if(state.category==="mod")renderCatalog();

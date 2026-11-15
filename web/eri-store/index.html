@@ -14,7 +14,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="/icon.svg">
 <link rel="stylesheet" href="/styles.css?v=20261115p3"><link rel="stylesheet" href="/shop-theme.css?v=20261115p3"><link rel="stylesheet" href="/eri-decrypt-layout.css?v=20261115dashboard2"><link rel="stylesheet" href="/eri-home-extras.css?v=20261115a">
-<script defer src="/app.js?v=20261115homeipa2"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js?v=20261115direct1"></script>
+<script defer src="/app.js?v=20261115homeipa2"></script><script defer src="/free-certificates.js?v=20261115cert1"></script><script defer src="/udid.js"></script><script defer src="/ipa-tools.js?v=20261115direct1"></script>
 <script>
 document.addEventListener("submit", function(event) {
   if (event.target && event.target.id === "eri-decrypt-search-form") event.preventDefault();
@@ -122,7 +122,7 @@ document.addEventListener("submit", function(event) {
   <div id="certificate-free-shortcut" class="eri-cert-free-shortcut hidden">
     <div><strong>Chứng chỉ Free · ERI Nguyễn</strong>
       <p>Nguồn cộng đồng để tham khảo chứng chỉ iOS miễn phí. Trạng thái và khả năng cài đặt phụ thuộc Apple và thiết bị.</p></div>
-    <a class="btn outline" href="https://website.khoindvn.io.vn/apps.js" target="_blank" rel="noopener noreferrer">Xem nguồn Free</a>
+    <button class="btn outline" id="open-certificate-free" type="button">Chọn KSign / ESign</button>
   </div>
   <div id="products-toolbar" class="products-toolbar"><p id="catalog-message" class="muted" role="status">Đang tải danh mục...</p><span class="products-toolbar-label"><svg class="icon" aria-hidden="true"><use href="#ic-circleCheck"></use></svg> Danh mục cập nhật từ máy chủ</span></div>
   <div id="products" class="products"></div>
@@ -284,11 +284,14 @@ document.addEventListener("submit", function(event) {
   <div id="certificate-free-panel" class="ipa-tool-panel eri-cert-free hidden" role="tabpanel" aria-labelledby="eri-cert-free-title">
     <div class="eri-cert-free-icon"><svg class="icon" aria-hidden="true"><use href="#ic-shield"></use></svg></div>
     <h3 id="eri-cert-free-title">Chứng chỉ Free · ERI Nguyễn</h3>
-    <p>Tham khảo nguồn chứng chỉ iOS miễn phí do cộng đồng chia sẻ. Chứng chỉ có thể hết hạn, bị thu hồi hoặc không phù hợp với UDID của máy.</p>
-    <div class="ipa-tool-actions">
-      <a class="btn primary" href="https://website.khoindvn.io.vn/apps.js" target="_blank" rel="noopener noreferrer">Mở nguồn chứng chỉ Free</a>
+    <p>Chọn KSign hoặc ESign rồi nhấn <strong>Cài đặt</strong> tại đúng chứng chỉ bạn muốn dùng. Mỗi phiên bản có một liên kết cài đặt iOS riêng.</p>
+    <div class="eri-free-tabs" role="group" aria-label="Ứng dụng ký IPA">
+      <button class="eri-free-tab is-active" type="button" data-sign-app="ksign" aria-pressed="true">KSign <span id="eri-ksign-count">17</span></button>
+      <button class="eri-free-tab" type="button" data-sign-app="esign" aria-pressed="false">ESign <span id="eri-esign-count">17</span></button>
     </div>
-    <p class="small">Nguồn bên ngoài: Khoindvn. Liên kết được cung cấp là tệp JavaScript (.js), không phải tệp chứng chỉ .p12. ERI không tự chạy mã nguồn này hoặc tự tải chứng chỉ vào máy.</p>
+    <p id="eri-free-status" class="eri-free-status" role="status" aria-live="polite">Chọn KSign hoặc ESign để xem các bản cài đặt.</p>
+    <div id="eri-free-cards" class="eri-free-cards" aria-live="polite"></div>
+    <p class="small eri-free-note">Cài trực tiếp bằng Safari trên iPhone/iPad. Liên kết cài đặt được cung cấp từ website.khoindvn.io.vn. ERI không xác nhận chứng chỉ còn hiệu lực; iOS có thể từ chối nếu bản ký đã bị thu hồi hoặc không hợp lệ.</p>
   </div>
   <div id="ipa-sign-panel" class="ipa-tool-panel hidden" role="tabpanel">
     <h3>Ký IPA và cài đặt trực tiếp</h3>

@@ -32,3 +32,22 @@
 #certificate-free-shortcut p{margin:5px 0 0;color:#686486;font-size:12px;line-height:1.55}
 #certificate-free-shortcut .btn{flex-shrink:0}
 @media(max-width:680px){#certificate-free-shortcut .btn{width:100%}}
+
+/* Direct iOS free certificate installer cards. */
+#certificate-free-panel.eri-cert-free{max-width:1040px}
+.eri-free-tabs{display:flex;gap:10px;margin:22px 0 12px}
+.eri-free-tab{display:inline-flex;justify-content:center;align-items:center;gap:10px;padding:12px 22px;border:1px solid #dedbf7;background:#fff;border-radius:13px;color:#514b79;font-weight:800;min-width:133px}
+.eri-free-tab.is-active{background:#6150df;border-color:#6150df;color:#fff;box-shadow:0 9px 21px #6050df25}
+.eri-free-tab span{padding:1px 7px;border-radius:8px;background:#ebebf7;color:#554c91;font-size:12px}
+.eri-free-tab.is-active span{background:#ffffff33;color:#fff}
+#certificate-free-panel .eri-free-status{font-size:13px;color:#70698a;margin:8px 0 15px}
+.eri-free-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.eri-free-card{min-width:0;display:grid;grid-template-columns:46px minmax(0,1fr) auto;grid-template-rows:auto auto;align-items:center;gap:8px 11px;padding:15px;border:1px solid #e4e0fa;background:white;border-radius:16px;box-shadow:0 8px 24px #24214c09}
+.eri-free-card-mark{grid-column:1;grid-row:1;width:46px;height:46px;display:grid;place-items:center;border-radius:13px;background:#eae7ff;color:#5b4dde;font-size:24px;font-weight:900}
+.eri-free-card-body{grid-column:2;grid-row:1;min-width:0}
+#certificate-free-panel .eri-free-card-title{font-size:15px;line-height:1.4;margin:0 0 3px;color:#242044;overflow-wrap:anywhere}
+#certificate-free-panel .eri-free-card-issuer{font-size:12px;margin:0;color:#73708b;overflow-wrap:anywhere;line-height:1.45}
+.eri-free-card-index{grid-column:3;grid-row:1;color:#a5a1bf;font-size:12px;font-weight:800;align-self:start}
+#certificate-free-panel .eri-free-install{grid-column:1/-1;grid-row:2;width:100%;padding:10px 15px;min-height:43px;touch-action:manipulation}
+#certificate-free-panel .eri-free-note{margin-top:18px;font-size:12px}
+@media(max-width:700px){.eri-free-cards{grid-template-columns:1fr}.eri-free-tab{flex:1;min-width:0}}
