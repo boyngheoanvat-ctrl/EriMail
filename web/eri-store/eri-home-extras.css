@@ -21,3 +21,14 @@
   #hero .hero-buttons .btn{flex:1 1 calc(50% - 10px);justify-content:center}
   #certificate-free-panel.eri-cert-free{padding:18px;border-radius:16px}
 }
+
+#certificate-free-shortcut.eri-cert-free-shortcut{
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+  padding:16px 18px;margin:14px 0;
+  border:1px solid rgba(104,77,238,.25);border-radius:15px;background:#f7f5ff;
+}
+#certificate-free-shortcut.eri-cert-free-shortcut.hidden{display:none}
+#certificate-free-shortcut strong{color:#292052;font-size:16px}
+#certificate-free-shortcut p{margin:5px 0 0;color:#686486;font-size:12px;line-height:1.55}
+#certificate-free-shortcut .btn{flex-shrink:0}
+@media(max-width:680px){#certificate-free-shortcut .btn{width:100%}}
