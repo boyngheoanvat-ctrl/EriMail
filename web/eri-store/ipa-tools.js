@@ -230,6 +230,9 @@
           // Single first-party download button. The shared ERI Store checker
           // validates exact Bundle ID/version and the actual IPA download path.
           // No redirect to a third-party app page, no imaginary IPA URLs.
+          const downloadFeedback = document.createElement("p");
+          downloadFeedback.className = "ipa-tool-result";
+          downloadFeedback.hidden = true;
           const download = document.createElement("button");
           download.type = "button";
           download.className = "btn primary";
@@ -237,7 +240,9 @@
           download.addEventListener("click", () => {
             const handler = window.ERIStoreIPA?.download;
             if (typeof handler !== "function") {
-              display(appStoreResult, "Công cụ tải IPA của ERI chưa sẵn sàng. Hãy tải lại trang.", "error");
+              downloadFeedback.hidden = false;
+              downloadFeedback.textContent = "Công cụ tải IPA của ERI chưa sẵn sàng. Hãy tải lại trang.";
+              downloadFeedback.dataset.state = "error";
               return;
             }
             handler({
@@ -247,7 +252,7 @@
               country: data.country || "VN",
               app_store_url: data.app_store_url || link,
               cached: existingIPA,
-            });
+            }, downloadFeedback);
           });
           actions.append(download);
           if (typeof data.app_store_url === "string") {
@@ -265,6 +270,7 @@
             } catch { /* No unsafe destination. */ }
           }
           appStoreResult.append(actions);
+          appStoreResult.append(downloadFeedback);
         } catch (error) {
           display(appStoreResult, error.name === "AbortError"
             ? "App Store phản hồi quá lâu. Hãy thử lại."
