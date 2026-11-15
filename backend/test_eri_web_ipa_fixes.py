@@ -47,7 +47,9 @@ assert '/api/v1/tools/ipa/decrypt/vault?' in decrypt
 assert 'const job = await request("/api/v1/tools/ipa/decrypt/requests"' in decrypt
 assert "downloadFromERI" in decrypt
 assert "window.ERIStoreIPA = Object.freeze({download: downloadFromERI})" in decrypt
-assert 'button("Tải IPA", () => downloadFromERI(item), true)' in decrypt
+assert 'button("Tải IPA", () => downloadFromERI(item, feedback), true)' in decrypt
+assert "feedback.hidden = true" in decrypt
+assert "downloadFeedback.hidden = true" in tools
 assert "Cài qua App Store" in decrypt
 assert "Xem tải IPA trên Decrypt.day" not in decrypt
 assert "decrypt.day/app/id" not in decrypt
