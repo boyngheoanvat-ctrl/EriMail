@@ -85,6 +85,11 @@ class VaultTests(unittest.TestCase):
                 self.assertEqual(c.execute("select username from customers").fetchone()[0],"existing")
             next_info=vault.snapshot_sqlite(path)
             self.assertGreater(next_info["generation"],info["generation"])
+            third = vault.snapshot_sqlite(path)
+            assert third["previous"]["id"] == next_info["id"]
+            assert not vault.chunk_exists(info["id"],kind="snapshots")
+            assert vault.chunk_exists(next_info["id"],kind="snapshots")
+            assert vault.chunk_exists(third["id"],kind="snapshots")
 
     def test_upload_part_and_recovery_metadata(self):
         vault = MemoryVault()

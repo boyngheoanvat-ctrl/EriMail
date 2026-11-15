@@ -112,6 +112,17 @@ class PersistenceIntegration(unittest.TestCase):
                     downloaded=api.get(f"/api/v1/mods/{product_id}/download")
                     self.assertEqual(downloaded.status_code,200,downloaded.text[:300])
                     self.assertEqual(downloaded.content,data)
+                    deleted=api.delete(f"/api/v1/admin/catalog/ipa/{product_id}",headers=admin)
+                    self.assertEqual(deleted.status_code,200,deleted.text)
+                    self.assertEqual(deleted.json()["cloud_cleanup_pending"],0)
+                    self.assertFalse(vault.chunk_exists(upload_id,0))
+                    # Account credentials remain in snapshots even after IPA deletion.
+                    er.DB.unlink()
+                    vault.restore_sqlite(er.DB)
+                    again=api.post("/api/v1/auth/login",json={
+                        "username":username,"password":password
+                    })
+                    self.assertEqual(again.status_code,200,again.text)
                 finally:
                     er._eri_vault=previous
 
