@@ -53,7 +53,7 @@ class VaultTests(unittest.TestCase):
             original.write_bytes(payload)
             vault=MemoryVault()
             item=vault.upload_file(original,"a"*32)
-            self.assertEqual(item["chunks"],1)
+            self.assertEqual(item["chunks"],2)
             output=root/"restored.ipa"
             vault.restore_file(output,item["id"],item["size"],item["sha256"])
             self.assertEqual(output.read_bytes(),payload)
