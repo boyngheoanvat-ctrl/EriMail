@@ -47,7 +47,6 @@ with tempfile.TemporaryDirectory(prefix="eri-auto-r2-") as root:
     manifest.write_text(json.dumps({"items": [source]}), encoding="utf-8")
     assert matrix.get_ids(manifest) == [source_id]
     assert matrix.get_ids(manifest, source_id) == [source_id]
-    assert matrix.get_ids(manifest, "missing") if False else True
     try:
         matrix.get_ids(manifest, "missing")
         raise AssertionError("Unapproved ID should not dispatch")
