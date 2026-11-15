@@ -31,21 +31,26 @@ assert "Kiểm tra và tạo link tải IPA" not in html
 assert 'id="ipa-sign-panel"' in html
 assert 'name="ipa"' in html and 'name="p12"' in html
 assert 'name="mobileprovision"' in html and 'name="password"' in html
-assert 'sign-jobs.js?v=20261115uploadphase2' in html
+assert 'sign-jobs.js?v=20261115uploadparallel1' in html
 assert '"eri_store_signing_job_v2"' in chunks
 assert 'if (!busy)' in chunks
 assert 'if (polling || (busy && !activeSigner)) return;' in chunks
 assert 'action("Tiếp tục tải IPA", () => run(form))' in chunks
-assert 'if (received.has(i)) continue;' in chunks
-assert 'if (!token()) throw new Error' in chunks
+assert 'filter(i=>!received.has(i))' in chunks
+assert 'if(!token())throw new Error' in chunks
 assert 'const confirmedBytes = () => Array.from(received).reduce' in chunks
 assert 'await putChunk(job.job_id,i,slice,digest);' in chunks
-assert 'const remote = await api("/api/v1/tools/ipa/sign-jobs/" + job.job_id);' in chunks
+assert 'const concurrency=Math.min(3,pending.length);' in chunks
+assert 'await Promise.all(Array.from({length:concurrency},()=>uploadWorker()));' in chunks
+assert 'const i=pending[cursor++];' in chunks
+assert 'if(received.size!==chunks)' in chunks
+assert 'if(!failed)failed=error;' in chunks
+assert 'const remote=await api("/api/v1/tools/ipa/sign-jobs/"+job.job_id);' in chunks
 assert 'await watch(job.job_id, true);' in chunks
 assert 'https://eri-api-dag8.onrender.com' in chunks
 assert 'decrypt.160-191-242-70.sslip.io' not in chunks
 assert 'https://eri-f4-bridge.onrender.com' not in chunks
-assert 'status("Đã nhận " + pct + "%' in chunks
+assert 'status("Đã nhận "+pct+"%' in chunks
 assert 'percentage + "% · "' in tools
 assert 'received.size * job.chunk_bytes' not in chunks
 
@@ -57,7 +62,7 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v35" in service
+assert "eri-store-v40" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
 assert "decrypt-store.js?v=20261115erivault3" in html
@@ -104,15 +109,17 @@ assert 'id="certificate-free-panel"' in html
 assert 'id="certificate-udid"' in html
 assert 'https://website.khoindvn.io.vn/apps.js' not in html
 assert 'eri-home-extras.css?v=20261115certificatetab1' in html
-assert 'app.js?v=20261115certificatetab1' in html
+assert 'app.js?v=20261115autosign1' in html
 app = (web / "app.js").read_text()
 assert 'openCategory("certificate",tab.dataset.certMode)' in app
 assert 'freeCertificates=category==="certificate"&&certMode==="free"' in app
 assert 'category==="certificate"?"Chứng chỉ BÁN"' in app
-assert 'id="ipa-sign-server"' in html
-assert 'id="ipa-sign-iphone"' in html
-assert 'data-sign-mode="server"' in html and 'data-sign-mode="iphone"' in html
-assert 'id="open-sign-local"' in html
+assert 'id="ipa-sign-form"' in html
+assert 'id="ipa-sign-iphone"' not in html
+assert 'id="ipa-sign-server"' not in html
+assert 'data-sign-mode=' not in html
+assert 'id="open-sign-local"' not in html
+assert '[data-sign-mode]' not in app
 free_js = (web / "free-certificates.js").read_text()
 assert 'eri-free-card' in free_js and 'product--certificate' in free_js
 assert 'install.setAttribute("href",item.url)' in free_js
