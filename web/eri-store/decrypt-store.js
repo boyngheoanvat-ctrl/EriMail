@@ -70,8 +70,10 @@
   // detail-page link is NOT a verified IPA binary or a direct install URL.
   function decryptDayAppPage(item) {
     const direct = String(item?.app_id || "");
-    const storeId = String(item?.app_store_url || "")
-      .match(/\\/id([0-9]{6,15})(?:\\/|$|[?#])/)?.[1];
+    const appleUrl = safeStoreLink(item?.app_store_url);
+    const storeId = appleUrl
+      ? new URL(appleUrl).pathname.match(/id([0-9]{6,15})/)?.[1]
+      : null;
     const id = /^[0-9]{6,15}$/.test(direct) ? direct : storeId;
     return id && /^[0-9]{6,15}$/.test(id)
       ? "https://decrypt.day/app/id" + id : null;
