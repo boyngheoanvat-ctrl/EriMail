@@ -221,10 +221,27 @@ class ERIVault:
         pointer = {"id": result["id"], "generation": generation,
                    "size": result["size"], "chunks": result["chunks"],
                    "sha256": result["sha256"]}
+        # Keep the most recent previous generation to permit manual recovery.
+        # Remove the generation before it only AFTER the pointer commits.
+        if existing is not None:
+            pointer["previous"] = {
+                "id": existing["id"], "size": existing["size"],
+                "sha256": existing["sha256"], "chunks": existing["chunks"]
+            }
         data = json.dumps(pointer, separators=(",", ":")).encode("utf-8")
         confirmation = json.loads(self._request("PUT", "/pointer", data, "application/json"))
         if confirmation.get("ok") is not True or confirmation.get("generation") != generation:
             raise VaultError("Database snapshot not committed")
+        old = existing.get("previous") if isinstance(existing, dict) else None
+        if isinstance(old, dict):
+            try:
+                self.delete_file(old["id"], int(old["size"]), kind="snapshots")
+            except (VaultError, FileNotFoundError, KeyError, TypeError, ValueError):
+                # A failed cleanup must never undo a confirmed durable commit.
+                import logging
+                logging.getLogger("eri.persistence").warning(
+                    "Could not prune an old cloud SQLite snapshot"
+                )
         return pointer
 
     def restore_sqlite(self, target: Path):
