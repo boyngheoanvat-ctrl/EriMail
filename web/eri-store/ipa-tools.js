@@ -227,45 +227,30 @@
             }
           } catch (_) { /* Apple metadata still renders when inventory is offline. */ }
 
-          // App Store URLs expose metadata only. ERI never invents IPA links.
-          if (!existingIPA) {
-            const note = document.createElement("p");
-            note.className = "small";
-            note.textContent = "ERI chưa có IPA đã kiểm định cho ứng dụng này. "
-              + "Bạn có thể kiểm tra ngay trang ứng dụng trên Decrypt.day; "
-              + "tính sẵn có của file và phiên bản cần xác minh tại nguồn.";
-            appStoreResult.append(note);
-          }
-
+          // Verified ERI IPA only. Do not redirect to a third-party catalog:
+          // Decrypt.day has no verified public direct-download API.
           if (existingIPA) {
             const download = document.createElement("a");
             download.className = "btn primary";
             download.href = API + existingIPA.download_path;
             download.rel = "noopener noreferrer";
-            download.textContent = "Tải IPA từ kho ERI (v" + existingIPA.version + ")";
+            download.textContent = "Tải IPA";
             actions.append(download);
+          } else {
+            const waiting = document.createElement("button");
+            waiting.type = "button";
+            waiting.className = "btn primary";
+            waiting.textContent = "Tải IPA";
+            waiting.disabled = true;
+            waiting.title = "Nguồn tải IPA trực tiếp đang được cập nhật";
+            waiting.setAttribute("aria-label", "Tải IPA chưa khả dụng: đang cập nhật nguồn");
+            actions.append(waiting);
+            const note = document.createElement("p");
+            note.className = "small";
+            note.textContent = "Nguồn tải trực tiếp đang được cập nhật. Chỉ tệp đã xác minh mới có thể tải.";
+            appStoreResult.append(note);
           }
 
-          // Open the provider's verified app-detail route, never a made-up
-          // direct .ipa/download URL or a request/decrypt endpoint.
-          let externalAppId = /^[0-9]{6,15}$/.test(String(data.app_id || ""))
-            ? String(data.app_id) : null;
-          if (!externalAppId) {
-            try {
-              const appStore = new URL(data.app_store_url || link);
-              if (appStore.protocol === "https:" && appStore.hostname === "apps.apple.com")
-                externalAppId = appStore.pathname.match(/id([0-9]{6,15})/)?.[1] || null;
-            } catch {}
-          }
-          if (externalAppId && !existingIPA) {
-            const external = document.createElement("a");
-            external.className = "btn primary";
-            external.href = "https://decrypt.day/app/id" + externalAppId;
-            external.target = "_blank";
-            external.rel = "noopener noreferrer";
-            external.textContent = "Xem tải IPA trên Decrypt.day";
-            actions.append(external);
-          }
           const decryptTab = document.querySelector('[data-kind="decrypt"]');
           if (decryptTab && $("eri-decrypt-query")) {
             const browseVault = () => {
@@ -278,7 +263,7 @@
             const browse = document.createElement("button");
             browse.type = "button";
             browse.className = "btn outline";
-            browse.textContent = "Xem kho IPA ERI / phiên bản";
+            browse.textContent = "Xem kho IPA ERI";
             browse.addEventListener("click", browseVault);
             actions.append(browse);
           }
