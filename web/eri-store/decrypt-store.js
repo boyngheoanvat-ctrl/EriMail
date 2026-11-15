@@ -7,12 +7,14 @@
   const QUERY_DRAFT = "eri.decrypt.query.v1";
   const REGION_DRAFT = "eri.decrypt.region.v1";
   const ACTIVE_JOB = "eri.decrypt.job.v1";
+  const ACTIVE_F4_JOB = "eri.decrypt.f4.job.v1";
   const $ = id => document.getElementById(id);
   const getToken = () => sessionStorage.getItem(TOKEN) || localStorage.getItem(TOKEN) || "";
   let vaultOffset = 0;
   const vaultLimit = 24;
   let vaultTotal = 0;
   let activeJob = null;
+  let activeF4Job = null;
   let pollInFlight = false;
   let historyInFlight = false;
   let historyQueued = false;
@@ -447,6 +449,36 @@
         if (complete) installActions(node,job.result);
         grid.append(node);
       }
+      // Include server-side F4 tasks in the same history, scoped to ERI user.
+      try {
+        const fromF4 = await request("/api/v1/tools/ipa/decrypt/f4/jobs",{auth:true});
+        if (startingToken !== getToken()) return;
+        for (const job of (Array.isArray(fromF4.items) ? fromF4.items : [])) {
+          const node = card("article","eri-decrypt-card");
+          node.append(card("strong","",job.name || job.bundle_id));
+          node.append(card("p","small","F4TEAM · " + (job.bundle_id || "") +
+            " · v" + (job.version || "—")));
+          node.append(card("p",job.state === "completed" ?
+            "eri-decrypt-available" : "eri-decrypt-unavailable",
+            job.state === "completed" ? "F4 trả link IPA (chưa kiểm định)" :
+              job.state === "failed" ? "F4 báo thất bại" : "F4 đang xử lý"));
+          node.append(button("Xem tác vụ F4",() => {
+            activeF4Job = job.job_id;
+            activeJob = null;
+            try {
+              localStorage.setItem(ACTIVE_F4_JOB,activeF4Job);
+              localStorage.removeItem(ACTIVE_JOB);
+            } catch {}
+            renderF4Job(job);
+            $("eri-decrypt-request-section")?.scrollIntoView({behavior:"smooth",block:"center"});
+          }));
+          const f4Url = trustedF4Download(job.download_url);
+          if (job.state === "completed" && f4Url) node.append(link("Tải IPA F4",f4Url,true));
+          grid.append(node);
+        }
+      } catch (_) {
+        // An older ERI backend or unavailable F4 provider should not hide ERI history.
+      }
     } catch (error) {
       if (startingToken === getToken()) grid.replaceChildren(card("p","small",error.message));
     } finally {
@@ -463,19 +495,100 @@
         button("Đăng nhập", () => document.querySelector('[data-view="account"]')?.click(), true));
       return;
     }
-    notice("Đang gửi yêu cầu xử lý...");
+    notice("Đang kiểm tra quyền tác vụ F4TEAM...");
+    let f4Enabled = false;
+    try {
+      const capabilities = await request("/api/v1/tools/ipa/decrypt/f4/capabilities");
+      f4Enabled = capabilities.enabled === true;
+    } catch (_) {
+      // Legacy ERI API: preserve the existing authorized-source request flow.
+    }
+    if (f4Enabled) {
+      try {
+        const f4 = await request("/api/v1/tools/ipa/decrypt/f4/start", {
+          auth:true, body:{target,country:country?.toLowerCase()||"auto",version:version||""}
+        });
+        activeF4Job = f4.job_id;
+        activeJob = null;
+        try {
+          localStorage.setItem(ACTIVE_F4_JOB, activeF4Job);
+          localStorage.removeItem(ACTIVE_JOB);
+        } catch {}
+        renderF4Job(f4);
+        await loadHistory();
+        return;
+      } catch (error) {
+        notice("F4TEAM không khởi tạo được tác vụ: " + error.message, "error");
+        return;
+      }
+    }
+    notice("Chưa có quyền tác vụ F4TEAM; đang lưu yêu cầu vào kho ERI.");
     try {
       const job = await request("/api/v1/tools/ipa/decrypt/requests", {
         auth:true, body:{target,country:country?.toLowerCase()||"auto",version:version||""}
       });
       activeJob = job.job_id;
-      try {localStorage.setItem(ACTIVE_JOB,activeJob);} catch {}
+      activeF4Job = null;
+      try {
+        localStorage.setItem(ACTIVE_JOB,activeJob);
+        localStorage.removeItem(ACTIVE_F4_JOB);
+      } catch {}
       renderJob(job);
       await loadHistory();
     } catch(error) {
       notice(error.message, "error");
     }
   }
+  function trustedF4Download(value) {
+    try {
+      const url = new URL(value);
+      const path = url.pathname;
+      const allowedPath =
+        /^\/api\/decrypt\/download\/[a-f0-9]{32}$/i.test(path) ||
+        /^\/dl_dec\/[A-Za-z0-9_-]{8,128}\/[0-9]{8,15}\/[A-Za-z0-9._%-]+\.ipa$/i.test(path);
+      return url.protocol === "https:" &&
+        ["decrypt.160-191-242-70.sslip.io","160-191-242-70.sslip.io"].includes(url.hostname) &&
+        !url.username && !url.password && !url.search && !url.hash && allowedPath
+          ? url.href : null;
+    } catch { return null; }
+  }
+
+  function renderF4Job(job) {
+    $("eri-decrypt-request-section")?.classList.remove("hidden");
+    const url = job.state === "completed" ? trustedF4Download(job.download_url) : null;
+    const measured = job.state === "processing" && job.progress !== null &&
+      Number.isFinite(Number(job.progress)) && Number(job.progress) >= 0 &&
+      Number(job.progress) < 100;
+    const pct = url ? 100 : measured ? Math.floor(Number(job.progress)) : null;
+    text("eri-decrypt-job-pct",pct === null ?
+      (job.state === "failed" ? "Lỗi F4" : "Chờ F4TEAM") : pct + "%");
+    const bar = $("eri-decrypt-job-progress");
+    if (bar) {
+      bar.hidden = pct === null;
+      bar.style.display = pct === null ? "none" : "";
+      bar.value = pct === null ? 0 : pct;
+    }
+    const label = url ? "Sẵn sàng link từ F4" :
+      job.state === "failed" ? "F4 báo thất bại" : "F4 đang xử lý / đang chờ";
+    text("eri-decrypt-job-stage",
+      (job.name || "Ứng dụng") + " · v" + (job.version || "—") +
+      " · " + label + "\n" + (job.message || ""));
+    const actions = $("eri-decrypt-job-actions");
+    if (actions) actions.replaceChildren();
+    if (url) {
+      if (actions) {
+        const download = link("Tải IPA từ F4TEAM (nguồn ngoài)", url, true);
+        download.referrerPolicy = "no-referrer";
+        actions.append(download);
+      }
+      notice("F4 đã trả link IPA; ERI chưa kiểm định nội dung hoặc khả năng cài đặt.", "success");
+    } else if (job.state === "failed") {
+      notice(job.message || "F4TEAM xử lý thất bại.", "error");
+    } else {
+      notice("Đã gửi tác vụ F4TEAM · Chỉ hiển thị tiến độ do F4 cung cấp.", "info");
+    }
+  }
+
   function renderJob(job) {
     const section = $("eri-decrypt-request-section");
     section?.classList.remove("hidden");
@@ -517,9 +630,15 @@
     }
   }
   async function refreshJob() {
-    if (pollInFlight || !activeJob || !getToken()) return;
+    if (pollInFlight || (!activeJob && !activeF4Job) || !getToken()) return;
     pollInFlight=true;
     try {
+      if (activeF4Job) {
+        const f4 = await request("/api/v1/tools/ipa/decrypt/f4/jobs/" + activeF4Job,{auth:true});
+        renderF4Job(f4);
+        if (f4.state === "completed" || f4.state === "failed") loadHistory();
+        return;
+      }
       const result = await request("/api/v1/tools/ipa/decrypt/requests/" + activeJob,{auth:true});
       renderJob(result);
       // Refresh history from the server after a completed request is observed.
@@ -527,7 +646,11 @@
     } catch (error) {
       if (/không tìm thấy yêu cầu|404/.test(error.message)) {
         activeJob = null;
-        try{localStorage.removeItem(ACTIVE_JOB);}catch{}
+        activeF4Job = null;
+        try{
+          localStorage.removeItem(ACTIVE_JOB);
+          localStorage.removeItem(ACTIVE_F4_JOB);
+        }catch{}
       } else {
         notice(error.message, "error");
       }
@@ -544,6 +667,8 @@
       if ([...$("eri-decrypt-region").options].some(o=>o.value===saved))
         $("eri-decrypt-region").value = saved;
       activeJob = localStorage.getItem(ACTIVE_JOB);
+      activeF4Job = localStorage.getItem(ACTIVE_F4_JOB);
+      if (activeF4Job) activeJob = null;
     } catch {}
     $("eri-decrypt-query").addEventListener("input", () => {
       try {localStorage.setItem(QUERY_DRAFT,$("eri-decrypt-query").value.slice(0,500));} catch{}
@@ -610,12 +735,13 @@
     $("eri-decrypt-versions-close")?.addEventListener("click",()=>$("eri-decrypt-versions-section")?.classList.add("hidden"));
     loadVault();
     loadHistory();
-    if (activeJob && getToken()) refreshJob();
+    if ((activeJob || activeF4Job) && getToken()) refreshJob();
     $("eri-decrypt-refresh-history")?.addEventListener("click",loadHistory);
     window.addEventListener("eri-store:session-changed", () => {
       // Never leave a previous customer's requests visible after logout.
       if (!getToken()) {
         activeJob = null;
+        activeF4Job = null;
         $("eri-decrypt-request-section")?.classList.add("hidden");
         try {localStorage.removeItem(ACTIVE_JOB);}catch{}
       }
@@ -625,11 +751,11 @@
     document.addEventListener("visibilitychange",() => {
       if (document.visibilityState === "visible") {
         loadHistory();
-        if (activeJob) refreshJob();
+        if (activeJob || activeF4Job) refreshJob();
       }
     });
     setInterval(() => {
-      if (activeJob && document.visibilityState === "visible" && !document.hidden) refreshJob();
+      if ((activeJob || activeF4Job) && document.visibilityState === "visible" && !document.hidden) refreshJob();
     },4000);
   }
   document.addEventListener("DOMContentLoaded",init);
