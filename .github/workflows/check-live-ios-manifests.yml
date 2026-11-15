@@ -48,7 +48,8 @@ jobs:
                   assert 'id="certificate-subtabs"' in text
                   assert 'data-cert-mode="free"' in text
                   assert 'data-cert-mode="paid"' in text
-                  assert 'id="ipa-sign-server"' in text and 'id="ipa-sign-iphone"' in text
+                  assert 'id="ipa-sign-form"' in text
+                  assert 'id="ipa-sign-server"' not in text and 'id="ipa-sign-iphone"' not in text
               elif "app.js" in suffix:
                   assert 'openCategory("certificate",tab.dataset.certMode)' in text
                   assert 'freeCertificates=category==="certificate"&&certMode==="free"' in text
