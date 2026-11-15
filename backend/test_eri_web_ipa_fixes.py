@@ -36,41 +36,50 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v31" in service
+assert "eri-store-v32" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
-assert "decrypt-store.js?v=20261115direct1" in html
-assert 'request("/api/v1/tools/ipa/decrypt/start"' not in decrypt
-assert 'request("/api/v1/tools/ipa/decrypt/job/"' not in decrypt
-assert '/api/v1/tools/ipa/decrypt/requests"' in decrypt
-assert '/api/v1/tools/ipa/decrypt/vault?' in decrypt
-assert 'const job = await request("/api/v1/tools/ipa/decrypt/requests"' in decrypt
-assert "downloadFromERI" in decrypt
-assert "window.ERIStoreIPA = Object.freeze({download: downloadFromERI})" in decrypt
-assert 'button("Tải IPA", () => downloadFromERI(item, feedback), true)' in decrypt
-assert "feedback.hidden = true" in decrypt
-assert "downloadFeedback.hidden = true" in tools
-assert "Cài qua App Store" in decrypt
-assert "Xem tải IPA trên Decrypt.day" not in decrypt
-assert "decrypt.day/app/id" not in decrypt
+assert "decrypt-store.js?v=20261115dashboard2" in html
+assert "eri-decrypt-layout.css?v=20261115dashboard2" in html
+
+# ERI hosts a branded view, but provider API data must stay sourced from
+# the F4TEAM host that served the supplied page, not empty ERI metadata.
+assert 'const PROVIDER = "https://decrypt.160-191-242-70.sslip.io"' in decrypt
+assert '/api/decrypt/search?' in decrypt
+assert '/api/decrypt/library?' in decrypt
+assert '/api/decrypt/versions?' in decrypt
+assert '/api/decrypt/app-info?' in decrypt
+assert "window.ERIF4Decrypt" in decrypt
+assert "window.ERIStoreIPA" in decrypt
+assert "sourceDownload" in decrypt
+assert 'credentials:"omit"' in decrypt
+assert "X-CSRF-TOKEN" not in decrypt
+assert "4c00c79dc63e3c5600328e1616518ad15c53fd67bdf39da2a0a1b7d23327bcd6" not in html
+
+# The new layout closely follows the supplied F4TEAM UI and is uniquely
+# branded ERI, with genuine catalog numbers instead of hardcoded 621 IPA.
+for identifier in (
+    "eri-decrypt-region", "eri-decrypt-query", "eri-decrypt-search-button",
+    "eri-decrypt-result-section", "eri-decrypt-vault-section",
+    "eri-decrypt-vault-filter", "eri-decrypt-vault-sort",
+    "eri-v-category-bar", "eri-v-detail-modal",
+    "eri-v-versions-modal", "eri-v-job-panel",
+    "eri-v-direct-versions", "eri-v-direct-check",
+):
+    assert f'id="{identifier}"' in html, identifier
+assert "621" not in html
+assert "F4TEAM" not in html
+assert "F4Decrypt" not in html
+assert "ERI DECRYPT" in html
+assert "BY ERI NGUYỄN" in html
+
+# Existing signing, upload, and App Store tool behavior remain intact.
 assert 'id="eri-decrypt-direct-request"' not in html
-assert 'id="eri-decrypt-direct-version"' not in html
-assert 'id="eri-decrypt-versions-section"' not in html
 assert 'id="eri-decrypt-request-section"' not in html
 assert 'id="eri-decrypt-history-section"' not in html
-assert "Chọn phiên bản" not in html
-assert "Chưa có IPA" not in decrypt.split("function searchResult(item) {")[1].split("function publicCatalog()")[0]
-assert "Yêu cầu IPA" not in decrypt.split("function searchResult(item) {")[1].split("function publicCatalog()")[0]
-assert "isRemoteDownload" in decrypt
-assert "trustedSignedR2" in decrypt
-assert "Tải IPA từ ERI R2" in decrypt
-assert "Hiện máy chủ ERI không có tệp IPA đã kiểm tra đúng phiên bản" in decrypt
-assert '"/api/v1/tools/ipa/decrypt/vault?q="' in tools
+assert "downloadFeedback.hidden = true" in tools
+assert "window.ERIStoreIPA?.download" in tools
 assert "/api/v1/tools/ipa/decrypt/external?" not in tools
-assert "/api/v1/tools/ipa/decrypt/f4/" not in decrypt
-assert "F4TEAM" not in decrypt
-assert "F4TEAM" not in tools
-
 # No bogus IPA URL from App Store link is ever generated.
 assert not re.search(r'ipa.*download.*apps\.apple\.com', tools, re.I)
 assert 'Link App Store không chứa IPA đã giải mã FairPlay' not in tools
@@ -98,4 +107,4 @@ else:
     assert not (admin_html.is_file() ^ admin_js.is_file()), "Admin upload UI must include both HTML and JS"
     print("ERI Admin uploader is absent from this checkout; skipping its independent checks.")
 
-print("ERI STORE: direct ERI-only IPA download, no version/status banners or Decrypt.day redirect OK")
+print("ERI STORE: ERI-branded F4TEAM public catalog UI and safe source links OK")
