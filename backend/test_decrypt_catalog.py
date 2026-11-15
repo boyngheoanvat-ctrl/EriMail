@@ -173,6 +173,71 @@ with tempfile.TemporaryDirectory(prefix="eri-decrypt-") as root:
         stale = client.get(base + "/requests/" + job_id,headers=auth).json()
         assert stale["progress"] is None and stale["result"] is None
 
+    # F4 /search returns an items list, not a top-level vault_entry.
+    # A download is displayed only when its Apple track ID matches exactly,
+    # and only a strictly validated F4 download route may be linked.
+    import json
+
+    class F4Reply:
+        status = 200
+        def __init__(self, content):
+            self.content = json.dumps(content).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self, _limit):
+            return self.content
+
+    f4_target = "https://apps.apple.com/vn/app/ngh%E1%BB%8Bch-th%E1%BB%A7y-h%C3%A0n/id6743144418?l=vi&ppid=example"
+    f4_token = "a" * 32
+    f4_path = "/api/decrypt/download/" + f4_token
+    f4_search = {"ok": True, "items": [
+        {"item_id": "6743144419", "title": "Unrelated Game",
+         "vault_cached": {"dl_url": "/api/decrypt/download/" + "b" * 32}},
+        {"item_id": "6743144418", "title": "Nghịch Thủy Hàn",
+         "bundle_id": "com.example.nth", "version": "1.2.3",
+         "vault_cached": {"dl_url": f4_path}}
+    ]}
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(f4_search)):
+        f4 = client.get(base + "/external", params={"target": f4_target})
+    assert f4.status_code == 200, f4.text
+    assert f4.json()["download_ready"] is True
+    assert f4.json()["download_url"] == "https://decrypt.160-191-242-70.sslip.io" + f4_path
+    assert f4.json()["version"] == "1.2.3"
+    assert f4.json()["verification"]["file_exists"] is False
+
+    # A matching app with no cached IPA must not show a fake download.
+    f4_missing = {"ok": True, "items": [{
+        "app_id": 6743144418, "title": "Nghịch Thủy Hàn", "vault_cached": None
+    }]}
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(f4_missing)):
+        missing = client.get(base + "/external", params={"target": f4_target})
+    assert missing.status_code == 200
+    assert missing.json()["found"] is True
+    assert missing.json()["download_ready"] is False
+    assert missing.json()["download_url"] is None
+
+    # Do not accept a download URL from a different app or third-party host.
+    wrong = {"ok": True, "items": [{
+        "app_id": 6743144419, "vault_cached": {"dl_url": f4_path}
+    }]}
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(wrong)):
+        wrong_response = client.get(base + "/external", params={"target": f4_target})
+    assert wrong_response.json()["download_ready"] is False
+
+    evil = {"ok": True, "items": [{
+        "app_id": 6743144418,
+        "vault_cached": {"dl_url": "https://example.invalid/IPA.ipa"}
+    }]}
+    with patch.object(decrypt_catalog.urllib.request, "urlopen",
+                      return_value=F4Reply(evil)):
+        evil_response = client.get(base + "/external", params={"target": f4_target})
+    assert evil_response.json()["download_ready"] is False
+
     print("Apple regions/search/versions, real free vault, durable jobs and isolation: OK")
     # Exercise the independent worker in a fresh process with its own isolated DB.
     import subprocess
