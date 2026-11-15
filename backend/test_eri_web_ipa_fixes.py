@@ -45,6 +45,7 @@ assert "eri-decrypt-layout.css?v=20261115dashboard2" in html
 # ERI hosts a branded view, but provider API data must stay sourced from
 # the F4TEAM host that served the supplied page, not empty ERI metadata.
 assert 'const PROVIDER = "https://decrypt.160-191-242-70.sslip.io"' in decrypt
+assert "connect-src" in html and "https://decrypt.160-191-242-70.sslip.io" in html
 assert '/api/decrypt/search?' in decrypt
 assert '/api/decrypt/library?' in decrypt
 assert '/api/decrypt/versions?' in decrypt
