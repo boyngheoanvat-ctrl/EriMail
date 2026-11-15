@@ -41,7 +41,7 @@ def validate_source(url):
     host = (parts.hostname or "").lower().rstrip(".")
     if (parts.scheme != "https" or not host or host not in permitted_hosts()
             or parts.port not in (None, 443) or parts.username
-            or parts.password or parts.fragment):
+            or parts.password or parts.fragment or parts.query):
         raise ValueError("Chỉ nhận HTTPS từ host IPA do ERI cho phép")
     try:
         ipaddress.ip_address(host)
