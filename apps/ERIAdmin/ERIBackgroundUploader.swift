@@ -478,20 +478,24 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                     didSendBodyData bytesSent: Int64,
                     totalBytesSent: Int64,
                     totalBytesExpectedToSend: Int64) {
-        guard let current = record, task.taskDescription?.hasPrefix("part:") == true,
+        guard let current = record,
+              partIndex(task.taskDescription, for: current) != nil,
               totalBytesExpectedToSend > 0 else { return }
-        // Informational progress while bytes are on the wire; the server still
-        // must acknowledge the entire chunk before the checkpoint advances.
+        // The progress bar can include bytes in flight; only the server's
+        // successful response advances the durable checkpoint.
         let display = Double(current.acknowledgedBytes) + Double(totalBytesSent)
-        progress = min(0.999, display / Double(current.size))
+        progress = min(0.999, display / Double(max(1, current.size)))
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     didCompleteWithError error: Error?) {
         guard var current = record else { return }
-        sending = false
+        let isComplete = isCompleteTask(task.taskDescription, for: current)
+        let index = partIndex(task.taskDescription, for: current)
+        // Ignore responses from an older upload ID after a renewed session.
+        guard isComplete || index != nil else { return }
+        if renewing { return }
         let code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
-        let isComplete = task.taskDescription == "complete"
         let expectedStatus = isComplete ? 201 : 200
 
         if error == nil && code == expectedStatus {
@@ -500,8 +504,9 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                 record = nil
                 pending = false
                 active = false
+                sending = false
                 progress = 1.0
-                status = "Đã upload 100% và cập nhật sản phẩm lên máy chủ."
+                status = "IPA đã tải xong và sản phẩm đã được máy chủ xác nhận."
                 persist()
                 Task.detached(priority: .utility) {
                     if let folder = try? Self.jobFolder(id) {
@@ -511,13 +516,17 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                 return
             }
 
-            if task.taskDescription == "part:" + String(current.nextPart) {
-                current.acknowledgedBytes += min(current.chunkBytes,
-                    current.size - current.nextPart * current.chunkBytes)
-                current.nextPart += 1
+            if let index, index >= 0, index < current.partCount {
+                var confirmed = receivedIndices(current)
+                confirmed.insert(index)
+                current.acknowledgedParts = confirmed.sorted()
+                current.acknowledgedBytes = receivedBytes(current, confirmed)
+                current.nextPart = (0..<current.partCount).first {
+                    !confirmed.contains($0)
+                } ?? current.partCount
                 current.failures = 0
                 record = current
-                progress = Double(current.acknowledgedBytes) / Double(current.size)
+                progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
                 persist()
                 scheduleNext()
                 return
@@ -525,34 +534,48 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         }
 
         if code == 404 {
-            progress = Double(current.acknowledgedBytes) / Double(current.size)
+            progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
             if current.metadata == nil {
                 active = false
                 retryBlocked = true
-                status = "Phiên upload cũ đã mất sau khi máy chủ khởi động lại. Hãy bấm Bỏ phiên cũ, rồi nhập lại."
+                status = "Phiên upload đã hết hạn; vui lòng mở ERI ADMIN để chọn lại tệp."
             } else if !renewing {
                 renewing = true
                 active = true
-                status = "HTTP 404: Máy chủ mất phiên tải; đang tạo lại từ dữ liệu trên iPhone..."
+                status = "Đang khôi phục phiên upload bị mất trên máy chủ..."
+                // Cancel queued requests for the obsolete session, then
+                // create a new session without deleting local cached IPA.
+                session.getAllTasks { tasks in
+                    for outstanding in tasks {
+                        let description = outstanding.taskDescription ?? ""
+                        if description.hasPrefix("part:" + current.id + ":") ||
+                           description == "complete:" + current.id {
+                            outstanding.cancel()
+                        }
+                    }
+                }
                 Task { await renewMissingSession() }
             }
             return
         }
-        // A missing HTTP response can happen even when the server committed the
-        // chunk. The endpoint is idempotent for the same SHA-256 checksum.
+
+        // A missing response can happen after the server persisted the part.
+        // Retrying the same part is safe: the API checks its SHA-256 marker.
         current.failures += 1
         record = current
-        progress = Double(current.acknowledgedBytes) / Double(current.size)
+        progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
         persist()
-        if current.failures <= 3 {
-            status = "Kết nối gián đoạn, iOS đang gửi lại phần chưa xác nhận..."
+        if current.failures <= 3 && !retryBlocked {
+            status = "Kết nối gián đoạn; đang gửi lại phần chưa được xác nhận..."
             scheduleNext()
         } else {
             retryBlocked = true
             active = false
-            status = "Tạm dừng upload (HTTP " + String(code) + "): " +
+            status = "Tạm dừng (HTTP " + String(code) + "): " +
                 (error?.localizedDescription ?? "Máy chủ chưa xác nhận") +
                 ". Mở ERI ADMIN và bấm Tiếp tục."
+            // Do not claim to have paused while iOS is still transferring.
+            session.getAllTasks { tasks in tasks.forEach { $0.cancel() } }
         }
     }
 
