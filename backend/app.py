@@ -54,7 +54,7 @@ app = FastAPI(title="ERI NGUYEN API", version="0.1.0")
 # No wildcard CORS: native iOS clients do not require browser CORS.
 origins = [x.strip() for x in os.getenv("ERI_CORS_ORIGINS", "").split(",") if x.strip()]
 if origins:
-    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-ERI-Admin-Key", "X-ERI-Upload-Offset", "X-ERI-Chunk-SHA256"], max_age=600)
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-ERI-Admin-Key", "X-ERI-Upload-Offset", "X-ERI-Chunk-SHA256"], max_age=600)
 
 @app.exception_handler(VaultError)
 async def vault_unavailable(_request, _exc):
@@ -1392,13 +1392,82 @@ def admin_catalog_products(kind: str):
     if kind not in lookup:
         raise HTTPException(404, "Danh mục không tồn tại")
     with connection() as db:
-        query = "SELECT id,name,description,price_vnd FROM " + lookup[kind]
+        fields = "id,name,description,price_vnd"
+        if kind == "certificate":
+            fields += ",issuer"
+        if kind in ("ipa", "apk"):
+            fields += ",version,platform"
+        query = "SELECT " + fields + " FROM " + lookup[kind]
         params = ()
         if kind in ("ipa", "apk"):
             query += " WHERE platform=?"
             params = (kind,)
         rows = db.execute(query + " ORDER BY id DESC LIMIT 300", params).fetchall()
     return {"items": [dict(row) for row in rows]}
+
+class CatalogProductEdit(BaseModel):
+    """Only mutable listing metadata. Never accept a file ID or order fields."""
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(max_length=2000)
+    price_vnd: int = Field(ge=0, le=1000000000)
+    issuer: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+@app.patch("/api/v1/admin/catalog/{kind}/{product_id}",
+           dependencies=[Depends(require_admin)])
+def admin_edit_catalog_product(kind: str, product_id: int, changes: CatalogProductEdit):
+    """Edit the SAME product row, preserving its file, orders and customer history.
+
+    Completed and pending orders have immutable price/name snapshots, so edits
+    affect future purchases only. AI/Certificate sell price keeps the 30% markup.
+    """
+    if kind not in ("ipa", "apk", "ai", "certificate") or product_id <= 0:
+        raise HTTPException(404, "Sản phẩm không tồn tại")
+    if kind in ("ai", "certificate") and changes.price_vnd == 0:
+        raise HTTPException(422, "AI Plus và Chứng chỉ phải có giá vốn lớn hơn 0")
+    name = changes.name.strip()
+    if not name:
+        raise HTTPException(422, "Tên sản phẩm không được để trống")
+    description = changes.description.strip()
+    if changes.issuer is not None and (kind != "certificate" or not changes.issuer.strip()):
+        raise HTTPException(422, "Nhà phát hành chỉ dùng cho Chứng chỉ")
+    table = {"ipa": "ipa", "apk": "ipa", "ai": "products", "certificate": "certificates"}[kind]
+    with connection() as db:
+        if kind in ("ipa", "apk"):
+            cur = db.execute(
+                "UPDATE ipa SET name=?,description=?,price_vnd=? "
+                "WHERE id=? AND platform=?",
+                (name, description, changes.price_vnd, product_id, kind),
+            )
+        elif kind == "certificate":
+            if changes.issuer is not None:
+                cur = db.execute(
+                    "UPDATE certificates SET name=?,description=?,price_vnd=?,issuer=? "
+                    "WHERE id=?",
+                    (name, description, changes.price_vnd, changes.issuer.strip(), product_id),
+                )
+            else:
+                cur = db.execute(
+                    "UPDATE certificates SET name=?,description=?,price_vnd=? WHERE id=?",
+                    (name, description, changes.price_vnd, product_id),
+                )
+        else:
+            cur = db.execute(
+                "UPDATE products SET name=?,description=?,price_vnd=? WHERE id=?",
+                (name, description, changes.price_vnd, product_id),
+            )
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Sản phẩm không tồn tại")
+        fields = "id,name,description,price_vnd"
+        if kind == "certificate":
+            fields += ",issuer"
+        if kind in ("ipa", "apk"):
+            fields += ",version,platform"
+        row = db.execute(
+            "SELECT " + fields + " FROM " + table + " WHERE id=?", (product_id,)
+        ).fetchone()
+    return {"updated": True, "item": dict(row), "price_applies_to": "future_orders_only"}
+
 
 @app.delete("/api/v1/admin/catalog/{kind}/{product_id}",
             dependencies=[Depends(require_admin)])
