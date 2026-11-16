@@ -3,6 +3,10 @@
 """ERI Login public API proxy — Render Free, Python stdlib."""
 import hmac
 import json
+import hashlib
+import secrets
+import time
+import re
 import os
 import urllib.error
 import urllib.parse
@@ -13,6 +17,39 @@ FN = os.environ.get("ERI_SUPABASE_FUNCTION_URL", "").rstrip("/")
 KEY_FN = os.environ.get("ERI_KEY_FUNCTION_URL", "").rstrip("/")
 INTERNAL = os.environ.get("ERI_INTERNAL_KEY", "")
 ADMIN = os.environ.get("ERI_ADMIN_KEY", "")
+# Time-limited HMAC credentials derived from the primary secret. No local DB.
+# Rotating the primary secret revokes all delegated credentials immediately.
+ADMIN_TOKEN_PREFIX = "ERIADM1"
+ADMIN_TOKEN_TTL_MAX_DAYS = 90
+
+def issue_admin_token(days=30):
+    if len(ADMIN) < 32:
+        raise ValueError("Primary admin key is not configured")
+    if type(days) is not int or not 1 <= days <= ADMIN_TOKEN_TTL_MAX_DAYS:
+        raise ValueError("Invalid days")
+    expiry = int(time.time()) + days * 86400
+    nonce = secrets.token_hex(16)
+    payload = f"{ADMIN_TOKEN_PREFIX}.{expiry}.{nonce}"
+    signature = hmac.new(ADMIN.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).hexdigest()
+    return payload + "." + signature, expiry
+
+def verify_admin_token(value):
+    if len(ADMIN) < 32 or not isinstance(value, str):
+        return False
+    if not re.fullmatch(r"ERIADM1\.[0-9]{10}\.[0-9a-f]{32}\.[0-9a-f]{64}", value):
+        return False
+    try:
+        prefix, expiry_text, nonce, signature = value.split(".")
+        expiry = int(expiry_text)
+    except ValueError:
+        return False
+    now = int(time.time())
+    if not now < expiry <= now + ADMIN_TOKEN_TTL_MAX_DAYS * 86400:
+        return False
+    payload = f"{prefix}.{expiry_text}.{nonce}"
+    expected = hmac.new(ADMIN.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
 
 ADMIN_HTML = r"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -63,6 +100,7 @@ POSTS = {
     "/api/admin/key/create", "/api/admin/key/extend",
     "/api/admin/key/disable", "/api/admin/key/enable",
     "/api/admin/key/reset-device", "/api/admin/key/delete",
+    "/api/admin/keys/issue",
 }
 
 class Handler(BaseHTTPRequestHandler):
@@ -87,9 +125,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send(200, b"")
 
-    def is_admin(self):
+    def is_primary_admin(self):
         key = self.headers.get("X-ERI-ADMIN-KEY", "")
         return len(ADMIN) >= 32 and len(key) > 0 and hmac.compare_digest(key, ADMIN)
+
+    def is_admin(self):
+        key = self.headers.get("X-ERI-ADMIN-KEY", "")
+        return self.is_primary_admin() or verify_admin_token(key)
 
     def forward(self, path, method, body=None):
         if not FN.startswith("https://") or len(INTERNAL) < 32:
@@ -133,6 +175,21 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if path not in POSTS:
             return self.send(404, {"error":"Không tìm thấy API"})
+        if path == "/api/admin/keys/issue":
+            if not self.is_primary_admin():
+                return self.send(403, {"error":"Chỉ Admin Key chính được tạo thêm khóa quản trị"})
+            try:
+                size = int(self.headers.get("Content-Length", "0"))
+                if not 1 <= size <= 1024:
+                    return self.send(413, {"error":"Yêu cầu không hợp lệ"})
+                payload = json.loads(self.rfile.read(size))
+                if not isinstance(payload, dict):
+                    return self.send(400, {"error":"JSON không hợp lệ"})
+                token, expiry = issue_admin_token(payload.get("days", 30))
+                return self.send(201, {"admin_key": token, "expires_at": expiry,
+                                       "note":"Khóa quản trị phụ chỉ hiển thị một lần và tự hết hạn."})
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return self.send(400, {"error":"Số ngày phải từ 1 đến 90"})
         if path.startswith("/api/admin/") and not self.is_admin():
             return self.send(403, {"error":"Không có quyền Admin"})
         try:
