@@ -157,6 +157,10 @@ function openCategory(category,certMode){
     tab.setAttribute("aria-selected",String(active));
   });
   syncCertTabs();
+  const selectedTab=document.querySelector("#tabs [data-kind].selected");
+  if(selectedTab && selectedTab.scrollIntoView){
+    selectedTab.scrollIntoView({block:"nearest",inline:"nearest"});
+  }
   loadCatalog();
 }
 function setView(view){
