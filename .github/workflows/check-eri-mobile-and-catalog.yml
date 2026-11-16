@@ -1,0 +1,54 @@
+name: Verify ERI catalog and mobile tabs
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/check-eri-mobile-and-catalog.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read public catalog counts and test live Safari tab assets
+        run: |
+          python3 - <<'PY'
+          import json
+          import time
+          import urllib.request
+          from urllib.error import HTTPError, URLError
+
+          def get(url):
+              last=None
+              for attempt in range(5):
+                  try:
+                      req=urllib.request.Request(url,headers={"User-Agent":"ERI-Store-Healthcheck","Cache-Control":"no-cache"})
+                      with urllib.request.urlopen(req,timeout=25) as response:
+                          assert response.status==200
+                          return response.read().decode("utf-8")
+                  except (OSError, HTTPError, URLError) as e:
+                      last=e
+                      time.sleep(2)
+              raise last
+
+          api="https://eri-api-dag8.onrender.com"
+          for name,path in (("AI Plus","/api/v1/products"),("Chứng chỉ","/api/v1/certificates")):
+              body=json.loads(get(api+path))
+              items=body.get("items",[])
+              assert isinstance(items,list),name+" returned an invalid catalog"
+              paid=sum(1 for item in items if float(item.get("price_vnd") or 0)>0)
+              print(f"API CATALOG {name}: total={len(items)}, paid={paid}")
+          base="https://eri-store-web.onrender.com"
+          css=get(base+"/shop-theme.css?verify=mobtabs20261116")
+          html=get(base+"/?verify=mobtabs20261116")
+          app=get(base+"/app.js?verify=mobtabs20261116")
+          assert "#tabs .tab" in css
+          assert "flex:0 0 auto" in css
+          assert "overflow-x:auto" in css
+          assert "selectedTab.scrollIntoView" in app
+          assert "/shop-theme.css?v=20261116mobtabs1" in html
+          assert 'data-kind="decrypt"' in html
+          assert 'data-kind="certificate"' in html
+          print("LIVE VERIFIED: Safari product tabs have nonshrinking buttons and horizontal scrolling")
+          PY
