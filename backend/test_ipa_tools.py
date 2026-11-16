@@ -143,6 +143,7 @@ with tempfile.TemporaryDirectory(prefix="eri-tools-test-") as root:
             pass
         else:
             raise AssertionError("Default metadata path must validate the archive")
+    expected_signed_bytes = signed_test.read_bytes()
     signed_result = _register_signed_output(signed_test, metadata)
     assert signed_result["install_url"].startswith("itms-services://?action=download-manifest")
     manifest = client.get(signed_result["manifest_path"])
@@ -151,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix="eri-tools-test-") as root:
     assert manifest_data["items"][0]["metadata"]["bundle-identifier"] == "vn.eri.tool.test"
     assert manifest_data["items"][0]["metadata"]["kind"] == "software"
     actual_ipa = client.get(signed_result["download_path"])
-    assert actual_ipa.status_code == 200 and actual_ipa.content == make_ipa(executable)
+    assert actual_ipa.status_code == 200 and actual_ipa.content == expected_signed_bytes
     assert client.get(signed_result["download_path"]).status_code == 200
 
     print("IPA analysis, symlink validation, decrypt and iOS install manifest: OK")
