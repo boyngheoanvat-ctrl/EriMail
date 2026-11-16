@@ -358,8 +358,32 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         return String(data: data, encoding: .utf8) ?? ""
     }
 
+    private func partIndex(_ name: String?, for current: ERIBackgroundRecord) -> Int? {
+        guard let name else { return nil }
+        let prefix = "part:" + current.id + ":"
+        if name.hasPrefix(prefix) {
+            return Int(name.dropFirst(prefix.count))
+        }
+        // A single outstanding task from the previous app version may still
+        // be managed by iOS after upgrading. Never apply it to a renewed ID.
+        if current.acknowledgedParts == nil && name.hasPrefix("part:"),
+           !name.dropFirst(5).contains(":") {
+            return Int(name.dropFirst(5))
+        }
+        return nil
+    }
+
+    private func isCompleteTask(_ name: String?, for current: ERIBackgroundRecord) -> Bool {
+        name == "complete:" + current.id ||
+        (current.acknowledgedParts == nil && name == "complete")
+    }
+
+    // Queue ALL remaining file-backed requests before iOS suspends the app.
+    // The background URLSession runs in a system process. The session still
+    // uses only ONE HTTP connection, and the API accepts out-of-order indexes.
+    // Finalization must not be submitted until each chunk is acknowledged.
     private func scheduleNext() {
-        guard !sending, !renewing, !retryBlocked, let current = record else { return }
+        guard !scheduling, !renewing, !retryBlocked, let current = record else { return }
         let key = Self.storedAdminKey()
         guard key.count >= 32 else {
             active = false
@@ -367,46 +391,86 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
             status = ERIBackgroundError.keyMissing.localizedDescription
             return
         }
-        do {
-            let folder = try Self.jobFolder(current.id)
-            let complete = current.nextPart == current.partCount
-            let path = "/api/v1/admin/upload-sessions/" + current.id
-            let suffix = complete ? "/complete" :
-                "/fast-parts/" + String(current.nextPart)
-            guard let url = URL(string: eriBackgroundHost + path + suffix) else {
-                throw URLError(.badURL)
+        scheduling = true
+        let uploadID = current.id
+        transfers.getAllTasks { tasks in
+            DispatchQueue.main.async {
+                defer { self.scheduling = false }
+                guard let current = self.record, current.id == uploadID,
+                      !self.renewing, !self.retryBlocked else { return }
+                do {
+                    let folder = try Self.jobFolder(uploadID)
+                    let confirmed = self.receivedIndices(current)
+                    let queued = Set(tasks.compactMap {
+                        self.partIndex($0.taskDescription, for: current)
+                    })
+                    let finalTaskExists = tasks.contains {
+                        self.isCompleteTask($0.taskDescription, for: current)
+                    }
+                    let base = eriBackgroundHost + "/api/v1/admin/upload-sessions/" + uploadID
+                    var added = 0
+                    if confirmed.count == current.partCount {
+                        if !finalTaskExists {
+                            let file = folder.appendingPathComponent("complete.body")
+                            guard FileManager.default.fileExists(atPath: file.path),
+                                  let url = URL(string: base + "/complete") else {
+                                throw ERIBackgroundError.invalidFile
+                            }
+                            var request = URLRequest(url: url)
+                            request.httpMethod = "POST"
+                            request.setValue(key, forHTTPHeaderField: "X-ERI-Admin-Key")
+                            request.setValue("application/octet-stream",
+                                             forHTTPHeaderField: "Content-Type")
+                            request.timeoutInterval = 180
+                            let job = self.transfers.uploadTask(with: request, fromFile: file)
+                            job.taskDescription = "complete:" + uploadID
+                            job.resume()
+                            added = 1
+                        }
+                        self.status = "Đã tải xong IPA; đang xác nhận sản phẩm trên máy chủ..."
+                    } else {
+                        // Limit connection count to one, NOT the number of
+                        // scheduled tasks. iOS can transfer the queue without
+                        // waiting for ERI ADMIN to run after every 4-MB file.
+                        for i in 0..<current.partCount where
+                            !confirmed.contains(i) && !queued.contains(i) {
+                            let name = Self.partName(i)
+                            let file = folder.appendingPathComponent(name + ".part")
+                            guard FileManager.default.fileExists(atPath: file.path) else {
+                                throw ERIBackgroundError.invalidFile
+                            }
+                            let digest = try String(contentsOf:
+                                folder.appendingPathComponent(name + ".sha256"),
+                                encoding: .utf8)
+                            guard let url = URL(string: base + "/fast-parts/" + String(i)) else {
+                                throw URLError(.badURL)
+                            }
+                            var request = URLRequest(url: url)
+                            request.httpMethod = "POST"
+                            request.setValue(key, forHTTPHeaderField: "X-ERI-Admin-Key")
+                            request.setValue("application/octet-stream",
+                                             forHTTPHeaderField: "Content-Type")
+                            request.setValue(digest, forHTTPHeaderField: "X-ERI-Chunk-SHA256")
+                            request.timeoutInterval = 180
+                            let job = self.transfers.uploadTask(with: request, fromFile: file)
+                            job.taskDescription = "part:" + uploadID + ":" + String(i)
+                            job.resume()
+                            added += 1
+                        }
+                        self.status = "iOS đang tải IPA trong nền; " +
+                            String(confirmed.count) + "/" + String(current.partCount) +
+                            " phần đã được máy chủ xác nhận."
+                    }
+                    self.sending = !tasks.isEmpty || added > 0
+                    self.pending = true
+                    self.active = true
+                } catch {
+                    self.retryBlocked = true
+                    self.active = false
+                    self.status = "Không thể chuẩn bị tải nền: " + error.localizedDescription +
+                        ". Mở ERI ADMIN và bấm Tiếp tục."
+                }
             }
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue(key, forHTTPHeaderField: "X-ERI-Admin-Key")
-            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-            request.timeoutInterval = 180
-            let file: URL
-            if complete {
-                file = folder.appendingPathComponent("complete.body")
-            } else {
-                let stem = Self.partName(current.nextPart)
-                file = folder.appendingPathComponent(stem + ".part")
-                let digest = try String(contentsOf:
-                    folder.appendingPathComponent(stem + ".sha256"), encoding: .utf8)
-                request.setValue(digest, forHTTPHeaderField: "X-ERI-Chunk-SHA256")
-            }
-            guard FileManager.default.fileExists(atPath: file.path) else {
-                throw ERIBackgroundError.invalidFile
-            }
-            let upload = transfers.uploadTask(with: request, fromFile: file)
-            upload.taskDescription = complete ? "complete" : "part:" + String(current.nextPart)
-            sending = true
-            active = true
-            status = complete
-                ? "Máy chủ đang kiểm tra và đăng sản phẩm..."
-                : "iOS đang tải nền: phần " + String(current.nextPart + 1) +
-                    "/" + String(current.partCount)
-            upload.resume()
-        } catch {
-            retryBlocked = true
-            active = false
-            status = "Không thể tiếp tục tải nền: " + error.localizedDescription
         }
     }
 
