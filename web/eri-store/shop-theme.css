@@ -563,3 +563,28 @@ body.shop-v2{
  .shop-v2 .eri-dec .eri-dec-count-pill {padding:6px}
  .shop-v2 .eri-dec .eri-dec-sideload .btn {font-size:10px;padding:6px 2px}
 }
+
+/* Fix Safari iPhone category buttons shrinking into each other. */
+.shop-v2 #tabs.tabs{
+  display:flex;flex-wrap:nowrap;align-items:center;
+  width:100%;max-width:100%;min-width:0;
+  gap:10px;overflow-x:auto;overflow-y:hidden;
+  box-sizing:border-box;-webkit-overflow-scrolling:touch;
+  overscroll-behavior-x:contain;scroll-padding-inline:8px;
+  padding:4px 2px 16px;
+}
+.shop-v2 #tabs .tab{
+  display:inline-flex;flex:0 0 auto;flex-shrink:0;
+  width:max-content;min-width:max-content;max-width:none;
+  min-height:44px;box-sizing:border-box;align-items:center;
+  justify-content:center;gap:7px;white-space:nowrap;
+  position:relative;
+}
+.shop-v2 #tabs .tab>span{
+  flex:0 0 auto;min-width:max-content;
+  white-space:nowrap;overflow:visible;
+}
+.shop-v2 #tabs .tab>.icon{flex:0 0 auto}
+@media(max-width:490px){
+  .shop-v2 #tabs .tab{font-size:12px;padding:11px 12px;gap:6px}
+}
