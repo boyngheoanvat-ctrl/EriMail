@@ -136,22 +136,92 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         }
     }
 
+    private func receivedIndices(_ value: ERIBackgroundRecord) -> Set<Int> {
+        // Old records contain only an in-order nextPart checkpoint.
+        let parts = value.acknowledgedParts ??
+            Array(0..<max(0, min(value.nextPart, value.partCount)))
+        return Set(parts.filter { $0 >= 0 && $0 < value.partCount })
+    }
+
+    private func receivedBytes(_ value: ERIBackgroundRecord, _ parts: Set<Int>) -> Int {
+        parts.reduce(0) { size, index in
+            size + min(value.chunkBytes, value.size - index * value.chunkBytes)
+        }
+    }
+
     // Called by the app delegate on launch, including iOS relaunch for transfer events.
     func restore() {
         _ = transfers
         guard record != nil else { return }
         transfers.getAllTasks { tasks in
             DispatchQueue.main.async {
+                guard self.record != nil else { return }
+                self.sending = !tasks.isEmpty
+                self.pending = true
+                self.active = true
                 if tasks.isEmpty {
-                    self.sending = false
-                    if !self.retryBlocked { self.scheduleNext() }
+                    // Explicit force-quit cancels iOS transfers. On reopening,
+                    // ask the server which parts were committed before retrying.
+                    self.status = "Đang đối chiếu các phần đã lưu trên máy chủ..."
+                    Task { await self.reconcileServer() }
                 } else {
-                    self.sending = true
-                    self.active = true
-                    self.pending = true
-                    self.status = "iOS đang tiếp tục upload trong nền"
+                    self.status = "iOS đang tải IPA trong nền"
+                    // Prequeue unsubmitted parts while the app can still run.
+                    self.scheduleNext()
                 }
             }
+        }
+    }
+
+    private func reconcileServer() async {
+        guard !checkingServer, var current = record else { return }
+        checkingServer = true
+        defer { checkingServer = false }
+        do {
+            let key = Self.storedAdminKey()
+            guard key.count >= 32 else { throw ERIBackgroundError.keyMissing }
+            guard let url = URL(string: eriBackgroundHost +
+                "/api/v1/admin/upload-sessions/" + current.id + "/fast-parts") else {
+                throw URLError(.badURL)
+            }
+            var request = URLRequest(url: url)
+            request.setValue(key, forHTTPHeaderField: "X-ERI-Admin-Key")
+            request.timeoutInterval = 60
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let http = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if http == 404 {
+                await renewMissingSession()
+                return
+            }
+            guard http == 200,
+                let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let parts = json["received"] as? [Int],
+                json["total_parts"] as? Int == current.partCount,
+                json["chunk_bytes"] as? Int == current.chunkBytes,
+                json["size_bytes"] as? Int == current.size else {
+                throw URLError(.badServerResponse)
+            }
+            guard record?.id == current.id else { return }
+            let confirmed = Set(parts.filter { $0 >= 0 && $0 < current.partCount })
+            current.acknowledgedParts = confirmed.sorted()
+            current.acknowledgedBytes = receivedBytes(current, confirmed)
+            current.nextPart = (0..<current.partCount).first {
+                !confirmed.contains($0)
+            } ?? current.partCount
+            current.failures = 0
+            record = current
+            progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
+            persist()
+            active = true
+            retryBlocked = false
+            status = "Đã khôi phục " + String(format: "%.1f", progress * 100) +
+                "%; đang tải tiếp các phần còn thiếu."
+            scheduleNext()
+        } catch {
+            retryBlocked = true
+            active = false
+            status = "Chưa đối chiếu được máy chủ: " + error.localizedDescription +
+                ". Mở lại ứng dụng và bấm Tiếp tục."
         }
     }
 
