@@ -71,10 +71,10 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v44" in service
+assert "eri-store-v45" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
-assert "decrypt-store.js?v=20261115erivault3" in html
+assert "decrypt-store.js?v=20261116brand1" in html
 assert "eri-decrypt-layout.css?v=20261115dashboard2" in html
 
 # ERI hosts a branded view, but provider API data must stay sourced from
@@ -89,6 +89,8 @@ assert '/api/decrypt/app-info?' in decrypt
 assert "window.ERIF4Decrypt" in decrypt
 assert "window.ERIStoreIPA" in decrypt
 assert "sourceDownload" in decrypt
+assert '["Cửa hàng","Eri Nguyễn"]' in decrypt
+assert '["Nguồn","F4TEAM"]' not in decrypt
 assert 'credentials:"omit"' in decrypt
 assert "X-CSRF-TOKEN" not in decrypt
 assert "4c00c79dc63e3c5600328e1616518ad15c53fd67bdf39da2a0a1b7d23327bcd6" not in html

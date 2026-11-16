@@ -386,7 +386,7 @@
     const specs=el("div","eri-v-detail-specs");
     [["Phiên bản",item.version||"—"],["Quốc gia",item.country],
       ["Dung lượng",item.size_human||"—"],["Bundle ID",item.bundle_id||"—"],
-      ["Nguồn","F4TEAM"]].forEach(([label,v])=>{
+      ["Cửa hàng","Eri Nguyễn"]].forEach(([label,v])=>{
         const box=el("div");add(box,el("small","",label),el("strong","",v));specs.append(box);
       });
     add(body,specs);
