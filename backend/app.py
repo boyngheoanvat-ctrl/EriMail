@@ -1,6 +1,8 @@
 """ERI NGUYEN backend — independently hosted API. No third-party scraping or fake signing."""
 import os
 import sqlite3
+import threading
+import logging
 import secrets
 import hmac
 import hashlib
@@ -14,11 +16,39 @@ from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, HttpUrl
 
 DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
+from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
+_eri_db_guard = threading.RLock()
+_VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
+if _VAULT_MODE not in ("", "off", "required", "preview", "bootstrap"):
+    raise RuntimeError("Invalid ERI_VAULT_MODE")
+if _VAULT_MODE == "preview" and (
+        os.getenv("ERI_PREVIEW_ALLOW_EMPTY_SEED") != "I_ACKNOWLEDGE_DATA_RESET"
+        or os.getenv("ERI_STORE_ENV") != "isolated-preview"):
+    raise RuntimeError("Preview seeding is forbidden outside isolated-preview")
+if _VAULT_MODE == "bootstrap" and (
+        os.getenv("ERI_APPROVE_FRESH_START") != "START_NEW_ERI_STORE_WITHOUT_OLD_DATA"
+        or os.getenv("ERI_STORE_ENV") != "production"):
+    raise RuntimeError("Explicit production fresh-start approval is required")
+_eri_vault = ERIVault() if _VAULT_MODE in ("required", "preview", "bootstrap") else None
+_preview_cloud_empty = False
+if _eri_vault is not None:
+    if _VAULT_MODE in ("preview", "bootstrap"):
+        pointer = _eri_vault.read_snapshot_pointer()
+        if pointer is not None:
+            _eri_vault.restore_sqlite(DB)
+        else:
+            if _VAULT_MODE == "bootstrap" and DB.exists():
+                raise RuntimeError("Refusing fresh start over a local SQLite database")
+            _preview_cloud_empty = True
+    else:
+        # Strict production mode NEVER initializes an empty customer database.
+        _eri_vault.restore_sqlite(DB)
+_log = logging.getLogger("eri.persistence")
 ADMIN_KEY = os.getenv("ERI_ADMIN_KEY", "")
 app = FastAPI(title="ERI NGUYEN API", version="0.1.0")
 # No wildcard CORS: native iOS clients do not require browser CORS.
@@ -26,16 +56,77 @@ origins = [x.strip() for x in os.getenv("ERI_CORS_ORIGINS", "").split(",") if x.
 if origins:
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-ERI-Admin-Key", "X-ERI-Upload-Offset", "X-ERI-Chunk-SHA256"], max_age=600)
 
+@app.exception_handler(VaultError)
+async def vault_unavailable(_request, _exc):
+    return JSONResponse(status_code=503, content={
+        "detail": "Kho lưu trữ an toàn đang gián đoạn; dữ liệu chưa được xác nhận."
+    })
+
 @contextmanager
 def connection():
-    DB.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB)
-    db.row_factory = sqlite3.Row
-    try:
-        yield db
-        db.commit()
-    finally:
-        db.close()
+    # Serialize writes and their durable snapshots to avoid lost updates.
+    with _eri_db_guard:
+        DB.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(DB, timeout=30)
+        db.row_factory = sqlite3.Row
+        initial = db.total_changes
+        try:
+            yield db
+            db.commit()
+            if _eri_vault is not None and db.total_changes != initial:
+                _eri_vault.snapshot_sqlite(DB)
+        finally:
+            db.close()
+
+def _persist_private_file(path: Path, item_id: str, digest: str):
+    if _eri_vault is not None:
+        _eri_vault.upload_file(path, item_id, expected_sha256=digest)
+
+def _restore_private_file(storage_name: str, size: int, digest: str):
+    if _eri_vault is None:
+        return None
+    match = re.fullmatch(r"([a-f0-9]{32})\.[a-z0-9]{1,16}", storage_name)
+    if not match:
+        return None
+    output = UPLOAD_DIR / storage_name
+    _eri_vault.restore_file(output, match.group(1), int(size), digest)
+    return output
+
+def _queue_cloud_deletion(db, storage_name: str, size: int):
+    if _eri_vault is None:
+        return
+    if (not isinstance(storage_name, str)
+            or not re.fullmatch(r"[a-f0-9]{32}\.[a-z0-9]{1,16}", storage_name)
+            or not isinstance(size, int) or not 0 < size <= 512 * 1024 * 1024):
+        raise VaultError("Cannot queue invalid private object deletion")
+    db.execute(
+        "INSERT OR IGNORE INTO vault_delete_queue(storage_name,size_bytes,created_at) "
+        "VALUES(?,?,?)",
+        (storage_name,size,datetime.now(timezone.utc).isoformat()),
+    )
+
+def _drain_cloud_deletions(limit: int = 40) -> dict:
+    if _eri_vault is None:
+        return {"deleted":0,"pending":0}
+    with connection() as db:
+        rows = db.execute(
+            "SELECT storage_name,size_bytes FROM vault_delete_queue "
+            "ORDER BY created_at LIMIT ?", (limit,)
+        ).fetchall()
+    done = 0
+    for row in rows:
+        try:
+            _eri_vault.delete_file(row["storage_name"][:32], row["size_bytes"])
+        except (VaultError, OSError, FileNotFoundError):
+            _log.warning("Cloud deletion pending; will retry later")
+            continue
+        with connection() as db:
+            db.execute("DELETE FROM vault_delete_queue WHERE storage_name=?",
+                       (row["storage_name"],))
+        done += 1
+    with connection() as db:
+        pending = db.execute("SELECT COUNT(*) AS n FROM vault_delete_queue").fetchone()["n"]
+    return {"deleted":done,"pending":pending}
 
 def sale_price(base_price_vnd: int) -> int:
     """30% markup, rounded up to the next VND; never trust client pricing."""
@@ -94,6 +185,10 @@ def init():
           storage_name TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL,
           sha256 TEXT NOT NULL, created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS vault_delete_queue (
+          storage_name TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        );
         """)
         ipa_columns = {row["name"] for row in db.execute("PRAGMA table_info(ipa)")}
         if "description" not in ipa_columns:
@@ -110,6 +205,9 @@ def init():
         db.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer_created ON orders(customer_id, created_at)")
 
 init()
+if _preview_cloud_empty:
+    # Only explicit preview or approved one-time production bootstrap can seed.
+    _eri_vault.snapshot_sqlite(DB)
 
 def require_admin(x_eri_admin_key: str | None = Header(default=None)):
     if len(ADMIN_KEY) < 32 or not secrets.compare_digest(x_eri_admin_key or "", ADMIN_KEY):
@@ -291,8 +389,8 @@ def admin_ipa_catalog():
         rows = db.execute("SELECT id,name,version,bundle_id,download_url,sha256,authorized,price_vnd,platform FROM ipa ORDER BY id DESC LIMIT 200").fetchall()
     return {"items": [dict(x) for x in rows]}
 
-def _eri_mod_file(row):
-    """Only advertise a free download if the actual file is still available."""
+def _eri_mod_file(row, *, restore: bool = False):
+    """Cloud-backed listing does not download a large IPA until requested."""
     storage_name = row["storage_name"]
     platform = row["platform"] if row["platform"] in ("ipa", "apk") else "ipa"
     if (not isinstance(storage_name, str)
@@ -301,8 +399,16 @@ def _eri_mod_file(row):
     if not storage_name.endswith("." + platform):
         return None
     path = UPLOAD_DIR / storage_name
-    if not path.is_file() or path.stat().st_size != row["size_bytes"]:
+    if path.is_file() and path.stat().st_size == row["size_bytes"]:
+        return path
+    if _eri_vault is None:
         return None
+    if not _eri_vault.chunk_exists(storage_name[:32]):
+        return None
+    if restore:
+        if "sha256" not in row.keys():
+            raise VaultError("Missing integrity hash for cloud download")
+        return _restore_private_file(storage_name, row["size_bytes"], row["sha256"])
     return path
 
 
@@ -311,7 +417,7 @@ def ipa_storage_status():
     """Admin-only integrity report for the self-hosted IPA vault."""
     with connection() as db:
         rows = db.execute(
-            "SELECT i.id,i.name,i.version,i.platform,p.storage_name,p.size_bytes "
+            "SELECT i.id,i.name,i.version,i.platform,p.storage_name,p.size_bytes,p.sha256 "
             "FROM ipa i LEFT JOIN private_product_uploads p "
             "ON p.product_id=i.id AND p.kind=i.platform "
             "WHERE i.platform='ipa' AND i.authorized=1 ORDER BY i.id DESC"
@@ -334,7 +440,7 @@ def public_mod_catalog():
     with connection() as db:
         rows = db.execute(
             "SELECT i.id,i.name,i.version,i.bundle_id,i.description,i.price_vnd,"
-            "i.platform,p.storage_name,p.size_bytes "
+            "i.platform,p.storage_name,p.size_bytes,p.sha256 "
             "FROM ipa i LEFT JOIN private_product_uploads p "
             "ON p.product_id=i.id AND p.kind=i.platform "
             "WHERE i.authorized=1 ORDER BY i.id DESC LIMIT 100"
@@ -357,7 +463,7 @@ def download_free_mod(product_id: int):
     # Only files that are authorized, FREE, and actually stored on server.
     with connection() as db:
         row = db.execute(
-            "SELECT p.storage_name,p.original_name,p.size_bytes,i.platform "
+            "SELECT p.storage_name,p.original_name,p.size_bytes,p.sha256,i.platform "
             "FROM ipa i JOIN private_product_uploads p "
             "ON p.kind=i.platform AND p.product_id=i.id "
             "WHERE i.id=? AND i.authorized=1 AND i.price_vnd=0",
@@ -365,7 +471,7 @@ def download_free_mod(product_id: int):
         ).fetchone()
     if row is None:
         raise HTTPException(404, "Free mod file not available")
-    path = _eri_mod_file(row)
+    path = _eri_mod_file(row, restore=True)
     if path is None:
         raise HTTPException(404, "File missing on server; ask admin to re-upload")
     return FileResponse(
@@ -828,6 +934,7 @@ async def upload_private_product(
             except zipfile.BadZipFile:
                 raise HTTPException(422, "Invalid ZIP or IPA file")
         os.replace(temporary_path, final_path)
+        _persist_private_file(final_path, storage_id, digest.hexdigest())
         with connection() as db:
             if kind in ("ipa", "apk"):
                 row = db.execute(
@@ -885,6 +992,44 @@ def _eri_paths(upload_id: str):
     return (UPLOAD_DIR / ("." + upload_id + ".session.json"),
             UPLOAD_DIR / ("." + upload_id + ".part"))
 
+def _eri_recover_fast_session(upload_id: str):
+    """Reconstruct acknowledged chunks from private cloud after a restart."""
+    if _eri_vault is None:
+        raise HTTPException(404, "Phiên upload không tồn tại")
+    try:
+        metadata = _eri_vault.get_session(upload_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "Không có phiên upload trong kho bền vững")
+    if not metadata.get("fast"):
+        raise HTTPException(409, "Phiên tải cũ không thể khôi phục; hãy tạo lại upload")
+    size, kind = metadata.get("size_bytes"), metadata.get("kind")
+    if (not isinstance(size, int) or kind not in UPLOAD_LIMITS
+            or not 0 < size <= UPLOAD_LIMITS[kind]):
+        raise VaultError("Cloud upload session has invalid size")
+    count = (size + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    metadata_file, data_file = _eri_paths(upload_id)
+    parts_dir = _eri_fast_parts_dir(upload_id)
+    parts_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with data_file.open("wb") as dest:
+        os.chmod(data_file, 0o600)
+        dest.truncate(size)
+        for index in range(count):
+            if not _eri_vault.chunk_exists(upload_id, index):
+                continue
+            data = _eri_vault.get_upload_part(upload_id, index)
+            expected = min(ERI_CHUNK_BYTES, size - index * ERI_CHUNK_BYTES)
+            if len(data) != expected:
+                raise VaultError("Cloud upload chunk has invalid size")
+            dest.seek(index * ERI_CHUNK_BYTES)
+            dest.write(data)
+            marker = _eri_fast_part_marker(upload_id, index)
+            marker.write_text(hashlib.sha256(data).hexdigest(), encoding="utf-8")
+            os.chmod(marker, 0o600)
+    _eri_save_session(upload_id, metadata)
+    return metadata
+
+
 def _eri_read_session(upload_id: str):
     metadata_file, data_file = _eri_paths(upload_id)
     try:
@@ -892,8 +1037,13 @@ def _eri_read_session(upload_id: str):
         if metadata.get("upload_id") != upload_id:
             raise ValueError("Session mismatch")
     except (OSError, ValueError, TypeError):
-        raise HTTPException(404, "Upload session not found; server storage may have restarted")
+        if _eri_vault is None:
+            raise HTTPException(404, "Upload session not found; server storage may have restarted")
+        metadata = _eri_recover_fast_session(upload_id)
     actual = data_file.stat().st_size if data_file.exists() else -1
+    if _eri_vault is not None and metadata.get("fast") and actual != metadata["size_bytes"]:
+        metadata = _eri_recover_fast_session(upload_id)
+        actual = data_file.stat().st_size
     if metadata.get("fast"):
         # Fast mode pre-sizes a sparse file; completed ranges are tracked
         # independently so a partial chunk is never considered acknowledged.
@@ -913,6 +1063,8 @@ def _eri_save_session(upload_id: str, metadata: dict):
     staged.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
     os.chmod(staged, 0o600)
     os.replace(staged, metadata_file)
+    if _eri_vault is not None and metadata.get("fast"):
+        _eri_vault.put_session(upload_id, metadata)
 
 def _eri_ipa_properties(file: Path):
     try:
@@ -1029,6 +1181,9 @@ async def eri_send_fast_part(upload_id: str, index: int, request: Request,
         raise HTTPException(422, "Incomplete chunk")
     if hashlib.sha256(chunk).hexdigest() != x_eri_chunk_sha256:
         raise HTTPException(422, "Chunk checksum mismatch")
+    if _eri_vault is not None:
+        # Remote storage must acknowledge bytes before the Admin sees success.
+        await asyncio.to_thread(_eri_vault.put_upload_part, upload_id, index, bytes(chunk))
 
     async with _eri_upload_lock:
         # Revalidate after the network transfer (another call can have completed).
@@ -1129,6 +1284,12 @@ async def eri_finish_chunk_upload(upload_id: str):
         final = UPLOAD_DIR / (upload_id + meta["extension"])
         os.replace(part, final)
         try:
+            if _eri_vault is not None:
+                # Each 4-MiB cloud part was stored before its ACK.
+                count = (meta["size_bytes"] + VAULT_CHUNK_BYTES - 1) // VAULT_CHUNK_BYTES
+                for i in range(count):
+                    if not _eri_vault.chunk_exists(upload_id, i):
+                        raise VaultError("Cloud IPA part missing; product not published")
             with connection() as db:
                 if meta["kind"] in ("ipa", "apk"):
                     row = db.execute(
@@ -1253,9 +1414,11 @@ def admin_delete_catalog_product(kind: str, product_id: int):
         if row is None:
             raise HTTPException(404, "Sản phẩm không tồn tại")
         matches = db.execute(
-            "SELECT storage_name FROM private_product_uploads WHERE kind=? AND product_id=?",
+            "SELECT storage_name,size_bytes FROM private_product_uploads WHERE kind=? AND product_id=?",
             (kind, product_id)).fetchall()
         storage_names = [x["storage_name"] for x in matches]
+        for item in matches:
+            _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
         db.execute("DELETE FROM private_product_uploads WHERE kind=? AND product_id=?",
                    (kind, product_id))
         db.execute("DELETE FROM " + lookup[kind] + " WHERE id=?", (product_id,))
@@ -1264,7 +1427,9 @@ def admin_delete_catalog_product(kind: str, product_id: int):
     for name in storage_names:
         if Path(name).name == name and not name.startswith("."):
             (UPLOAD_DIR / name).unlink(missing_ok=True)
-    return {"deleted": True, "id": product_id, "kind": kind}
+    cleanup = _drain_cloud_deletions()
+    return {"deleted": True, "id": product_id, "kind": kind,
+            "cloud_cleanup_pending":cleanup["pending"]}
 
 
 # Authenticated delivery files, visible only to the buyer whose order is fulfilled.
@@ -1375,6 +1540,7 @@ async def delivery_complete(order_id: str,upload_id: str):
         final=UPLOAD_DIR / (upload_id+meta["suffix"])
         os.replace(part,final)
         try:
+            _persist_private_file(final, upload_id, digest.hexdigest())
             with connection() as db:
                 order=db.execute("SELECT status,customer_id FROM orders WHERE id=?",(order_id,)).fetchone()
                 if order is None or order["status"]!="paid" or order["customer_id"] is None:
@@ -1403,15 +1569,20 @@ def delivery_download(order_id: str, customer=Depends(require_customer)):
         raise HTTPException(404,"Không tìm thấy tệp")
     with connection() as db:
         file=db.execute(
-            "SELECT d.original_name,d.storage_name FROM order_deliveries d "
+            "SELECT d.original_name,d.storage_name,d.size_bytes,d.sha256 FROM order_deliveries d "
             "JOIN orders o ON o.id=d.order_id "
             "WHERE o.id=? AND o.customer_id=? AND o.status='fulfilled'",
             (order_id,customer["id"])).fetchone()
     if file is None:
         raise HTTPException(404,"Đơn này chưa có tệp được giao")
     path=UPLOAD_DIR / file["storage_name"]
-    if path.name!=file["storage_name"] or not path.is_file():
-        raise HTTPException(410,"Tệp đã mất khỏi ổ tạm. Liên hệ Admin để nhận lại.")
+    if path.name!=file["storage_name"]:
+        raise HTTPException(404,"Tên tệp giao hàng không hợp lệ")
+    if not path.is_file() or path.stat().st_size!=file["size_bytes"]:
+        if _eri_vault is not None:
+            _restore_private_file(file["storage_name"], file["size_bytes"], file["sha256"])
+    if not path.is_file() or path.stat().st_size!=file["size_bytes"]:
+        raise HTTPException(410,"Tệp giao hàng không khả dụng trong kho.")
     return FileResponse(path,media_type="application/octet-stream",
         filename=file["original_name"],content_disposition_type="attachment",
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
@@ -1421,6 +1592,51 @@ def delivery_download(order_id: str, customer=Depends(require_customer)):
 # Customer management. Deleting a selected customer permanently removes their
 # sessions, orders, delivery records and private uploaded delivery files.
 # Backups, provider logs and external payment records are not affected.
+@app.get("/api/v1/admin/vault/status", dependencies=[Depends(require_admin)])
+def admin_vault_status():
+    if _eri_vault is None:
+        return {"enabled": False, "ready": False, "detail": "Not activated"}
+    pointer = _eri_vault.read_snapshot_pointer()
+    if pointer is None:
+        return {"enabled": True, "ready": False, "detail": "Snapshot not initialized"}
+    with connection() as db:
+        pending = db.execute("SELECT COUNT(*) AS n FROM vault_delete_queue").fetchone()["n"]
+        customers = db.execute("SELECT COUNT(*) AS n FROM customers").fetchone()["n"]
+        uploads = db.execute("SELECT COUNT(*) AS n FROM private_product_uploads").fetchone()["n"]
+    return {"enabled": True, "ready": True, "generation": pointer["generation"],
+            "customers": customers, "uploads": uploads, "cleanup_pending": pending}
+
+@app.post("/api/v1/admin/vault/cleanup", dependencies=[Depends(require_admin)])
+def admin_vault_cleanup():
+    return _drain_cloud_deletions()
+
+
+@app.get("/api/v1/admin/backups/sqlite", dependencies=[Depends(require_admin)])
+def admin_export_sqlite_backup():
+    """Admin-only consistent SQLite export. Never serve /tmp via a public path."""
+    folder = Path(tempfile.mkdtemp(prefix="eri-admin-backup-"))
+    target = folder / "eri-store-backup.sqlite3"
+    try:
+        with _eri_db_guard:
+            with sqlite3.connect(DB) as source:
+                with sqlite3.connect(target) as dest:
+                    source.backup(dest)
+        os.chmod(target,0o600)
+        with sqlite3.connect(target) as check:
+            if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise VaultError("SQLite backup integrity failed")
+        return FileResponse(
+            target, filename="eri-store-backup.sqlite3",
+            media_type="application/octet-stream",
+            background=BackgroundTask(shutil.rmtree, folder, ignore_errors=True),
+            headers={"Cache-Control":"private, no-store",
+                     "X-Content-Type-Options":"nosniff"}
+        )
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
 @app.get("/api/v1/admin/customers", dependencies=[Depends(require_admin)])
 def admin_customers():
     with connection() as db:
@@ -1460,11 +1676,14 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
             order_ids = [r["id"] for r in db.execute(
                 "SELECT id FROM orders WHERE customer_id=?", (customer_id,)
             ).fetchall()]
-            deliveries = [r["storage_name"] for r in db.execute(
-                "SELECT d.storage_name FROM order_deliveries d "
+            delivery_rows = db.execute(
+                "SELECT d.storage_name,d.size_bytes FROM order_deliveries d "
                 "JOIN orders o ON o.id=d.order_id WHERE o.customer_id=?",
                 (customer_id,)
-            ).fetchall()]
+            ).fetchall()
+            deliveries = [r["storage_name"] for r in delivery_rows]
+            for item in delivery_rows:
+                _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
             # Delete UDID submissions and unexpired scan links for this customer.
             db.execute("DELETE FROM cert_order_udids WHERE customer_id=?", (customer_id,))
             db.execute("DELETE FROM cert_udid_sessions WHERE customer_id=?", (customer_id,))
@@ -1502,9 +1721,11 @@ async def admin_delete_customer(customer_id: int, confirmation: ConfirmCustomerD
                     part = meta.with_name(meta.name[:-len(".delivery.json")] + ".delivery.part")
                     part.unlink(missing_ok=True)
                     meta.unlink(missing_ok=True)
+    cleanup = _drain_cloud_deletions()
     return {
         "deleted": True, "deleted_orders": len(order_ids),
-        "deleted_delivery_files": files_removed
+        "deleted_delivery_files": files_removed,
+        "cloud_cleanup_pending": cleanup["pending"]
     }
 
 # Consent-based Apple profile scan for certificate orders only.
