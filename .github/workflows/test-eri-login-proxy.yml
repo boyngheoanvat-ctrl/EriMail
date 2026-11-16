@@ -1,0 +1,18 @@
+name: Verify ERI Login Admin delegated keys
+on:
+  push:
+    branches: [eri-login-render]
+    paths:
+      - 'eri_login_proxy.py'
+      - 'tests/test_eri_login_admin_delegation.py'
+      - '.github/workflows/test-eri-login-proxy.yml'
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: python3 -m py_compile eri_login_proxy.py
+      - name: Validate temporary admin keys
+        run: python3 -m unittest discover -s tests -p 'test_eri_login_admin_delegation.py' -v
