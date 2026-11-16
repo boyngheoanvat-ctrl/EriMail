@@ -22,6 +22,9 @@ private struct ERIBackgroundRecord: Codable {
     // Only non-secret product fields. No private key or admin key is persisted.
     var metadata: Data?
     var renewals: Int?
+    // Sparse acknowledgments support background transfers completing out of order.
+    // Optional to restore records created by prior releases.
+    var acknowledgedParts: [Int]?
 }
 
 private enum ERIBackgroundError: LocalizedError {
@@ -51,6 +54,8 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
 
     private var record: ERIBackgroundRecord?
     private var sending = false
+    private var scheduling = false
+    private var checkingServer = false
     private var renewing = false
     private var retryBlocked = false
     private var backgroundEventsCompletion: (() -> Void)?
@@ -170,7 +175,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         record = ERIBackgroundRecord(id: uploadID, size: size, chunkBytes: chunkBytes,
                                      partCount: parts, nextPart: 0,
                                      acknowledgedBytes: 0, failures: 0,
-                                     metadata: metadata, renewals: 0)
+                                     metadata: metadata, renewals: 0, acknowledgedParts: [])
         progress = 0
         pending = true
         active = true
@@ -249,6 +254,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
             current.id = newID
             current.nextPart = 0
             current.acknowledgedBytes = 0
+            current.acknowledgedParts = []
             current.failures = 0
             current.renewals = renewals + 1
             record = current
