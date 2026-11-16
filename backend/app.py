@@ -24,24 +24,29 @@ DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
 from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
 _eri_db_guard = threading.RLock()
 _VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
-if _VAULT_MODE not in ("", "off", "required", "preview"):
+if _VAULT_MODE not in ("", "off", "required", "preview", "bootstrap"):
     raise RuntimeError("Invalid ERI_VAULT_MODE")
 if _VAULT_MODE == "preview" and (
         os.getenv("ERI_PREVIEW_ALLOW_EMPTY_SEED") != "I_ACKNOWLEDGE_DATA_RESET"
         or os.getenv("ERI_STORE_ENV") != "isolated-preview"):
     raise RuntimeError("Preview seeding is forbidden outside isolated-preview")
-_eri_vault = ERIVault() if _VAULT_MODE in ("required", "preview") else None
+if _VAULT_MODE == "bootstrap" and (
+        os.getenv("ERI_APPROVE_FRESH_START") != "START_NEW_ERI_STORE_WITHOUT_OLD_DATA"
+        or os.getenv("ERI_STORE_ENV") != "production"):
+    raise RuntimeError("Explicit production fresh-start approval is required")
+_eri_vault = ERIVault() if _VAULT_MODE in ("required", "preview", "bootstrap") else None
 _preview_cloud_empty = False
 if _eri_vault is not None:
-    if _VAULT_MODE == "preview":
+    if _VAULT_MODE in ("preview", "bootstrap"):
         pointer = _eri_vault.read_snapshot_pointer()
         if pointer is not None:
             _eri_vault.restore_sqlite(DB)
         else:
+            if _VAULT_MODE == "bootstrap" and DB.exists():
+                raise RuntimeError("Refusing fresh start over a local SQLite database")
             _preview_cloud_empty = True
     else:
-        # Production NEVER initializes a new customer database from scratch.
-        # Seed a verified snapshot from the original running server first.
+        # Strict production mode NEVER initializes an empty customer database.
         _eri_vault.restore_sqlite(DB)
 _log = logging.getLogger("eri.persistence")
 ADMIN_KEY = os.getenv("ERI_ADMIN_KEY", "")
@@ -201,7 +206,7 @@ def init():
 
 init()
 if _preview_cloud_empty:
-    # A fresh isolated preview is the only mode allowed to create an empty DB.
+    # Only explicit preview or approved one-time production bootstrap can seed.
     _eri_vault.snapshot_sqlite(DB)
 
 def require_admin(x_eri_admin_key: str | None = Header(default=None)):
