@@ -913,6 +913,7 @@ private struct OrdersView: View {
     let kind: String
     @State private var orders: [Order] = []
     @State private var references: [String: String] = [:]
+    @State private var referenceErrors: [String: String] = [:]
     @State private var status = ""
     @State private var toDeliver: Order?
     @State private var fileDeliveryOrder: Order?
@@ -991,10 +992,19 @@ private struct OrdersView: View {
                     if order.status == "pending" {
                         TextField("Mã giao dịch MoMo đã đối chiếu", text: Binding(
                             get: { references[order.id] ?? "" },
-                            set: { references[order.id] = $0 }
+                            set: {
+                                references[order.id] = $0
+                                referenceErrors[order.id] = nil
+                            }
                         ))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        if let explanation = referenceErrors[order.id] {
+                            Text(explanation)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if !validReference(order) {
                             Text("Nhập mã giao dịch MoMo hợp lệ (6–128 ký tự) sau khi đã kiểm tra tiền để bật nút Đã giao.")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -1087,10 +1097,19 @@ private struct OrdersView: View {
         defer { updatingOrderID = nil }
         do {
             try await setServerStatus(order, to: newStatus)
+            referenceErrors[order.id] = nil
             await refresh()
             status = "Đơn " + order.id + ": " + readableStatus(newStatus)
         } catch {
-            status = "Không cập nhật được đơn: " + error.localizedDescription
+            let details = error.localizedDescription
+            if newStatus == "paid" &&
+                details.localizedCaseInsensitiveContains("MoMo transaction reference already used") {
+                let notice = "Mã MoMo này đã dùng cho đơn khác. Hãy mở lịch sử MoMo và nhập mã giao dịch thật, duy nhất của khoản thanh toán này. Không dùng mã thử như 123456."
+                referenceErrors[order.id] = notice
+                status = "Chưa xác nhận thanh toán. " + notice
+            } else {
+                status = "Không cập nhật được đơn: " + details
+            }
         }
     }
 
