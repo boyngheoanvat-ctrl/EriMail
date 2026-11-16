@@ -1666,10 +1666,126 @@ private struct CatalogProduct: Decodable, Identifiable {
     let name: String
     let description: String
     let price_vnd: Int
+    let issuer: String?
+    let version: String?
 }
 
 private struct CatalogList: Decodable {
     let items: [CatalogProduct]
+}
+
+private struct CatalogEditView: View {
+    @EnvironmentObject private var session: AdminSession
+    @Environment(\.dismiss) private var dismiss
+    let kind: UploadKind
+    let item: CatalogProduct
+    let onSaved: () -> Void
+
+    @State private var name: String
+    @State private var description: String
+    @State private var price: String
+    @State private var issuer: String
+    @State private var saving = false
+    @State private var message = ""
+
+    init(kind: UploadKind, item: CatalogProduct, onSaved: @escaping () -> Void) {
+        self.kind = kind
+        self.item = item
+        self.onSaved = onSaved
+        _name = State(initialValue: item.name)
+        _description = State(initialValue: item.description)
+        _price = State(initialValue: String(item.price_vnd))
+        _issuer = State(initialValue: item.issuer ?? "Chưa xác định")
+    }
+
+    private var valid: Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...160).contains(trimmed.count),
+              description.count <= 2000,
+              let amount = Int(price), amount >= 0,
+              amount <= 1_000_000_000, !saving else { return false }
+        if kind == .certificate &&
+            !(1...160).contains(issuer.trimmingCharacters(in: .whitespacesAndNewlines).count) {
+            return false
+        }
+        return (kind == .ipa || kind == .apk) || amount > 0
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Sản phẩm đã đăng") {
+                    LabeledContent("Mã sản phẩm", value: String(item.id))
+                    if (kind == .ipa || kind == .apk), let version = item.version {
+                        LabeledContent("Phiên bản IPA/APK", value: version)
+                    }
+                    Text("Giữ nguyên mã sản phẩm, file đã upload và lịch sử đơn hàng.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Sửa thông tin") {
+                    TextField("Tên sản phẩm", text: $name)
+                    TextField("Mô tả / nội dung sản phẩm", text: $description, axis: .vertical)
+                        .lineLimit(3...6)
+                    if kind == .certificate {
+                        TextField("Nhà phát hành chứng chỉ", text: $issuer)
+                    }
+                    TextField((kind == .ipa || kind == .apk)
+                              ? "Giá bán (VND)" : "Giá vốn (VND)", text: $price)
+                        .keyboardType(.numberPad)
+                    if (kind == .ai || kind == .certificate),
+                       let amount = Int(price), amount > 0, amount <= 1_000_000_000 {
+                        Text("Giá trên ERI STORE: " + eriMoney((amount * 130 + 99) / 100))
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if (kind == .ipa || kind == .apk), price == "0" {
+                        Text("FREE: khách có thể tải trực tiếp nếu file còn trong kho.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                Section {
+                    Button(saving ? "Đang lưu..." : "Lưu thay đổi") {
+                        Task { await save() }
+                    }
+                    .disabled(!valid)
+                    if !message.isEmpty {
+                        Text(message).font(.footnote).foregroundStyle(.red)
+                    }
+                } footer: {
+                    Text("Giá mới chỉ áp dụng cho đơn mua sau khi lưu. Không thay đổi giá, trạng thái hay lịch sử thanh toán của các đơn trước.")
+                }
+            }
+            .navigationTitle("Sửa sản phẩm")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Đóng") { dismiss() }.disabled(saving)
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard valid, let amount = Int(price) else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            var body: [String: Any] = [
+                "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
+                "description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+                "price_vnd": amount
+            ]
+            if kind == .certificate {
+                body["issuer"] = issuer.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let encoded = try JSONSerialization.data(withJSONObject: body)
+            _ = try await session.send("/api/v1/admin/catalog/" + kind.rawValue +
+                                       "/" + String(item.id), method: "PATCH", data: encoded)
+            onSaved()
+            dismiss()
+        } catch {
+            message = "Không lưu được: " + error.localizedDescription
+        }
+    }
 }
 
 private struct AdminCatalogView: View {
@@ -1678,6 +1794,7 @@ private struct AdminCatalogView: View {
     @State private var products: [CatalogProduct] = []
     @State private var showFree = false
     @State private var toDelete: CatalogProduct?
+    @State private var editing: CatalogProduct?
     @State private var busy = false
     @State private var message = ""
 
@@ -1702,15 +1819,32 @@ private struct AdminCatalogView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.name).font(.headline)
                     if !item.description.isEmpty { Text(item.description) }
-                    Text((kind == .ipa || kind == .apk) && item.price_vnd == 0 ? "FREE · Tải trực tiếp" : eriMoney(item.price_vnd))
-                    Button("Xóa sản phẩm", role: .destructive) { toDelete = item }
-                        .disabled(busy)
+                    Text((kind == .ipa || kind == .apk) && item.price_vnd == 0
+                         ? "FREE · Tải trực tiếp" : eriMoney(item.price_vnd))
+                    if kind == .ai || kind == .certificate {
+                        Text("Giá vốn, giá trên Store cộng 30%")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 16) {
+                        Button("Sửa giá / thông tin") { editing = item }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(busy)
+                        Button("Xóa sản phẩm", role: .destructive) { toDelete = item }
+                            .buttonStyle(.bordered)
+                            .disabled(busy)
+                    }
                 }
                 .padding(.vertical, 5)
             }
         }
         .navigationTitle("Quản lý " + kind.title.replacingOccurrences(of: "Cập nhật ", with: ""))
         .toolbar { Button("Làm mới") { Task { await reload() } } }
+        .sheet(item: $editing) { item in
+            CatalogEditView(kind: kind, item: item) {
+                Task { await reload() }
+            }
+            .environmentObject(session)
+        }
         .task { await reload() }
         .confirmationDialog("Xóa sản phẩm khỏi ERI STORE?", isPresented: Binding(
             get: { toDelete != nil }, set: { if !$0 { toDelete = nil } }
