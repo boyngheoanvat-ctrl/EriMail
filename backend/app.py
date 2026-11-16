@@ -18,7 +18,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
 from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
@@ -1407,6 +1407,7 @@ def admin_catalog_products(kind: str):
 
 class CatalogProductEdit(BaseModel):
     """Only mutable listing metadata. Never accept a file ID or order fields."""
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(max_length=2000)
     price_vnd: int = Field(ge=0, le=1000000000)
