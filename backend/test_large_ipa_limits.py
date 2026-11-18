@@ -65,5 +65,7 @@ with tempfile.TemporaryDirectory(prefix="eri-large-ipa-") as folder:
     app_source = (Path(__file__).resolve().parents[1] /
                   "apps/ERIAdmin/ERIAdminApp.swift").read_text(encoding="utf-8")
     assert "case .ipa, .apk: return eriModUploadMaxBytes" in app_source
-    assert "private let eriModUploadMaxBytes = 2 * 1024 * 1024 * 1024" in app_source
+    assert "private let eriLegacyModUploadMaxBytes = 2 * 1024 * 1024 * 1024" in app_source
+    assert "private let eriModUploadMaxBytes = 5 * 1024 * 1024 * 1024 * 1024" in app_source
+    assert "publishModViaR2" in app_source
     print("Large IPA/APK metadata and vault bounds: OK (no large payload allocated)")
