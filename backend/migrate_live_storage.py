@@ -46,7 +46,8 @@ def inventory(db_path: Path, uploads: Path):
         name, size, sha = entry["storage_name"], entry["size_bytes"], entry["sha256"]
         if not SAFE_NAME.fullmatch(name):
             raise VaultError("Unsafe private object name in database")
-        if not (isinstance(size,int) and 0 < size <= MAX_PRODUCT_BYTES
+        if not (type(size) is int and size > 0
+                and (MAX_PRODUCT_BYTES == 0 or size <= MAX_PRODUCT_BYTES)
                 and isinstance(sha,str) and re.fullmatch(r"[a-f0-9]{64}",sha)):
             raise VaultError("Invalid object metadata in database")
         if name in uploads_by_name:
