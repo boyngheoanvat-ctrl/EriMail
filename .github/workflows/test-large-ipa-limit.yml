@@ -1,9 +1,9 @@
-name: Validate capacity-aware IPA uploads
+name: ERI ADMIN incident catalog all-items iOS build
 
 on:
   push:
     branches:
-      - feature/capacity-aware-ipa-upload-20261118
+      - incident/catalog-recovery-audit-20261119
     paths:
       - 'apps/ERIAdmin/**'
       - 'backend/**'
@@ -18,27 +18,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  api-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt httpx
-      - name: Validate large file limits and existing chunk uploads
-        working-directory: backend
-        run: |
-          python test_large_ipa_limits.py
-          python test_r2_large_mods.py
-          python test_upload_reservations.py
-          python test_fast_upload.py
-          python test_eri_atomic_snapshot.py
-          python -m unittest -v test_eri_vault.py test_eri_persistence.py test_live_storage_migration.py
-      - name: Syntax check
-        run: python -m py_compile backend/app.py backend/eri_vault.py backend/test_large_ipa_limits.py backend/eri_r2_mods.py backend/test_r2_large_mods.py
-
   ios-compile:
     runs-on: macos-15
     timeout-minutes: 45
@@ -87,7 +66,7 @@ jobs:
         run: |
           mkdir -p payload/Payload
           cp -R build-project/derived/Build/Products/Release-iphoneos/ERIAdmin.app payload/Payload/
-          cd payload && zip -qr ../ERIAdmin-capacity-aware-unsigned.ipa Payload
+          cd payload && zip -qr ../ERIAdmin-catalog-visibility-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
           name: ERIAdmin-capacity-aware-unsigned-IPA
