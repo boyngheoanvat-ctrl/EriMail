@@ -32,6 +32,27 @@ The connected project is on Supabase Free (1 GB included); its private
 bucket was observed to contain approximately 1,052,985,043 bytes before the
 change. No storage plan was upgraded and no existing file was deleted.
 
+## Transaction safety and capacity admission
+
+The API now reserves unfinished bytes across concurrent upload sessions,
+including sparse fast uploads whose file length does not show actual disk
+consumption. New sessions are rejected with HTTP 507 when the total of
+unfinished reservations, the new file and the 128 MiB safety reserve
+would exceed free local storage. This is a conservative admission check,
+not a guarantee against external disk usage.
+
+When `ERI_VAULT_MODE=required`, mutations are serialized from their
+uncommitted SQLite transaction and published as an authenticated, checksum
+verified remote snapshot **before** committing the local SQLite write.
+A failed remote snapshot rolls the local transaction back. If the remote
+commit succeeds but local commit fails, the server restores the cloud
+snapshot or refuses further database operations. This prevents acknowledging
+a user registration or order that cannot survive an ephemeral restart.
+
+CI now covers cloud snapshot failure and retry, account recovery, private
+IPA recovery after local disk loss, file checksums and concurrent upload
+admission. Production migration still requires a current restorable backup.
+
 ## Backend rollout — NOT YET DEPLOYED
 
 The live Render `eri-api-dag8` was still running
