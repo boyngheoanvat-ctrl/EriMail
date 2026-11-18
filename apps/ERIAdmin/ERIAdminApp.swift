@@ -14,7 +14,8 @@ import UniformTypeIdentifiers
 
 private let server = "https://eri-api-dag8.onrender.com"
 // 2 GiB IPA/APK ceiling; the server and the private vault must match.
-private let eriModUploadMaxBytes = 2 * 1024 * 1024 * 1024
+private let eriModUploadMaxBytes = 5 * 1024 * 1024 * 1024 * 1024 - 5 * 1024 * 1024 * 1024
+private let eriLegacyModUploadMaxBytes = 2 * 1024 * 1024 * 1024
 
 @main
 struct ERIAdminApp: App {
@@ -1502,6 +1503,68 @@ private struct ERIDocumentPicker: UIViewControllerRepresentable {
     }
 }
 
+private struct ERIR2Config: Decodable {
+    let enabled: Bool
+    let max_object_bytes: Int
+}
+private struct ERIR2UploadStart: Decodable {
+    let upload_id: String
+    let size_bytes: Int
+    let part_bytes: Int
+    let total_parts: Int
+}
+private struct ERIR2UploadStatus: Decodable {
+    let state: String
+    let received: [Int]
+    let total_parts: Int
+    let part_bytes: Int?
+    let size_bytes: Int?
+}
+private struct ERIR2SignedPart: Decodable {
+    let url: String
+    let bytes: Int
+    let index: Int
+}
+private struct ERIR2UploadDone: Decodable {
+    let id: Int
+    let uploaded: Bool
+}
+
+private enum ERIR2ChunkFile {
+    // Never create a second full IPA: stage only one multipart part at a time.
+    static func make(source: URL, index: Int, partBytes: Int, expected: Int) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eri-r2-parts", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let output = folder.appendingPathComponent(UUID().uuidString + ".part")
+        guard FileManager.default.createFile(atPath: output.path, contents: nil) else {
+            throw URLError(.cannotCreateFile)
+        }
+        do {
+            let input = try FileHandle(forReadingFrom: source)
+            defer { try? input.close() }
+            let writer = try FileHandle(forWritingTo: output)
+            defer { try? writer.close() }
+            try input.seek(toOffset: UInt64(index * partBytes))
+            var copied = 0
+            while copied < expected {
+                let count = min(1_048_576, expected - copied)
+                guard let data = try input.read(upToCount: count),
+                      data.count == count else { throw URLError(.cannotOpenFile) }
+                try writer.write(contentsOf: data)
+                copied += count
+            }
+            try FileManager.default.setAttributes([
+                .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+            ], ofItemAtPath: output.path)
+            return output
+        } catch {
+            try? FileManager.default.removeItem(at: output)
+            throw error
+        }
+    }
+}
+
 private struct AdminUploadView: View {
     @EnvironmentObject private var session: AdminSession
     @ObservedObject private var backgroundUploader = ERIBackgroundUploader.shared
@@ -1558,7 +1621,7 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
-                    Text("IPA tối đa 2 GiB. iPhone cần đủ dung lượng trống để sao chép tệp và chuẩn bị các phần tải nền.")
+                    Text("IPA lớn dùng R2 khi máy chủ đã cấu hình. Giới hạn thực tế phụ thuộc dung lượng kho và iPhone; R2 cho phép tối đa gần 5 TiB mỗi file.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1685,6 +1748,93 @@ private struct AdminUploadView: View {
         case .ai: return true
         }
     }
+    private func publishModViaR2(_ file: URL, size: Int, amount: Int) async throws {
+        // Save the upload session only against the same source and metadata.
+        // If the app is suspended, the user can reopen and press Upload again.
+        let key = "eri.admin.r2.pending." + kind.rawValue
+        let existing = UserDefaults.standard.dictionary(forKey: key)
+        let sameFile = existing?["path"] as? String == file.path &&
+            existing?["size"] as? Int == size &&
+            existing?["name"] as? String == name &&
+            existing?["description"] as? String == description &&
+            existing?["price"] as? Int == amount
+        var uploadID = sameFile ? (existing?["id"] as? String ?? "") : ""
+        if uploadID.isEmpty {
+            uploadPhase = "Đang tạo phiên tải R2 bảo mật..."
+            let payload: [String: Any] = [
+                "kind": kind.rawValue, "filename": file.lastPathComponent,
+                "size_bytes": size, "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
+                "description": description, "price_vnd": amount, "authorized": authorized
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let result = try await session.send("/api/v1/admin/r2-mods/start", method: "POST",
+                                                data: data)
+            let start = try JSONDecoder().decode(ERIR2UploadStart.self, from: result)
+            guard start.size_bytes == size, start.part_bytes >= 5 * 1024 * 1024,
+                  start.total_parts > 0 && start.total_parts <= 10_000 else {
+                throw URLError(.badServerResponse)
+            }
+            uploadID = start.upload_id
+            UserDefaults.standard.set([
+                "id": uploadID, "path": file.path, "size": size,
+                "name": name, "description": description, "price": amount
+            ], forKey: key)
+        }
+        let base = "/api/v1/admin/r2-mods/" + uploadID
+        let statusData = try await session.send(base + "/status")
+        let remote = try JSONDecoder().decode(ERIR2UploadStatus.self, from: statusData)
+        if remote.state == "published" {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        guard remote.state == "pending",
+              let partSize = remote.part_bytes,
+              remote.size_bytes == size,
+              partSize >= 5 * 1024 * 1024,
+              remote.total_parts > 0 && remote.total_parts <= 10_000 else {
+            throw URLError(.badServerResponse)
+        }
+        let received = Set(remote.received)
+        var completed = received.reduce(0) { total, index in
+            total + min(partSize, size - index * partSize)
+        }
+        progress = Double(completed) / Double(size)
+        for index in 0..<remote.total_parts where !received.contains(index) {
+            try Task.checkCancellation()
+            let expected = min(partSize, size - index * partSize)
+            uploadPhase = "R2: chuẩn bị phần \(index + 1)/\(remote.total_parts)"
+            let filePart = try await Task.detached(priority: .userInitiated) {
+                try ERIR2ChunkFile.make(source: file, index: index,
+                                        partBytes: partSize, expected: expected)
+            }.value
+            defer { try? FileManager.default.removeItem(at: filePart) }
+            let reply = try await session.send(base + "/part/" + String(index))
+            let ticket = try JSONDecoder().decode(ERIR2SignedPart.self, from: reply)
+            guard ticket.index == index, ticket.bytes == expected,
+                  let target = URL(string: ticket.url), target.scheme == "https",
+                  target.host?.hasSuffix(".r2.cloudflarestorage.com") == true else {
+                throw URLError(.badServerResponse)
+            }
+            var request = URLRequest(url: target)
+            request.httpMethod = "PUT"
+            request.timeoutInterval = 900
+            let (_, response) = try await URLSession.shared.upload(for: request,
+                                                                    fromFile: filePart)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            completed += expected
+            progress = Double(completed) / Double(size)
+            uploadPhase = "R2 đã nhận " + String(format: "%.1f", progress * 100) + "%"
+        }
+        uploadPhase = "Đang xác minh SHA-256 và cấu trúc IPA/APK trên kho R2..."
+        let response = try await session.send(base + "/complete", method: "POST")
+        let done = try JSONDecoder().decode(ERIR2UploadDone.self, from: response)
+        guard done.uploaded, done.id > 0 else { throw URLError(.badServerResponse) }
+        progress = 1
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
     private func publish() async {
         guard let file = selectedFile, !backgroundUploader.pending else { return }
         working = true
@@ -1698,10 +1848,29 @@ private struct AdminUploadView: View {
             }
             let info = try FileManager.default.attributesOfItem(atPath: file.path)
             guard let number = info[.size] as? NSNumber,
-                  number.intValue > 0 && number.intValue <= kind.maxBytes else {
-                throw URLError(.dataLengthExceedsMaximum)
+                  number.int64Value > 0 && number.int64Value <= Int64(kind.maxBytes) else {
+                throw ImportedFileFailure.exceededLimit(kind.maxBytes)
             }
             let size = number.intValue
+            if kind == .ipa || kind == .apk {
+                if let result = try? await session.send("/api/v1/admin/r2-mods/config"),
+                   let configuration = try? JSONDecoder().decode(ERIR2Config.self, from: result),
+                   configuration.enabled {
+                    guard size <= configuration.max_object_bytes else {
+                        throw ImportedFileFailure.exceededLimit(configuration.max_object_bytes)
+                    }
+                    try await publishModViaR2(file, size: size, amount: amount)
+                    status = "R2 đã xác minh và đăng sản phẩm thành công."
+                    selectedFile = nil
+                    saveDraft()
+                    try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+                    return
+                }
+                guard size <= eriLegacyModUploadMaxBytes else {
+                    throw AdminError.httpDetail(503,
+                        "R2 chưa được bật trên máy chủ. Không thể tải IPA lớn hơn 2 GiB qua API cũ.")
+                }
+            }
             let payload: [String: Any] = [
                 "kind": kind.rawValue,
                 "filename": file.lastPathComponent,
