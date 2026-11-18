@@ -1603,6 +1603,8 @@ private struct AdminUploadView: View {
     @State private var status = ""
     @State private var progress = 0.0
     @State private var uploadPhase = ""
+    @State private var r2PendingUploadID: String?
+    @State private var confirmR2Cancel = false
 
     var body: some View {
         Form {
@@ -1676,6 +1678,14 @@ private struct AdminUploadView: View {
                     Task { await publish() }
                 }
                 .disabled(!valid || working || backgroundUploader.pending)
+                if (kind == .ipa || kind == .apk), r2PendingUploadID != nil {
+                    Text("Có phiên tải R2 chưa hoàn tất. Chọn lại cùng IPA rồi bấm Cập nhật để tiếp tục, không cần tải lại các phần đã nhận.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Button("Hủy phiên tải R2 đang dở", role: .destructive) {
+                        confirmR2Cancel = true
+                    }
+                    .disabled(working || backgroundUploader.pending)
+                }
                 if !status.isEmpty { Text(status).font(.footnote) }
             }
             Section {
@@ -1688,7 +1698,21 @@ private struct AdminUploadView: View {
             }
         }
         .navigationTitle(kind.title)
-        .onAppear { restoreDraft() }
+        .onAppear {
+            restoreDraft()
+            r2PendingUploadID = UserDefaults.standard.dictionary(
+                forKey: "eri.admin.r2.pending." + kind.rawValue
+            )?["id"] as? String
+        }
+        .confirmationDialog(
+            "Hủy phiên tải R2? Các phần chưa hoàn thành sẽ bị xóa khỏi kho R2. Sản phẩm đã đăng không bị ảnh hưởng.",
+            isPresented: $confirmR2Cancel, titleVisibility: .visible
+        ) {
+            Button("Hủy và xóa các phần chưa hoàn thành", role: .destructive) {
+                Task { await abortR2Pending() }
+            }
+            Button("Giữ phiên tải", role: .cancel) {}
+        }
         .onChange(of: name) { _ in saveDraft() }
         .onChange(of: description) { _ in saveDraft() }
         .onChange(of: price) { _ in saveDraft() }
@@ -1770,6 +1794,22 @@ private struct AdminUploadView: View {
         case .ai: return true
         }
     }
+    private func abortR2Pending() async {
+        guard let sid = r2PendingUploadID, !working,
+              sid.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil else { return }
+        working = true
+        defer { working = false }
+        do {
+            _ = try await session.send(
+                "/api/v1/admin/r2-mods/" + sid + "/abort", method: "POST")
+            UserDefaults.standard.removeObject(forKey: "eri.admin.r2.pending." + kind.rawValue)
+            r2PendingUploadID = nil
+            status = "Đã hủy phiên tải R2 chưa hoàn tất. IPA đã chọn vẫn được giữ trên iPhone."
+        } catch {
+            status = "Không thể hủy phiên tải R2: " + error.localizedDescription
+        }
+    }
+
     private func publishModViaR2(_ file: URL, size: Int, amount: Int) async throws {
         // Save the upload session only against the same source and metadata.
         // If the app is suspended, the user can reopen and press Upload again.
@@ -1810,11 +1850,13 @@ private struct AdminUploadView: View {
                 "price": amount
             ], forKey: key)
         }
+        r2PendingUploadID = uploadID
         let base = "/api/v1/admin/r2-mods/" + uploadID
         let statusData = try await session.send(base + "/status")
         let remote = try JSONDecoder().decode(ERIR2UploadStatus.self, from: statusData)
         if remote.state == "published" {
             UserDefaults.standard.removeObject(forKey: key)
+            r2PendingUploadID = nil
             return
         }
         if remote.state == "verifying" {
@@ -1823,6 +1865,7 @@ private struct AdminUploadView: View {
             let done = try JSONDecoder().decode(ERIR2UploadDone.self, from: completed)
             guard done.uploaded, done.id > 0 else { throw URLError(.badServerResponse) }
             UserDefaults.standard.removeObject(forKey: key)
+            r2PendingUploadID = nil
             progress = 1
             return
         }
@@ -1872,6 +1915,7 @@ private struct AdminUploadView: View {
         guard done.uploaded, done.id > 0 else { throw URLError(.badServerResponse) }
         progress = 1
         UserDefaults.standard.removeObject(forKey: key)
+        r2PendingUploadID = nil
     }
 
     private func publish() async {
