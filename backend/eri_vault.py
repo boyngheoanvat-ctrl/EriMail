@@ -19,7 +19,11 @@ import urllib.request
 from pathlib import Path
 
 CHUNK_BYTES = 4 * 1024 * 1024
-MAX_PRODUCT_BYTES = 512 * 1024 * 1024
+# 0 removes a code-level cap; remote storage quota and per-part size still apply.
+MAX_PRODUCT_BYTES = int(os.getenv("ERI_PRIVATE_MAX_PRODUCT_BYTES", "0"))
+if MAX_PRODUCT_BYTES < 0:
+    raise ValueError("ERI_PRIVATE_MAX_PRODUCT_BYTES must be >= 0")
+MAX_FILE_CHUNKS = 1_000_000_000  # Edge function's file-index namespace.
 MAX_SQLITE_BYTES = 64 * 1024 * 1024
 VAULT_BASE = os.getenv("ERI_VAULT_URL", "https://dahrbjjknmvwokruhnha.supabase.co/functions/v1/eri-private-vault")
 _NAME = re.compile(r"^[a-f0-9]{32}$")
@@ -71,9 +75,15 @@ class ERIVault:
         if not _NAME.fullmatch(obj_id):
             raise VaultError("Invalid private storage ID")
 
+    @staticmethod
+    def _valid_part(kind: str, index: int) -> bool:
+        if kind not in ("files", "snapshots", "sessionmeta") or type(index) is not int:
+            return False
+        return 0 <= index < (MAX_FILE_CHUNKS if kind == "files" else 128)
+
     def _put(self, kind: str, obj_id: str, index: int, data: bytes):
         self._valid_id(obj_id)
-        if kind not in ("files", "snapshots", "sessionmeta") or not 0 <= index < 128:
+        if not self._valid_part(kind, index):
             raise VaultError("Invalid vault chunk path")
         if not 0 < len(data) <= CHUNK_BYTES:
             raise VaultError("Invalid chunk size")
@@ -90,7 +100,7 @@ class ERIVault:
 
     def _get(self, kind: str, obj_id: str, index: int) -> bytes:
         self._valid_id(obj_id)
-        if kind not in ("files", "snapshots", "sessionmeta") or not 0 <= index < 128:
+        if not self._valid_part(kind, index):
             raise VaultError("Invalid vault chunk path")
         data = self._request("GET", f"/{kind}/{obj_id}/{index}")
         if not 0 < len(data) <= CHUNK_BYTES:
@@ -99,7 +109,7 @@ class ERIVault:
 
     def chunk_exists(self, obj_id: str, index: int = 0, *, kind: str = "files") -> bool:
         self._valid_id(obj_id)
-        if kind not in ("files", "snapshots", "sessionmeta") or not 0 <= index < 128:
+        if not self._valid_part(kind, index):
             raise VaultError("Invalid chunk locator")
         try:
             self._request("HEAD", f"/{kind}/{obj_id}/{index}")
@@ -135,7 +145,10 @@ class ERIVault:
         if kind not in ("files", "snapshots", "sessionmeta"):
             raise VaultError("Invalid delete kind")
         count = (size + CHUNK_BYTES - 1) // CHUNK_BYTES
-        if size < 1 or count > 128:
+        limit = MAX_PRODUCT_BYTES if kind == "files" else MAX_SQLITE_BYTES
+        if type(size) is not int or size <= 0 or (
+            limit and size > limit
+        ) or count > (MAX_FILE_CHUNKS if kind == "files" else 128):
             raise VaultError("Invalid delete size")
         for index in range(count):
             self._request("DELETE", f"/{kind}/{obj_id}/{index}")
@@ -145,8 +158,10 @@ class ERIVault:
         self._valid_id(object_id)
         file_size = local.stat().st_size
         max_size = MAX_PRODUCT_BYTES if kind == "files" else MAX_SQLITE_BYTES
-        if file_size < 1 or file_size > max_size:
+        if file_size < 1 or (max_size and file_size > max_size):
             raise VaultError("File exceeds private storage limits")
+        if kind == "files" and (file_size + CHUNK_BYTES - 1) // CHUNK_BYTES > MAX_FILE_CHUNKS:
+            raise VaultError("File exceeds chunk-addressing capacity")
         if expected_sha256 is not None and not _HASH.fullmatch(expected_sha256):
             raise VaultError("Invalid expected SHA256")
         h = hashlib.sha256()
@@ -164,8 +179,12 @@ class ERIVault:
                      *, kind="files"):
         self._valid_id(obj_id)
         limit = MAX_PRODUCT_BYTES if kind == "files" else MAX_SQLITE_BYTES
-        if not isinstance(size, int) or not 0 < size <= limit or not _HASH.fullmatch(sha256):
+        if type(size) is not int or size <= 0 or (
+            limit and size > limit
+        ) or not _HASH.fullmatch(sha256):
             raise VaultError("Invalid persisted metadata")
+        if kind == "files" and (size + CHUNK_BYTES - 1) // CHUNK_BYTES > MAX_FILE_CHUNKS:
+            raise VaultError("Invalid file chunk count")
         target.parent.mkdir(parents=True, exist_ok=True)
         partial = target.with_name("." + target.name + "." + secrets.token_hex(6) + ".partial")
         h = hashlib.sha256()

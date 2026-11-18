@@ -12,16 +12,27 @@ import urllib.error
 import re
 import zipfile
 import plistlib
+import tempfile
 from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from eri_r2_mods import (install_r2_mod_routes, parse_storage_name,
+                         object_exists as eri_r2_object_exists,
+                         signed_download as eri_r2_signed_download,
+                         delete_object as eri_r2_delete_object)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
-from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
+from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES, MAX_SQLITE_BYTES
+
+# Keep IPA/APK, order delivery and private-vault limits in sync.
+# A value of zero removes the code-level file size cap; storage remains finite.
+MOD_UPLOAD_MAX_BYTES = int(os.getenv("ERI_MOD_UPLOAD_MAX_BYTES", "0"))
+if MOD_UPLOAD_MAX_BYTES < 0:
+    raise RuntimeError("ERI_MOD_UPLOAD_MAX_BYTES must be >= 0")
 _eri_db_guard = threading.RLock()
 _VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
 if _VAULT_MODE not in ("", "off", "required", "preview", "bootstrap"):
@@ -62,21 +73,60 @@ async def vault_unavailable(_request, _exc):
         "detail": "Kho lưu trữ an toàn đang gián đoạn; dữ liệu chưa được xác nhận."
     })
 
+# A failed cloud commit must not leave unconfirmed writes in the local DB.
+_eri_db_safe = True
+
 @contextmanager
 def connection():
-    # Serialize writes and their durable snapshots to avoid lost updates.
+    global _eri_db_safe
     with _eri_db_guard:
+        if not _eri_db_safe:
+            raise VaultError("Database recovery required before new operations")
         DB.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(DB, timeout=30)
         db.row_factory = sqlite3.Row
         initial = db.total_changes
+        remote_committed = False
+        db_closed = False
         try:
             yield db
-            db.commit()
             if _eri_vault is not None and db.total_changes != initial:
-                _eri_vault.snapshot_sqlite(DB)
+                # A snapshot made AFTER local commit can fail and silently
+                # lose customers/orders on the next Render restart. Capture
+                # the pending transaction via SQLite serialize() and publish
+                # the durable snapshot BEFORE acknowledging the local write.
+                # sqlite3.backup() from a write transaction can deadlock;
+                # serialize() safely contains its uncommitted view instead.
+                image = db.serialize()
+                if not 0 < len(image) <= MAX_SQLITE_BYTES:
+                    raise VaultError("Customer database exceeds durable snapshot capacity")
+                with tempfile.TemporaryDirectory(prefix="eri-db-pending-") as temp:
+                    pending = Path(temp) / "pending.sqlite3"
+                    pending.write_bytes(image)
+                    os.chmod(pending, 0o600)
+                    _eri_vault.snapshot_sqlite(pending)
+                remote_committed = True
+            try:
+                db.commit()
+            except BaseException:
+                if remote_committed:
+                    # The newer cloud snapshot is authoritative. Restore
+                    # it before admitting another request; otherwise fail
+                    # closed rather than making changes to a stale DB.
+                    try:
+                        db.rollback()
+                        db.close()
+                        db_closed = True
+                        _eri_vault.restore_sqlite(DB)
+                    except BaseException:
+                        _eri_db_safe = False
+                        raise VaultError("Cloud snapshot saved; local DB recovery failed")
+                raise
         finally:
-            db.close()
+            if not db_closed:
+                if db.in_transaction:
+                    db.rollback()
+                db.close()
 
 def _persist_private_file(path: Path, item_id: str, digest: str):
     if _eri_vault is not None:
@@ -97,7 +147,8 @@ def _queue_cloud_deletion(db, storage_name: str, size: int):
         return
     if (not isinstance(storage_name, str)
             or not re.fullmatch(r"[a-f0-9]{32}\.[a-z0-9]{1,16}", storage_name)
-            or not isinstance(size, int) or not 0 < size <= 512 * 1024 * 1024):
+            or type(size) is not int or size <= 0
+            or (MOD_UPLOAD_MAX_BYTES > 0 and size > MOD_UPLOAD_MAX_BYTES)):
         raise VaultError("Cannot queue invalid private object deletion")
     db.execute(
         "INSERT OR IGNORE INTO vault_delete_queue(storage_name,size_bytes,created_at) "
@@ -425,7 +476,7 @@ def ipa_storage_status():
     ready, missing = [], []
     for row in rows:
         item = {"id": row["id"], "name": row["name"], "version": row["version"]}
-        if row["storage_name"] and _eri_mod_file(row):
+        if row["storage_name"] and (_eri_mod_file(row) or eri_r2_object_exists(row["storage_name"], row["size_bytes"])):
             ready.append(item)
         else:
             missing.append(item)
@@ -450,7 +501,7 @@ def public_mod_catalog():
         item = {key: row[key] for key in
                 ("id", "name", "version", "bundle_id", "description", "price_vnd", "platform")}
         if item["price_vnd"] == 0:
-            if row["storage_name"] and _eri_mod_file(row):
+            if row["storage_name"] and (_eri_mod_file(row) or eri_r2_object_exists(row["storage_name"], row["size_bytes"])):
                 item["download_path"] = f'/api/v1/mods/{item["id"]}/download'
             else:
                 item["file_available"] = False
@@ -471,6 +522,14 @@ def download_free_mod(product_id: int):
         ).fetchone()
     if row is None:
         raise HTTPException(404, "Free mod file not available")
+    if parse_storage_name(row["storage_name"]):
+        if not eri_r2_object_exists(row["storage_name"], row["size_bytes"]):
+            raise HTTPException(404, "R2 file is missing or storage is not configured")
+        return RedirectResponse(
+            eri_r2_signed_download(row["storage_name"], row["original_name"]),
+            status_code=307,
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
     path = _eri_mod_file(row, restore=True)
     if path is None:
         raise HTTPException(404, "File missing on server; ask admin to re-upload")
@@ -861,7 +920,7 @@ async def sign_ipa(
 
 # Files are private and only uploadable by an authenticated admin.
 # Use persistent, access-controlled storage for ERI_UPLOAD_DIR and ERI_DB_PATH in production.
-UPLOAD_LIMITS = {"ipa": 512 * 1024**2, "apk": 512 * 1024**2, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
+UPLOAD_LIMITS = {"ipa": MOD_UPLOAD_MAX_BYTES, "apk": MOD_UPLOAD_MAX_BYTES, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
 UPLOAD_SUFFIXES = {
     "ipa": {".ipa"},
     "apk": {".apk"},
@@ -869,6 +928,82 @@ UPLOAD_SUFFIXES = {
     "ai": {".txt", ".json", ".csv", ".zip"},
 }
 UPLOAD_DIR = Path(os.getenv("ERI_UPLOAD_DIR", str(DB.parent / "eri-private-uploads")))
+# This version still assembles a full local file before SHA-256/ZIP validation.
+# Check physical free space instead of promising limitless local storage.
+ERI_UPLOAD_DISK_RESERVE_BYTES = 128 * 1024**2
+
+def _eri_reserved_upload_bytes() -> int:
+    """Count bytes not yet received by other upload sessions.
+
+    Fast sessions use sparse files; stat().st_size therefore is NOT enough
+    to account for how much space they still need. Use verified part markers.
+    The admission check runs under _eri_upload_lock to avoid two simultaneous
+    requests overcommitting the same free space.
+    """
+    remaining = 0
+    for meta_path in UPLOAD_DIR.glob(".*.session.json"):
+        try:
+            info = json.loads(meta_path.read_text("utf-8"))
+            size = info.get("size_bytes")
+            if type(size) is not int or not 0 < size <= 2**63 - 1:
+                continue
+            if info.get("fast"):
+                upload_id = info.get("upload_id", "")
+                if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
+                    continue
+                directory = UPLOAD_DIR / ("." + upload_id + ".parts")
+                confirmed = set()
+                if directory.is_dir():
+                    for marker in directory.glob("*.sha256"):
+                        if not marker.stem.isdecimal():
+                            continue
+                        index = int(marker.stem)
+                        if 0 <= index < (size + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES:
+                            confirmed.add(index)
+                acknowledged = sum(
+                    min(ERI_CHUNK_BYTES, size - i * ERI_CHUNK_BYTES)
+                    for i in confirmed
+                )
+            else:
+                acknowledged = max(0, min(size, int(info.get("offset", 0))))
+            remaining += size - acknowledged
+        except (OSError, TypeError, ValueError):
+            # Invalid/stale private metadata needs manual inspection; never
+            # misinterpret it as proof of available capacity.
+            continue
+    for meta_path in UPLOAD_DIR.glob(".*.delivery.json"):
+        try:
+            info = json.loads(meta_path.read_text("utf-8"))
+            size = info.get("size_bytes")
+            offset = info.get("offset")
+            if type(size) is int and type(offset) is int and 0 <= offset <= size:
+                remaining += size - offset
+        except (OSError, TypeError, ValueError):
+            continue
+    return remaining
+
+def _eri_check_upload_capacity(size: int) -> None:
+    if type(size) is not int or size < 1:
+        raise HTTPException(422, "Invalid upload size")
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        available = shutil.disk_usage(UPLOAD_DIR).free
+    except OSError as exc:
+        raise HTTPException(503, "Cannot inspect upload storage") from exc
+    reserved = _eri_reserved_upload_bytes()
+    if size + reserved + ERI_UPLOAD_DISK_RESERVE_BYTES > available:
+        raise HTTPException(507, "Insufficient server disk space, including "
+                                 "bytes reserved for other active uploads.")
+
+@app.get("/api/v1/admin/upload-capacity", dependencies=[Depends(require_admin)])
+def eri_upload_capacity():
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    available = shutil.disk_usage(UPLOAD_DIR).free
+    return {"max_mod_file_bytes": MOD_UPLOAD_MAX_BYTES or None,
+            "local_free_bytes": available,
+            "pending_upload_bytes": _eri_reserved_upload_bytes(),
+            "reserve_bytes": ERI_UPLOAD_DISK_RESERVE_BYTES,
+            "vault_configured": _eri_vault is not None}
 
 @app.post("/api/v1/admin/uploads/{kind}", dependencies=[Depends(require_admin)], status_code=201)
 async def upload_private_product(
@@ -915,7 +1050,7 @@ async def upload_private_product(
             os.chmod(temporary_path, 0o600)
             while chunk := await upload.read(1024 * 1024):
                 size += len(chunk)
-                if size > UPLOAD_LIMITS[kind]:
+                if UPLOAD_LIMITS[kind] and size > UPLOAD_LIMITS[kind]:
                     raise HTTPException(413, "File exceeds category size limit")
                 digest.update(chunk)
                 target.write(chunk)
@@ -977,7 +1112,7 @@ _eri_upload_lock = asyncio.Lock()
 class EriChunkStart(BaseModel):
     kind: str = Field(pattern="^(ipa|apk|certificate|ai)$")
     filename: str = Field(min_length=1, max_length=180)
-    size_bytes: int = Field(gt=0)
+    size_bytes: int = Field(gt=0, le=2**63 - 1)
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=2000)
     price_vnd: int = Field(ge=0, le=1000000000)
@@ -1003,8 +1138,8 @@ def _eri_recover_fast_session(upload_id: str):
     if not metadata.get("fast"):
         raise HTTPException(409, "Phiên tải cũ không thể khôi phục; hãy tạo lại upload")
     size, kind = metadata.get("size_bytes"), metadata.get("kind")
-    if (not isinstance(size, int) or kind not in UPLOAD_LIMITS
-            or not 0 < size <= UPLOAD_LIMITS[kind]):
+    if (type(size) is not int or kind not in UPLOAD_LIMITS or size <= 0
+            or (UPLOAD_LIMITS[kind] and size > UPLOAD_LIMITS[kind])):
         raise VaultError("Cloud upload session has invalid size")
     count = (size + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES
     UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1089,7 +1224,7 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
     extension = Path(filename).suffix.lower()
     if extension not in UPLOAD_SUFFIXES[item.kind]:
         raise HTTPException(422, "Unsupported file extension")
-    if item.size_bytes > UPLOAD_LIMITS[item.kind]:
+    if UPLOAD_LIMITS[item.kind] and item.size_bytes > UPLOAD_LIMITS[item.kind]:
         raise HTTPException(413, "File exceeds maximum size")
     if item.kind in ("ipa", "apk") and not item.authorized:
         raise HTTPException(422, "Distribution authorization required")
@@ -1097,8 +1232,10 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
         raise HTTPException(422, "Only Mod Game supports free uploads")
     if item.kind == "certificate" and not item.issuer.strip():
         raise HTTPException(422, "Certificate issuer required")
-    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     async with _eri_upload_lock:
+        # Reserve under the same lock as session creation, so concurrent
+        # large uploads cannot both claim the last free disk space.
+        _eri_check_upload_capacity(item.size_bytes)
         upload_id = secrets.token_hex(16)
         metadata_file, data_file = _eri_paths(upload_id)
         metadata = item.model_dump()
@@ -1488,29 +1625,39 @@ def admin_delete_catalog_product(kind: str, product_id: int):
             (kind, product_id)).fetchall()
         storage_names = [x["storage_name"] for x in matches]
         for item in matches:
-            _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
+            if not parse_storage_name(item["storage_name"]):
+                _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
         db.execute("DELETE FROM private_product_uploads WHERE kind=? AND product_id=?",
                    (kind, product_id))
         db.execute("DELETE FROM " + lookup[kind] + " WHERE id=?", (product_id,))
         # Keep existing order records and payment history; they store a name/price snapshot.
-    # Remove only private files referenced by metadata. Never construct paths from user input.
+    # R2 deletion is separate. Report an orphan if it cannot be completed;
+    # never claim success when a remote object remains.
+    r2_cleanup_pending = 0
     for name in storage_names:
+        if parse_storage_name(name):
+            try:
+                if not eri_r2_delete_object(name):
+                    r2_cleanup_pending += 1
+            except Exception:
+                r2_cleanup_pending += 1
+            continue
         if Path(name).name == name and not name.startswith("."):
             (UPLOAD_DIR / name).unlink(missing_ok=True)
     cleanup = _drain_cloud_deletions()
     return {"deleted": True, "id": product_id, "kind": kind,
-            "cloud_cleanup_pending":cleanup["pending"]}
+            "cloud_cleanup_pending": cleanup["pending"] + r2_cleanup_pending}
 
 
 # Authenticated delivery files, visible only to the buyer whose order is fulfilled.
 # WARNING: /tmp is temporary on Render Free; use durable storage in production.
-DELIVERY_MAX_BYTES = 512 * 1024 * 1024
+DELIVERY_MAX_BYTES = MOD_UPLOAD_MAX_BYTES
 DELIVERY_SUFFIXES = {".ipa",".apk",".zip",".pdf",".txt",".mobileprovision",".p12",".cer",
                      ".png",".jpg",".jpeg",".json",".plist",".md",".csv"}
 
 class DeliveryBegin(BaseModel):
     filename: str = Field(min_length=1, max_length=180)
-    size_bytes: int = Field(gt=0, le=DELIVERY_MAX_BYTES)
+    size_bytes: int = Field(gt=0, le=2**63 - 1)
 
 def delivery_paths(upload_id: str):
     if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
@@ -1551,7 +1698,9 @@ async def delivery_begin(order_id: str, item: DeliveryBegin):
         raise HTTPException(404,"Đơn chưa gắn với tài khoản khách")
     if order["status"]!="paid" or prior:
         raise HTTPException(409,"Chỉ giao file cho đơn đã thanh toán và chưa được giao")
-    UPLOAD_DIR.mkdir(parents=True,exist_ok=True,mode=0o700)
+    if DELIVERY_MAX_BYTES and item.size_bytes > DELIVERY_MAX_BYTES:
+        raise HTTPException(413, "File exceeds delivery limit")
+    await asyncio.to_thread(_eri_check_upload_capacity, item.size_bytes)
     async with _eri_upload_lock:
         upload_id=secrets.token_hex(16)
         path,part=delivery_paths(upload_id)
@@ -1814,6 +1963,10 @@ register_decrypt_catalog(app, connection, UPLOAD_DIR, _eri_mod_file, require_cus
 # API credentials remain server-side; no public customer dispatch privileges.
 from eri_actions_bridge import install_actions_bridge
 install_actions_bridge(app, require_admin)
+
+# Optional direct multipart IPA/APK uploads to private R2.
+# Disabled until ERI_R2_MOD_UPLOADS=enabled and scoped secrets are provided.
+install_r2_mod_routes(app, connection, require_admin)
 
 # Automatic publisher-authorized IPA -> GitHub Actions -> R2 workflow.
 # Disabled by default until scoped GitHub/R2 secrets and persistent DB are ready.

@@ -30,6 +30,7 @@ private struct ERIBackgroundRecord: Codable {
 private enum ERIBackgroundError: LocalizedError {
     case uploadExists
     case invalidFile
+    case insufficientSpace
     case keyMissing
 
     var errorDescription: String? {
@@ -38,6 +39,8 @@ private enum ERIBackgroundError: LocalizedError {
             return "Một tệp đang tải nền. Vui lòng đợi hoàn tất hoặc bấm Tiếp tục để thử lại."
         case .invalidFile:
             return "Không thể chuẩn bị các phần của tệp để tải nền."
+        case .insufficientSpace:
+            return "iPhone không đủ chỗ trống để tạo các phần tải nền. Hãy dọn dung lượng rồi chọn lại."
         case .keyMissing:
             return "Cần đăng nhập quản trị để tiếp tục tải nền."
         }
@@ -101,6 +104,17 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         let folder = try jobFolder(id)
         let manager = FileManager.default
         try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+        var prepared = false
+        defer {
+            if !prepared { try? manager.removeItem(at: folder) }
+        }
+        // Background URLSession requires separate on-disk chunk files.
+        // Check real free space before making a second copy of the IPA.
+        let fs = try manager.attributesOfFileSystem(forPath: folder.path)
+        if let free = fs[.systemFreeSize] as? NSNumber,
+           free.int64Value < Int64(size) + 128 * 1024 * 1024 {
+            throw ERIBackgroundError.insufficientSpace
+        }
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutableFolder = folder
@@ -126,6 +140,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         try Data().write(to: empty)
         try manager.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                                   ofItemAtPath: empty.path)
+        prepared = true
     }
 
     private func persist() {
