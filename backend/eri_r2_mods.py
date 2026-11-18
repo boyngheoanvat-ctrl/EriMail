@@ -305,6 +305,8 @@ def install_r2_mod_routes(app, connection, require_admin):
     @app.get("/api/v1/admin/r2-mods/{sid}/status", dependencies=[Depends(require_admin)])
     def upload_status(sid: str):
         row = lookup(sid)
+        if row["state"] == "aborted":
+            raise HTTPException(410, "R2 upload was cancelled")
         if row["state"] == "published":
             return {"state": "published", "product_id": row["product_id"],
                     "received": [], "total_parts": math.ceil(row["size_bytes"] / row["part_bytes"])}
@@ -326,6 +328,65 @@ def install_r2_mod_routes(app, connection, require_admin):
         return {"state": row["state"], "received": received,
                 "size_bytes": row["size_bytes"],"part_bytes":row["part_bytes"],
                 "total_parts": math.ceil(row["size_bytes"] / row["part_bytes"])}
+
+    @app.get("/api/v1/admin/r2-mods/unfinished",
+             dependencies=[Depends(require_admin)])
+    def unfinished(limit: int = 100):
+        """Read-only inventory; do not discard existing multipart bytes."""
+        if not 1 <= limit <= 500:
+            raise HTTPException(422, "Invalid unfinished upload limit")
+        with connection() as db:
+            ensure_table(db)
+            rows = db.execute(
+                "SELECT id,kind,original_name,size_bytes,created_at,state "
+                "FROM eri_r2_mod_sessions WHERE state IN ('pending','verifying') "
+                "ORDER BY created_at DESC LIMIT ?", (limit,),
+            ).fetchall()
+        return {"items": [dict(row) for row in rows]}
+
+    @app.post("/api/v1/admin/r2-mods/{sid}/abort",
+              dependencies=[Depends(require_admin)])
+    def abort_pending(sid: str):
+        """Explicit, admin-only cancellation; never delete published files."""
+        row = lookup(sid)
+        if row["state"] == "published":
+            raise HTTPException(409, "A published IPA cannot be aborted")
+        if row["state"] == "aborted":
+            return {"aborted": True, "upload_id": sid}
+        if row["state"] != "pending":
+            raise HTTPException(409, "Upload is not pending")
+        client, bucket = require_ready()
+        key = object_key(sid, row["kind"])
+        try:
+            existing = client.head_object(Bucket=bucket, Key=key)
+            if existing.get("ContentLength") == row["size_bytes"]:
+                raise HTTPException(409, "R2 object is already finalized; publish it instead")
+        except HTTPException:
+            raise
+        except Exception:
+            # A missing multipart object is not visible through HEAD.
+            pass
+        try:
+            client.abort_multipart_upload(
+                Bucket=bucket, Key=key, UploadId=row["r2_upload_id"],
+            )
+        except Exception as exc:
+            # Do not pretend a cancelled upload is cleaned up on R2.
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+            if code != "NoSuchUpload":
+                raise HTTPException(503, "R2 could not cancel this upload") from exc
+        with connection() as db:
+            ensure_table(db)
+            current = db.execute(
+                "SELECT state FROM eri_r2_mod_sessions WHERE id=?", (sid,),
+            ).fetchone()
+            if current is None or current["state"] == "published":
+                raise HTTPException(409, "Upload was published concurrently")
+            db.execute(
+                "UPDATE eri_r2_mod_sessions SET state='aborted' "
+                "WHERE id=? AND state='pending'", (sid,),
+            )
+        return {"aborted": True, "upload_id": sid}
 
     @app.get("/api/v1/admin/r2-mods/{sid}/part/{index}",
              dependencies=[Depends(require_admin)])
@@ -354,6 +415,8 @@ def install_r2_mod_routes(app, connection, require_admin):
               status_code=status.HTTP_201_CREATED)
     def finish(sid: str):
         row = lookup(sid)
+        if row["state"] == "aborted":
+            raise HTTPException(410, "R2 upload was cancelled")
         if row["state"] == "published":
             return {"id":row["product_id"],"kind":row["kind"],"uploaded":True}
         client,bucket = require_ready()
