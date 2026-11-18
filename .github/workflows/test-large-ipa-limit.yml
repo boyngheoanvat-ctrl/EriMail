@@ -31,6 +31,7 @@ jobs:
         working-directory: backend
         run: |
           python test_large_ipa_limits.py
+          python test_upload_reservations.py
           python test_fast_upload.py
           python test_eri_atomic_snapshot.py
           python -m unittest -v test_eri_vault.py test_eri_persistence.py
