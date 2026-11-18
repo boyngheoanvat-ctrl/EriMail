@@ -1,9 +1,9 @@
-name: Validate staged 2 GiB IPA upload
+name: Validate capacity-aware IPA uploads
 
 on:
   push:
     branches:
-      - fix/large-ipa-upload-2g-20261118
+      - feature/capacity-aware-ipa-upload-20261118
     paths:
       - 'apps/ERIAdmin/**'
       - 'backend/**'
@@ -80,8 +80,8 @@ jobs:
         run: |
           mkdir -p payload/Payload
           cp -R build-project/derived/Build/Products/Release-iphoneos/ERIAdmin.app payload/Payload/
-          cd payload && zip -qr ../ERIAdmin-2GiB-staging-unsigned.ipa Payload
+          cd payload && zip -qr ../ERIAdmin-capacity-aware-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: ERIAdmin-2GiB-staging-unsigned-IPA
-          path: ERIAdmin-2GiB-staging-unsigned.ipa
+          name: ERIAdmin-capacity-aware-unsigned-IPA
+          path: ERIAdmin-capacity-aware-unsigned.ipa
