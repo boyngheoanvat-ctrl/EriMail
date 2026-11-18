@@ -13,6 +13,8 @@ import CryptoKit
 import UniformTypeIdentifiers
 
 private let server = "https://eri-api-dag8.onrender.com"
+// 2 GiB IPA/APK ceiling; the server and the private vault must match.
+private let eriModUploadMaxBytes = 2 * 1024 * 1024 * 1024
 
 @main
 struct ERIAdminApp: App {
@@ -145,7 +147,7 @@ private final class AdminSession: ObservableObject {
                      onProgress: @escaping @MainActor (Double) -> Void) async throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         guard let size = (attrs[.size] as? NSNumber)?.intValue,
-              size > 0 && size <= 512 * 1024 * 1024 else {
+              size > 0 && size <= eriModUploadMaxBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
         let base = "/api/v1/admin/orders/" + orderID + "/delivery-sessions"
@@ -543,6 +545,13 @@ private struct AdminHome: View {
                         Label("Xóa AI Plus", systemImage: "trash")
                     }
                 }
+                Section("Sao lưu dữ liệu ERI Store") {
+                    NavigationLink {
+                        AdminBackupView().environmentObject(session)
+                    } label: {
+                        Label("Xuất bản sao lưu SQLite", systemImage: "externaldrive.badge.timemachine")
+                    }
+                }
                 Section("Quản lý tài khoản khách hàng") {
                     NavigationLink {
                         CustomerManagementView().environmentObject(session)
@@ -584,6 +593,77 @@ private struct AdminHome: View {
             }
             .sheet(isPresented: $showLogin) { LoginView().environmentObject(session) }
             .onAppear { if !session.authenticated { showLogin = true } }
+        }
+    }
+}
+
+// Create a consistent, admin-authenticated snapshot using the existing API.
+// The SQLite bytes remain local until the administrator explicitly shares them.
+private struct AdminBackupView: View {
+    @EnvironmentObject private var session: AdminSession
+    @State private var exporting = false
+    @State private var backupURL: URL?
+    @State private var message = ""
+
+    var body: some View {
+        Form {
+            Section("Sao lưu trước khi cập nhật máy chủ") {
+                Text("Tải một bản sao SQLite nhất quán từ ERI API để giữ tài khoản, đơn hàng và thông tin sản phẩm.")
+                    .font(.footnote)
+                Button {
+                    Task { await exportBackup() }
+                } label: {
+                    Label(exporting ? "Đang xuất bản sao lưu..." : "Tạo bản sao lưu mới",
+                          systemImage: "square.and.arrow.down")
+                }
+                .disabled(!session.authenticated || exporting)
+                if exporting { ProgressView() }
+                if let backupURL {
+                    Text("Đã lưu: " + backupURL.lastPathComponent)
+                        .font(.footnote).foregroundStyle(.green)
+                    ShareLink(item: backupURL) {
+                        Label("Lưu vào Files / chia sẻ bản sao lưu", systemImage: "square.and.arrow.up")
+                    }
+                }
+                if !message.isEmpty {
+                    Text(message).font(.footnote)
+                }
+            }
+            Section("Bảo vệ dữ liệu") {
+                Text("Hãy dùng Lưu vào Tệp trên iPhone, sau đó sao chép tệp sao lưu ra nơi an toàn. Đây chỉ là cơ sở dữ liệu SQLite; các IPA/APK và tệp giao hàng còn phải kiểm tra trong kho lưu trữ riêng trước khi triển khai.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Không đăng bản sao lưu lên GitHub hoặc chia sẻ công khai: tệp có thể chứa thông tin khách hàng.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Sao lưu ERI Store")
+    }
+
+    private func exportBackup() async {
+        guard !exporting else { return }
+        exporting = true
+        defer { exporting = false }
+        message = ""
+        do {
+            let bytes = try await session.send("/api/v1/admin/backups/sqlite")
+            let signature = Data("SQLite format 3\u{0000}".utf8)
+            guard bytes.count > 100, bytes.starts(with: signature) else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ERIBackups", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let date = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let output = folder.appendingPathComponent("eri-store-backup-" + date + ".sqlite3")
+            try bytes.write(to: output, options: .atomic)
+            try FileManager.default.setAttributes([
+                .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+            ], ofItemAtPath: output.path)
+            backupURL = output
+            message = "Đã tạo bản sao lưu SQLite. Hãy bấm Lưu vào Files để giữ bản sao ngoài ứng dụng."
+        } catch {
+            message = "Sao lưu chưa thành công: " + error.localizedDescription +
+                ". Không cập nhật API trước khi có bản sao lưu hợp lệ."
         }
     }
 }
@@ -1179,7 +1259,7 @@ private struct OrderFileDeliveryView: View {
                     }
                 }
                 Section {
-                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 512 MiB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
+                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 2 GiB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Lưu ý: File hiện nằm trên ổ tạm Render Free, có thể mất khi server khởi động lại. Không lưu thông tin bí mật quan trọng khi chưa chuyển sang kho lưu trữ bền vững.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1193,7 +1273,7 @@ private struct OrderFileDeliveryView: View {
             }
             .sheet(isPresented: $picker) {
                 ERIDocumentPicker(
-                    maxBytes: 512 * 1024 * 1024,
+                    maxBytes: eriModUploadMaxBytes,
                     onPick: { url in
                         if let previous = fileURL {
                             try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
@@ -1254,7 +1334,7 @@ private enum UploadKind: String {
     // Use a broad system document picker; validate file extension after selection.
     var maxBytes: Int {
         switch self {
-        case .ipa, .apk: return 512 * 1_048_576
+        case .ipa, .apk: return eriModUploadMaxBytes
         case .certificate: return 15 * 1_048_576
         case .ai: return 20 * 1_048_576
         }
@@ -1295,6 +1375,38 @@ private enum ImportedFile {
         let folder = root.appendingPathComponent("eri-import-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let destination = folder.appendingPathComponent(source.lastPathComponent)
+
+        // With asCopy=true, iOS often returns an already-copied temporary
+        // file inside this app's sandbox. Move that copy atomically instead
+        // of reading and rewriting up to 2 GiB on the document-picker callback.
+        // Never move files from other apps or a user's normal Documents folder.
+        let localPath = source.resolvingSymlinksInPath().standardizedFileURL.path
+        let tempPath = FileManager.default.temporaryDirectory
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        let inboxPath = FileManager.default.urls(for: .documentDirectory,
+                                                  in: .userDomainMask)[0]
+            .appendingPathComponent("Inbox", isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        if localPath.hasPrefix(tempPath + "/") || localPath.hasPrefix(inboxPath + "/") {
+            if let info = try? FileManager.default.attributesOfItem(atPath: source.path),
+               let count = info[.size] as? NSNumber {
+                if count.int64Value > Int64(maxBytes) {
+                    try? FileManager.default.removeItem(at: folder)
+                    throw ImportedFileFailure.exceededLimit(maxBytes)
+                }
+                if count.int64Value == 0 {
+                    try? FileManager.default.removeItem(at: folder)
+                    throw ImportedFileFailure.emptyFile
+                }
+                if (try? FileManager.default.moveItem(at: source, to: destination)) != nil {
+                    try? FileManager.default.setAttributes([
+                        .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+                    ], ofItemAtPath: destination.path)
+                    return destination
+                }
+            }
+        }
+
         var coordinationError: NSError?
         var copyingError: Error?
         let coordinator = NSFileCoordinator(filePresenter: nil)
@@ -1446,6 +1558,8 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
+                    Text("IPA tối đa 2 GiB. iPhone cần đủ dung lượng trống để sao chép tệp và chuẩn bị các phần tải nền.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }

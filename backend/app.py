@@ -22,6 +22,9 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
 from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
+
+# Keep IPA/APK, order delivery and private-vault limits in sync.
+MOD_UPLOAD_MAX_BYTES = 2 * 1024**3
 _eri_db_guard = threading.RLock()
 _VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
 if _VAULT_MODE not in ("", "off", "required", "preview", "bootstrap"):
@@ -97,7 +100,7 @@ def _queue_cloud_deletion(db, storage_name: str, size: int):
         return
     if (not isinstance(storage_name, str)
             or not re.fullmatch(r"[a-f0-9]{32}\.[a-z0-9]{1,16}", storage_name)
-            or not isinstance(size, int) or not 0 < size <= 512 * 1024 * 1024):
+            or not isinstance(size, int) or not 0 < size <= MOD_UPLOAD_MAX_BYTES):
         raise VaultError("Cannot queue invalid private object deletion")
     db.execute(
         "INSERT OR IGNORE INTO vault_delete_queue(storage_name,size_bytes,created_at) "
@@ -861,7 +864,7 @@ async def sign_ipa(
 
 # Files are private and only uploadable by an authenticated admin.
 # Use persistent, access-controlled storage for ERI_UPLOAD_DIR and ERI_DB_PATH in production.
-UPLOAD_LIMITS = {"ipa": 512 * 1024**2, "apk": 512 * 1024**2, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
+UPLOAD_LIMITS = {"ipa": MOD_UPLOAD_MAX_BYTES, "apk": MOD_UPLOAD_MAX_BYTES, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
 UPLOAD_SUFFIXES = {
     "ipa": {".ipa"},
     "apk": {".apk"},
@@ -1504,7 +1507,7 @@ def admin_delete_catalog_product(kind: str, product_id: int):
 
 # Authenticated delivery files, visible only to the buyer whose order is fulfilled.
 # WARNING: /tmp is temporary on Render Free; use durable storage in production.
-DELIVERY_MAX_BYTES = 512 * 1024 * 1024
+DELIVERY_MAX_BYTES = MOD_UPLOAD_MAX_BYTES
 DELIVERY_SUFFIXES = {".ipa",".apk",".zip",".pdf",".txt",".mobileprovision",".p12",".cer",
                      ".png",".jpg",".jpeg",".json",".plist",".md",".csv"}
 
