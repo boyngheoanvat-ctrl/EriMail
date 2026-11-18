@@ -1503,6 +1503,28 @@ private struct ERIDocumentPicker: UIViewControllerRepresentable {
     }
 }
 
+// Files imports are staged in a different sandbox folder each time.
+// Identify the same content across repeated imports without reading an
+// entire multi-gigabyte IPA or trusting a newly generated temporary path.
+// Final multipart data is verified by the backend after upload.
+private enum ERIR2FileIdentity {
+    static func fingerprint(_ url: URL, size: Int) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let sample = min(size, 2 * 1024 * 1024)
+        let beginning = try handle.read(upToCount: sample) ?? Data()
+        guard beginning.count == sample else { throw URLError(.cannotOpenFile) }
+        try handle.seek(toOffset: UInt64(max(0, size - sample)))
+        let ending = try handle.read(upToCount: sample) ?? Data()
+        guard ending.count == sample else { throw URLError(.cannotOpenFile) }
+        var digest = SHA256()
+        digest.update(data: Data(String(size).utf8))
+        digest.update(data: beginning)
+        digest.update(data: ending)
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 private struct ERIR2Config: Decodable {
     let enabled: Bool
     let max_object_bytes: Int
@@ -1752,8 +1774,14 @@ private struct AdminUploadView: View {
         // Save the upload session only against the same source and metadata.
         // If the app is suspended, the user can reopen and press Upload again.
         let key = "eri.admin.r2.pending." + kind.rawValue
+        let identity = try await Task.detached(priority: .userInitiated) {
+            try ERIR2FileIdentity.fingerprint(file, size: size)
+        }.value
         let existing = UserDefaults.standard.dictionary(forKey: key)
-        let sameFile = existing?["path"] as? String == file.path &&
+        // Reimporting the same IPA creates a NEW path in Files. The partial
+        // R2 session belongs to the content, not the sandbox copy's path.
+        let sameFile = existing?["fingerprint"] as? String == identity &&
+            existing?["filename"] as? String == file.lastPathComponent &&
             existing?["size"] as? Int == size &&
             existing?["name"] as? String == name &&
             existing?["description"] as? String == description &&
@@ -1776,8 +1804,10 @@ private struct AdminUploadView: View {
             }
             uploadID = start.upload_id
             UserDefaults.standard.set([
-                "id": uploadID, "path": file.path, "size": size,
-                "name": name, "description": description, "price": amount
+                "id": uploadID, "path": file.path,
+                "filename": file.lastPathComponent, "fingerprint": identity,
+                "size": size, "name": name, "description": description,
+                "price": amount
             ], forKey: key)
         }
         let base = "/api/v1/admin/r2-mods/" + uploadID
