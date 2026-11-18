@@ -1936,7 +1936,23 @@ private struct AdminUploadView: View {
             }
             let size = number.intValue
             if kind == .ipa || kind == .apk {
-                let r2ConfigResponse = try? await session.send("/api/v1/admin/r2-mods/config")
+                var r2ConfigResponse: Data?
+                do {
+                    r2ConfigResponse = try await session.send("/api/v1/admin/r2-mods/config")
+                } catch {
+                    // Only 404 proves that the old Render API lacks R2.
+                    // Don't hide auth, timeout, provider or server errors.
+                    if let serverError = error as? AdminError {
+                        switch serverError {
+                        case .http(404), .httpDetail(404, _):
+                            r2ConfigResponse = nil
+                        default:
+                            throw error
+                        }
+                    } else {
+                        throw error
+                    }
+                }
                 if let response = r2ConfigResponse,
                    let configuration = try? JSONDecoder().decode(ERIR2Config.self, from: response),
                    configuration.enabled {
