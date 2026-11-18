@@ -32,6 +32,9 @@ with tempfile.TemporaryDirectory(prefix="eri-no-fixed-ipa-cap-") as folder:
 
     client = TestClient(app)
     auth = {"X-ERI-Admin-Key": os.environ["ERI_ADMIN_KEY"]}
+    # The capacity guard normally creates the directory. In the mocked
+    # sparse-file path, create the isolated test directory explicitly.
+    Path(os.environ["ERI_UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
     def begin(kind: str, size: int):
         return client.post("/api/v1/admin/upload-sessions", headers=auth, json={
