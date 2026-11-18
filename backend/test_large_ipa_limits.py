@@ -34,11 +34,12 @@ with tempfile.TemporaryDirectory(prefix="eri-large-ipa-") as folder:
         })
 
     for kind in ("ipa", "apk"):
-        # Sparse preallocation verifies metadata and the 129th chunk boundary
-        # without allocating or uploading the large file.
-        accepted = start(kind, 512 * 1024**2 + 1)
-        assert accepted.status_code == 201, (kind, accepted.text)
-        assert accepted.json()["size_bytes"] == 512 * 1024**2 + 1
+        # Sparse preallocation verifies metadata and the 129th chunk boundary,
+        # plus the 724.1 MB file size reported by the iOS user.
+        for size in (512 * 1024**2 + 1, 724_100_000):
+            accepted = start(kind, size)
+            assert accepted.status_code == 201, (kind, size, accepted.text)
+            assert accepted.json()["size_bytes"] == size
         denied = start(kind, MOD_UPLOAD_MAX_BYTES + 1)
         assert denied.status_code == 413, (kind, denied.text)
 
