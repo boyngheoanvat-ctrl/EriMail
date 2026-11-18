@@ -19,7 +19,7 @@ import urllib.request
 from pathlib import Path
 
 CHUNK_BYTES = 4 * 1024 * 1024
-MAX_PRODUCT_BYTES = 512 * 1024 * 1024
+MAX_PRODUCT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_SQLITE_BYTES = 64 * 1024 * 1024
 VAULT_BASE = os.getenv("ERI_VAULT_URL", "https://dahrbjjknmvwokruhnha.supabase.co/functions/v1/eri-private-vault")
 _NAME = re.compile(r"^[a-f0-9]{32}$")
@@ -135,7 +135,8 @@ class ERIVault:
         if kind not in ("files", "snapshots", "sessionmeta"):
             raise VaultError("Invalid delete kind")
         count = (size + CHUNK_BYTES - 1) // CHUNK_BYTES
-        if size < 1 or count > 128:
+        limit = MAX_PRODUCT_BYTES if kind == "files" else MAX_SQLITE_BYTES
+        if not isinstance(size, int) or not 0 < size <= limit or count > limit // CHUNK_BYTES:
             raise VaultError("Invalid delete size")
         for index in range(count):
             self._request("DELETE", f"/{kind}/{obj_id}/{index}")
