@@ -24,10 +24,12 @@ This alone does **not** raise the live Render API's 512 MiB admission limit.
    product files, outstanding upload sessions and order-delivery files.
    Identify the current `ERI_VAULT_MODE` and confirm a complete durable
    snapshot, without printing or changing secrets.
-2. Verify available Render disk space and Supabase Storage quota. These are
-   real capacity constraints; increasing a code limit does not add storage.
-   The Files picker and background staging also temporarily need additional
-   free space on the user's iPhone.
+2. Verify available Render disk space and Supabase Storage quota. On
+   2026-11-18, the Supabase project was on the Free tier (1 GB included),
+   while the private bucket already had about 1.053 GB of objects. Capacity
+   must be provided without deleting existing customer files. Increasing
+   the code limit adds no storage. iPhone background staging requires
+   additional free space.
 3. **Completed**: Upgrade both Supabase Edge Functions' file path guards
    to 0..511 while preserving authentication and snapshot limits. Confirm
    production version 5 stays ACTIVE, and separately test real data
