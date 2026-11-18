@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 
 private let server = "https://eri-api-dag8.onrender.com"
 // 2 GiB IPA/APK ceiling; the server and the private vault must match.
-private let eriModUploadMaxBytes = 2 * 1024 * 1024 * 1024
+private let eriModUploadMaxBytes = Int.max // No fixed client cap; real free disk and server quota still apply.
 
 @main
 struct ERIAdminApp: App {
@@ -1259,7 +1259,7 @@ private struct OrderFileDeliveryView: View {
                     }
                 }
                 Section {
-                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 2 GiB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
+                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tùy dung lượng kho lưu trữ. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Lưu ý: File hiện nằm trên ổ tạm Render Free, có thể mất khi server khởi động lại. Không lưu thông tin bí mật quan trọng khi chưa chuyển sang kho lưu trữ bền vững.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1558,7 +1558,7 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
-                    Text("IPA tối đa 2 GiB. iPhone cần đủ dung lượng trống để sao chép tệp và chuẩn bị các phần tải nền.")
+                    Text("IPA/APK không có giới hạn cố định trong ERI ADMIN. Cần đủ dung lượng trống trên iPhone và kho máy chủ để tải các phần an toàn.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
