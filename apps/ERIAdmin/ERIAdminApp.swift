@@ -1297,6 +1297,38 @@ private enum ImportedFile {
         let folder = root.appendingPathComponent("eri-import-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let destination = folder.appendingPathComponent(source.lastPathComponent)
+
+        // With asCopy=true, iOS often returns an already-copied temporary
+        // file inside this app's sandbox. Move that copy atomically instead
+        // of reading and rewriting up to 2 GiB on the document-picker callback.
+        // Never move files from other apps or a user's normal Documents folder.
+        let localPath = source.resolvingSymlinksInPath().standardizedFileURL.path
+        let tempPath = FileManager.default.temporaryDirectory
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        let inboxPath = FileManager.default.urls(for: .documentDirectory,
+                                                  in: .userDomainMask)[0]
+            .appendingPathComponent("Inbox", isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        if localPath.hasPrefix(tempPath + "/") || localPath.hasPrefix(inboxPath + "/") {
+            if let info = try? FileManager.default.attributesOfItem(atPath: source.path),
+               let count = info[.size] as? NSNumber {
+                if count.int64Value > Int64(maxBytes) {
+                    try? FileManager.default.removeItem(at: folder)
+                    throw ImportedFileFailure.exceededLimit(maxBytes)
+                }
+                if count.int64Value == 0 {
+                    try? FileManager.default.removeItem(at: folder)
+                    throw ImportedFileFailure.emptyFile
+                }
+                if (try? FileManager.default.moveItem(at: source, to: destination)) != nil {
+                    try? FileManager.default.setAttributes([
+                        .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+                    ], ofItemAtPath: destination.path)
+                    return destination
+                }
+            }
+        }
+
         var coordinationError: NSError?
         var copyingError: Error?
         let coordinator = NSFileCoordinator(filePresenter: nil)
