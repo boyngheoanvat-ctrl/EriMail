@@ -1862,7 +1862,8 @@ private struct AdminUploadView: View {
             }
             let size = number.intValue
             if kind == .ipa || kind == .apk {
-                if let result = try? await session.send("/api/v1/admin/r2-mods/config"),
+                let r2ConfigResponse = try? await session.send("/api/v1/admin/r2-mods/config")
+                if let result = r2ConfigResponse,
                    let configuration = try? JSONDecoder().decode(ERIR2Config.self, from: result),
                    configuration.enabled {
                     guard size <= configuration.max_object_bytes else {
@@ -1874,6 +1875,14 @@ private struct AdminUploadView: View {
                     saveDraft()
                     try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
                     return
+                }
+                // The deployed legacy API still rejects files above 512 MiB.
+                // Avoid sending a large file when the R2-capable API route is
+                // missing entirely. This does not alter stored customer data.
+                if r2ConfigResponse == nil && size > 512 * 1024 * 1024 {
+                    throw AdminError.httpDetail(503,
+                        "Máy chủ Render chưa triển khai API R2. Tệp vẫn được giữ trong ERI ADMIN; " +
+                        "cần sao lưu dữ liệu và nâng API trước khi tải IPA lớn.")
                 }
                 guard size <= eriLegacyModUploadMaxBytes else {
                     throw AdminError.httpDetail(503,
