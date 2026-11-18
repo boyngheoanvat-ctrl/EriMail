@@ -83,6 +83,7 @@ def connection():
         db.row_factory = sqlite3.Row
         initial = db.total_changes
         remote_committed = False
+        db_closed = False
         try:
             yield db
             if _eri_vault is not None and db.total_changes != initial:
@@ -109,16 +110,19 @@ def connection():
                     # it before admitting another request; otherwise fail
                     # closed rather than making changes to a stale DB.
                     try:
+                        db.rollback()
                         db.close()
+                        db_closed = True
                         _eri_vault.restore_sqlite(DB)
                     except BaseException:
                         _eri_db_safe = False
                         raise VaultError("Cloud snapshot saved; local DB recovery failed")
                 raise
         finally:
-            if db.in_transaction:
-                db.rollback()
-            db.close()
+            if not db_closed:
+                if db.in_transaction:
+                    db.rollback()
+                db.close()
 
 def _persist_private_file(path: Path, item_id: str, digest: str):
     if _eri_vault is not None:
