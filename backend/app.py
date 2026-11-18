@@ -24,7 +24,10 @@ DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
 from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
 
 # Keep IPA/APK, order delivery and private-vault limits in sync.
-MOD_UPLOAD_MAX_BYTES = 2 * 1024**3
+# A value of zero removes the code-level file size cap; storage remains finite.
+MOD_UPLOAD_MAX_BYTES = int(os.getenv("ERI_MOD_UPLOAD_MAX_BYTES", "0"))
+if MOD_UPLOAD_MAX_BYTES < 0:
+    raise RuntimeError("ERI_MOD_UPLOAD_MAX_BYTES must be >= 0")
 _eri_db_guard = threading.RLock()
 _VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
 if _VAULT_MODE not in ("", "off", "required", "preview", "bootstrap"):
@@ -100,7 +103,8 @@ def _queue_cloud_deletion(db, storage_name: str, size: int):
         return
     if (not isinstance(storage_name, str)
             or not re.fullmatch(r"[a-f0-9]{32}\.[a-z0-9]{1,16}", storage_name)
-            or not isinstance(size, int) or not 0 < size <= MOD_UPLOAD_MAX_BYTES):
+            or type(size) is not int or size <= 0
+            or (MOD_UPLOAD_MAX_BYTES > 0 and size > MOD_UPLOAD_MAX_BYTES)):
         raise VaultError("Cannot queue invalid private object deletion")
     db.execute(
         "INSERT OR IGNORE INTO vault_delete_queue(storage_name,size_bytes,created_at) "
@@ -872,6 +876,30 @@ UPLOAD_SUFFIXES = {
     "ai": {".txt", ".json", ".csv", ".zip"},
 }
 UPLOAD_DIR = Path(os.getenv("ERI_UPLOAD_DIR", str(DB.parent / "eri-private-uploads")))
+# This version still assembles a full local file before SHA-256/ZIP validation.
+# Check physical free space instead of promising limitless local storage.
+ERI_UPLOAD_DISK_RESERVE_BYTES = 128 * 1024**2
+
+def _eri_check_upload_capacity(size: int) -> None:
+    if type(size) is not int or size < 1:
+        raise HTTPException(422, "Invalid upload size")
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        available = shutil.disk_usage(UPLOAD_DIR).free
+    except OSError as exc:
+        raise HTTPException(503, "Cannot inspect upload storage") from exc
+    if size + ERI_UPLOAD_DISK_RESERVE_BYTES > available:
+        raise HTTPException(507, "Insufficient server disk space. Configure "
+                                 "durable storage and temporary upload space.")
+
+@app.get("/api/v1/admin/upload-capacity", dependencies=[Depends(require_admin)])
+def eri_upload_capacity():
+    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    available = shutil.disk_usage(UPLOAD_DIR).free
+    return {"max_mod_file_bytes": MOD_UPLOAD_MAX_BYTES or None,
+            "local_free_bytes": available,
+            "reserve_bytes": ERI_UPLOAD_DISK_RESERVE_BYTES,
+            "vault_configured": _eri_vault is not None}
 
 @app.post("/api/v1/admin/uploads/{kind}", dependencies=[Depends(require_admin)], status_code=201)
 async def upload_private_product(
@@ -918,7 +946,7 @@ async def upload_private_product(
             os.chmod(temporary_path, 0o600)
             while chunk := await upload.read(1024 * 1024):
                 size += len(chunk)
-                if size > UPLOAD_LIMITS[kind]:
+                if UPLOAD_LIMITS[kind] and size > UPLOAD_LIMITS[kind]:
                     raise HTTPException(413, "File exceeds category size limit")
                 digest.update(chunk)
                 target.write(chunk)
@@ -980,7 +1008,7 @@ _eri_upload_lock = asyncio.Lock()
 class EriChunkStart(BaseModel):
     kind: str = Field(pattern="^(ipa|apk|certificate|ai)$")
     filename: str = Field(min_length=1, max_length=180)
-    size_bytes: int = Field(gt=0)
+    size_bytes: int = Field(gt=0, le=2**63 - 1)
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=2000)
     price_vnd: int = Field(ge=0, le=1000000000)
@@ -1006,8 +1034,8 @@ def _eri_recover_fast_session(upload_id: str):
     if not metadata.get("fast"):
         raise HTTPException(409, "Phiên tải cũ không thể khôi phục; hãy tạo lại upload")
     size, kind = metadata.get("size_bytes"), metadata.get("kind")
-    if (not isinstance(size, int) or kind not in UPLOAD_LIMITS
-            or not 0 < size <= UPLOAD_LIMITS[kind]):
+    if (type(size) is not int or kind not in UPLOAD_LIMITS or size <= 0
+            or (UPLOAD_LIMITS[kind] and size > UPLOAD_LIMITS[kind])):
         raise VaultError("Cloud upload session has invalid size")
     count = (size + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES
     UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1092,7 +1120,7 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
     extension = Path(filename).suffix.lower()
     if extension not in UPLOAD_SUFFIXES[item.kind]:
         raise HTTPException(422, "Unsupported file extension")
-    if item.size_bytes > UPLOAD_LIMITS[item.kind]:
+    if UPLOAD_LIMITS[item.kind] and item.size_bytes > UPLOAD_LIMITS[item.kind]:
         raise HTTPException(413, "File exceeds maximum size")
     if item.kind in ("ipa", "apk") and not item.authorized:
         raise HTTPException(422, "Distribution authorization required")
@@ -1100,7 +1128,8 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
         raise HTTPException(422, "Only Mod Game supports free uploads")
     if item.kind == "certificate" and not item.issuer.strip():
         raise HTTPException(422, "Certificate issuer required")
-    UPLOAD_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Reserve only when local storage can hold the whole validated product.
+    await asyncio.to_thread(_eri_check_upload_capacity, item.size_bytes)
     async with _eri_upload_lock:
         upload_id = secrets.token_hex(16)
         metadata_file, data_file = _eri_paths(upload_id)
@@ -1513,7 +1542,7 @@ DELIVERY_SUFFIXES = {".ipa",".apk",".zip",".pdf",".txt",".mobileprovision",".p12
 
 class DeliveryBegin(BaseModel):
     filename: str = Field(min_length=1, max_length=180)
-    size_bytes: int = Field(gt=0, le=DELIVERY_MAX_BYTES)
+    size_bytes: int = Field(gt=0, le=2**63 - 1)
 
 def delivery_paths(upload_id: str):
     if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
@@ -1554,7 +1583,9 @@ async def delivery_begin(order_id: str, item: DeliveryBegin):
         raise HTTPException(404,"Đơn chưa gắn với tài khoản khách")
     if order["status"]!="paid" or prior:
         raise HTTPException(409,"Chỉ giao file cho đơn đã thanh toán và chưa được giao")
-    UPLOAD_DIR.mkdir(parents=True,exist_ok=True,mode=0o700)
+    if DELIVERY_MAX_BYTES and item.size_bytes > DELIVERY_MAX_BYTES:
+        raise HTTPException(413, "File exceeds delivery limit")
+    await asyncio.to_thread(_eri_check_upload_capacity, item.size_bytes)
     async with _eri_upload_lock:
         upload_id=secrets.token_hex(16)
         path,part=delivery_paths(upload_id)
