@@ -1787,6 +1787,15 @@ private struct AdminUploadView: View {
             UserDefaults.standard.removeObject(forKey: key)
             return
         }
+        if remote.state == "verifying" {
+            uploadPhase = "R2 đã nhận đủ dữ liệu; đang xác minh..."
+            let completed = try await session.send(base + "/complete", method: "POST")
+            let done = try JSONDecoder().decode(ERIR2UploadDone.self, from: completed)
+            guard done.uploaded, done.id > 0 else { throw URLError(.badServerResponse) }
+            UserDefaults.standard.removeObject(forKey: key)
+            progress = 1
+            return
+        }
         guard remote.state == "pending",
               let partSize = remote.part_bytes,
               remote.size_bytes == size,
