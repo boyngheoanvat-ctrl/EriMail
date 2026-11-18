@@ -1179,7 +1179,7 @@ private struct OrderFileDeliveryView: View {
                     }
                 }
                 Section {
-                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 300 MB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
+                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 512 MiB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Lưu ý: File hiện nằm trên ổ tạm Render Free, có thể mất khi server khởi động lại. Không lưu thông tin bí mật quan trọng khi chưa chuyển sang kho lưu trữ bền vững.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1192,10 +1192,22 @@ private struct OrderFileDeliveryView: View {
                 }
             }
             .sheet(isPresented: $picker) {
-                ERIDocumentPicker(onPick: { url in
-                    fileURL = url
-                    picker = false
-                }, onCancel: { picker = false })
+                ERIDocumentPicker(
+                    maxBytes: 512 * 1024 * 1024,
+                    onPick: { url in
+                        if let previous = fileURL {
+                            try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
+                        }
+                        fileURL = url
+                        message = ""
+                        picker = false
+                    },
+                    onFailure: { error in
+                        picker = false
+                        message = "Không đọc được tệp giao hàng: " + error.localizedDescription
+                    },
+                    onCancel: { picker = false }
+                )
             }
         }
     }
@@ -1207,13 +1219,11 @@ private struct OrderFileDeliveryView: View {
         message = ""
         defer { working = false }
         do {
-            let imported = try await Task.detached(priority: .userInitiated) {
-                try ImportedFile.copy(source, maxBytes: 512 * 1024 * 1024)
-            }.value
-            defer { try? FileManager.default.removeItem(at: imported.deletingLastPathComponent()) }
-            try await session.deliverFile(orderID: order.id, file: imported) { value in
+            try await session.deliverFile(orderID: order.id, file: source) { value in
                 progress = value
             }
+            try? FileManager.default.removeItem(at: source.deletingLastPathComponent())
+            fileURL = nil
             onDelivered()
             dismiss()
         } catch {
@@ -1251,6 +1261,22 @@ private enum UploadKind: String {
     }
 }
 
+private enum ImportedFileFailure: LocalizedError {
+    case exceededLimit(Int)
+    case emptyFile
+
+    var errorDescription: String? {
+        switch self {
+        case .exceededLimit(let limit):
+            return "Tệp vượt giới hạn " +
+                ByteCountFormatter.string(fromByteCount: Int64(limit), countStyle: .file) +
+                ". Vui lòng chọn tệp nhỏ hơn hoặc tối ưu kích thước IPA/APK."
+        case .emptyFile:
+            return "Tệp không có dữ liệu. Hãy tải tệp về Trên iPhone của tôi rồi chọn lại."
+        }
+    }
+}
+
 private enum ImportedFile {
     // The Files picker may return a security-scoped document-provider URL.
     // Copy it into our private sandbox before the picker access expires.
@@ -1284,10 +1310,12 @@ private enum ImportedFile {
                 var total = 0
                 while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
                     total += chunk.count
-                    guard total <= maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
+                    guard total <= maxBytes else {
+                        throw ImportedFileFailure.exceededLimit(maxBytes)
+                    }
                     try output.write(contentsOf: chunk)
                 }
-                guard total > 0 else { throw URLError(.zeroByteResource) }
+                guard total > 0 else { throw ImportedFileFailure.emptyFile }
                 try FileManager.default.setAttributes([
                     .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
                 ], ofItemAtPath: destination.path)
@@ -1304,7 +1332,9 @@ private enum ImportedFile {
 }
 
 private struct ERIDocumentPicker: UIViewControllerRepresentable {
+    let maxBytes: Int
     let onPick: (URL) -> Void
+    let onFailure: (Error) -> Void
     let onCancel: () -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
@@ -1318,15 +1348,21 @@ private struct ERIDocumentPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPick: onPick, onCancel: onCancel)
+        Coordinator(maxBytes: maxBytes, onPick: onPick,
+                    onFailure: onFailure, onCancel: onCancel)
     }
 
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let maxBytes: Int
         let onPick: (URL) -> Void
+        let onFailure: (Error) -> Void
         let onCancel: () -> Void
 
-        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+        init(maxBytes: Int, onPick: @escaping (URL) -> Void,
+             onFailure: @escaping (Error) -> Void, onCancel: @escaping () -> Void) {
+            self.maxBytes = maxBytes
             self.onPick = onPick
+            self.onFailure = onFailure
             self.onCancel = onCancel
         }
 
@@ -1336,7 +1372,16 @@ private struct ERIDocumentPicker: UIViewControllerRepresentable {
                 onCancel()
                 return
             }
-            onPick(file)
+            // An asCopy document picker provides a temporary URL. The Files
+            // provider may discard that URL as soon as this callback returns.
+            // Stage the bytes into our app's own directory BEFORE dismissing
+            // the picker or dispatching asynchronous work.
+            do {
+                let staged = try ImportedFile.copy(file, maxBytes: maxBytes)
+                onPick(staged)
+            } catch {
+                onFailure(error)
+            }
         }
 
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
@@ -1357,7 +1402,6 @@ private struct AdminUploadView: View {
     @State private var authorized = false
     @State private var selectedFile: URL?
     @State private var showImporter = false
-    @State private var importing = false
     @State private var working = false
     @State private var status = ""
     @State private var progress = 0.0
@@ -1390,8 +1434,8 @@ private struct AdminUploadView: View {
                 }
             }
             Section("Nhập tệp từ ứng dụng Tệp") {
-                Button(importing ? "Đang đọc tệp..." : "Chọn tệp từ Files") { showImporter = true }
-                    .disabled(working || importing)
+                Button("Chọn tệp từ Files") { showImporter = true }
+                    .disabled(working)
                 if let file = selectedFile {
                     Label("Đã chọn: " + file.lastPathComponent, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -1432,7 +1476,7 @@ private struct AdminUploadView: View {
                 Button(working ? "Đang chuẩn bị file..." : "Cập nhật lên máy chủ") {
                     Task { await publish() }
                 }
-                .disabled(!valid || working || importing || backgroundUploader.pending)
+                .disabled(!valid || working || backgroundUploader.pending)
                 if !status.isEmpty { Text(status).font(.footnote) }
             }
             Section {
@@ -1455,9 +1499,15 @@ private struct AdminUploadView: View {
         .onDisappear { saveDraft() }
         .sheet(isPresented: $showImporter) {
             ERIDocumentPicker(
+                maxBytes: kind.maxBytes,
                 onPick: { file in
                     showImporter = false
                     receivePickedFile(file)
+                },
+                onFailure: { error in
+                    showImporter = false
+                    status = "Không thể đọc tệp đã chọn: " + error.localizedDescription +
+                        " Nếu tệp nằm trên iCloud, hãy tải về Trên iPhone của tôi rồi chọn lại."
                 },
                 onCancel: { showImporter = false }
             )
@@ -1466,31 +1516,19 @@ private struct AdminUploadView: View {
 
     private func receivePickedFile(_ file: URL) {
         guard kind.accepted.contains(file.pathExtension.lowercased()) else {
+            try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
             status = "Sai định dạng. Vui lòng chọn: " + kind.accepted.map { "." + $0 }.joined(separator: ", ")
             return
         }
-        importing = true
-        status = "Đang sao chép tệp từ Files..."
-        Task {
-            do {
-                let limit = kind.maxBytes
-                let copied = try await Task.detached(priority: .userInitiated) {
-                    try ImportedFile.copy(file, maxBytes: limit)
-                }.value
-                if let previous = selectedFile {
-                    try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
-                }
-                selectedFile = copied
-                saveDraft()
-                if name.isEmpty {
-                    name = file.deletingPathExtension().lastPathComponent
-                }
-                status = "Đã chọn và sao chép tệp thành công. Hãy điền thông tin rồi tải lên."
-            } catch {
-                status = "Không thể đọc tệp đã chọn: " + error.localizedDescription
-            }
-            importing = false
+        if let previous = selectedFile {
+            try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
         }
+        selectedFile = file
+        saveDraft()
+        if name.isEmpty {
+            name = file.deletingPathExtension().lastPathComponent
+        }
+        status = "Đã đọc và lưu tệp trong ERI ADMIN. Hãy điền thông tin rồi tải lên."
     }
 
     private var draftKey: String { "eri.admin.upload.draft." + kind.rawValue }
@@ -1933,10 +1971,18 @@ private struct MoMoLinkView: View {
         .navigationTitle("Liên kết MoMo")
         .task { await refresh() }
         .sheet(isPresented: $picker) {
-            ERIDocumentPicker(onPick: { url in
-                picker = false
-                Task { await upload(url) }
-            }, onCancel: { picker = false })
+            ERIDocumentPicker(
+                maxBytes: 2 * 1024 * 1024,
+                onPick: { url in
+                    picker = false
+                    Task { await upload(url) }
+                },
+                onFailure: { error in
+                    picker = false
+                    message = "Không đọc được ảnh QR: " + error.localizedDescription
+                },
+                onCancel: { picker = false }
+            )
         }
         .confirmationDialog("Hủy mã QR MoMo đã liên kết?", isPresented: $unlinkConfirm,
                             titleVisibility: .visible) {
@@ -1956,17 +2002,17 @@ private struct MoMoLinkView: View {
 
     private func upload(_ source: URL) async {
         guard ["png", "jpg", "jpeg"].contains(source.pathExtension.lowercased()) else {
+            try? FileManager.default.removeItem(at: source.deletingLastPathComponent())
             message = "Chỉ chọn ảnh .png, .jpg hoặc .jpeg."
             return
         }
         working = true
-        defer { working = false }
+        defer {
+            working = false
+            try? FileManager.default.removeItem(at: source.deletingLastPathComponent())
+        }
         do {
-            let copied = try await Task.detached(priority: .userInitiated) {
-                try ImportedFile.copy(source, maxBytes: 2 * 1024 * 1024)
-            }.value
-            defer { try? FileManager.default.removeItem(at: copied.deletingLastPathComponent()) }
-            try await session.uploadMoMoQR(file: copied)
+            try await session.uploadMoMoQR(file: source)
             message = "Đã cập nhật mã QR. Khách có thể xem ở bước thanh toán."
             await refresh()
         } catch { message = "Liên kết thất bại: " + error.localizedDescription }
