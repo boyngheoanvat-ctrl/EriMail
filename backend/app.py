@@ -12,6 +12,7 @@ import urllib.error
 import re
 import zipfile
 import plistlib
+import tempfile
 from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
-from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
+from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES, MAX_SQLITE_BYTES
 
 # Keep IPA/APK, order delivery and private-vault limits in sync.
 # A value of zero removes the code-level file size cap; storage remains finite.
@@ -68,20 +69,55 @@ async def vault_unavailable(_request, _exc):
         "detail": "Kho lưu trữ an toàn đang gián đoạn; dữ liệu chưa được xác nhận."
     })
 
+# A failed cloud commit must not leave unconfirmed writes in the local DB.
+_eri_db_safe = True
+
 @contextmanager
 def connection():
-    # Serialize writes and their durable snapshots to avoid lost updates.
+    global _eri_db_safe
     with _eri_db_guard:
+        if not _eri_db_safe:
+            raise VaultError("Database recovery required before new operations")
         DB.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(DB, timeout=30)
         db.row_factory = sqlite3.Row
         initial = db.total_changes
+        remote_committed = False
         try:
             yield db
-            db.commit()
             if _eri_vault is not None and db.total_changes != initial:
-                _eri_vault.snapshot_sqlite(DB)
+                # A snapshot made AFTER local commit can fail and silently
+                # lose customers/orders on the next Render restart. Capture
+                # the pending transaction via SQLite serialize() and publish
+                # the durable snapshot BEFORE acknowledging the local write.
+                # sqlite3.backup() from a write transaction can deadlock;
+                # serialize() safely contains its uncommitted view instead.
+                image = db.serialize()
+                if not 0 < len(image) <= MAX_SQLITE_BYTES:
+                    raise VaultError("Customer database exceeds durable snapshot capacity")
+                with tempfile.TemporaryDirectory(prefix="eri-db-pending-") as temp:
+                    pending = Path(temp) / "pending.sqlite3"
+                    pending.write_bytes(image)
+                    os.chmod(pending, 0o600)
+                    _eri_vault.snapshot_sqlite(pending)
+                remote_committed = True
+            try:
+                db.commit()
+            except BaseException:
+                if remote_committed:
+                    # The newer cloud snapshot is authoritative. Restore
+                    # it before admitting another request; otherwise fail
+                    # closed rather than making changes to a stale DB.
+                    try:
+                        db.close()
+                        _eri_vault.restore_sqlite(DB)
+                    except BaseException:
+                        _eri_db_safe = False
+                        raise VaultError("Cloud snapshot saved; local DB recovery failed")
+                raise
         finally:
+            if db.in_transaction:
+                db.rollback()
             db.close()
 
 def _persist_private_file(path: Path, item_id: str, digest: str):
