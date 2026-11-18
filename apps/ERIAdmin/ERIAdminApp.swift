@@ -380,10 +380,10 @@ private final class AdminSession: ObservableObject {
         guard size > 0 && size <= maxBytes else { throw URLError(.dataLengthExceedsMaximum) }
         let values = Dictionary(fields, uniquingKeysWith: { _, newer in newer })
         guard let price = Int(values["price_vnd"] ?? ""),
-              price >= 0, (kind == "ipa" || price > 0) else {
+              price >= 0, (kind == "ipa" || kind == "apk" || price > 0) else {
             throw URLError(.badURL)
         }
-        if kind == "ipa" && price == 0 {
+        if (kind == "ipa" || kind == "apk") && price == 0 {
             try await ensureFreeModSupported()
         }
         let payload: [String: Any] = [
@@ -1558,7 +1558,7 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
-                    Text("IPA/APK không có giới hạn cố định trong ERI ADMIN. Cần đủ dung lượng trống trên iPhone và kho máy chủ để tải các phần an toàn.")
+                    Text("IPA/APK không có trần dung lượng cố định trong ứng dụng; kho và iPhone phải đủ chỗ. Với file lớn hơn 1 GiB, giữ ERI ADMIN mở trong lúc truyền từng phần.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1702,6 +1702,29 @@ private struct AdminUploadView: View {
                 throw URLError(.dataLengthExceedsMaximum)
             }
             let size = number.intValue
+            if (kind == .ipa || kind == .apk) && size > 1_024 * 1_024 * 1_024 {
+                // Large files use one checksummed HTTPS stream of small
+                // chunks, without duplicating the entire IPA into background
+                // task files. The app must stay open for this mode.
+                uploadPhase = "Tệp lớn: tải theo từng phần, vui lòng giữ ERI ADMIN mở."
+                let fields = [
+                    ("name", name.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    ("description", description),
+                    ("price_vnd", String(amount)),
+                    ("issuer", issuer),
+                    ("authorized", authorized ? "true" : "false")
+                ]
+                try await session.uploadFile(kind: kind.rawValue,
+                                             file: file, fields: fields,
+                                             maxBytes: kind.maxBytes,
+                                             onStatus: { value in uploadPhase = value },
+                                             onProgress: { value in progress = value })
+                status = "Máy chủ đã xác nhận tệp được tải và kiểm tra đầy đủ."
+                selectedFile = nil
+                saveDraft()
+                try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+                return
+            }
             let payload: [String: Any] = [
                 "kind": kind.rawValue,
                 "filename": file.lastPathComponent,
@@ -1731,8 +1754,8 @@ private struct AdminUploadView: View {
             saveDraft()
             try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
         } catch {
-            status = "Không thể bắt đầu tải nền: " + error.localizedDescription +
-                ". Tệp đã chọn vẫn được giữ trong ERI ADMIN."
+            status = "Tải lên chưa thành công: " + error.localizedDescription +
+                ". Tệp đã chọn vẫn được giữ trong ERI ADMIN để thử tiếp."
         }
     }
 }
