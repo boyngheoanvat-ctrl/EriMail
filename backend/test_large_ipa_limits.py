@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix="eri-no-fixed-ipa-cap-") as folder:
 
     def begin(kind: str, size: int):
         return client.post("/api/v1/admin/upload-sessions", headers=auth, json={
-            "kind": kind, "filename": "large." + kind, "size_bytes": size,
+            "kind": kind, "filename": ("performance.txt" if kind == "ai" else "large." + kind), "size_bytes": size,
             "name": "Publisher-approved package", "price_vnd": 1000,
             "authorized": True, "fast": True,
         })
