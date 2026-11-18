@@ -32,7 +32,8 @@ jobs:
         run: |
           python test_large_ipa_limits.py
           python test_fast_upload.py
-          python -m unittest -v test_eri_vault.py
+          python test_eri_atomic_snapshot.py
+          python -m unittest -v test_eri_vault.py test_eri_persistence.py
       - name: Syntax check
         run: python -m py_compile backend/app.py backend/eri_vault.py backend/test_large_ipa_limits.py
 
