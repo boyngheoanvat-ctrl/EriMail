@@ -12,9 +12,11 @@ orders, user keys, and uploaded product files unless they have already been
 verified in durable storage. Do not merge or redeploy the backend just to
 change the file size limit. Back up and verify restores first.
 
-The live Supabase function **eri-private-vault** currently accepts paths for
-indices **0 through 127** (128 * 4 MiB = 512 MiB) and will reject index 128.
-The Python client and backend changes in this branch **cannot bypass that**.
+The Supabase functions **eri-private-vault-preview** (v2) and
+**eri-private-vault** (v5) have now been updated to accept **files** chunk
+indices 0 through 511 while retaining the previous 0..127 limit for
+**snapshots** and **sessionmeta**. Their code and ACTIVE status were verified.
+This alone does **not** raise the live Render API's 512 MiB admission limit.
 
 ## Required coordinated deployment checklist
 
@@ -26,13 +28,10 @@ The Python client and backend changes in this branch **cannot bypass that**.
    real capacity constraints; increasing a code limit does not add storage.
    The Files picker and background staging also temporarily need additional
    free space on the user's iPhone.
-3. Update the Edge Function's **files** chunk path validation to permit
-   0..511, while keeping **snapshots** and **sessionmeta** limited to
-   0..127. Keep authentication, upload integrity and snapshot pointer
-   validation unchanged. The current implementation validates the sequence
-   with `/^(0|[1-9][0-9]{0,2})$/`, which already admits 511, but additionally
-   rejects `Number(seq) >= 128`. Replace that rejection with a
-   kind-specific check; do not remove it entirely.
+3. **Completed**: Upgrade both Supabase Edge Functions' file path guards
+   to 0..511 while preserving authentication and snapshot limits. Confirm
+   production version 5 stays ACTIVE, and separately test real data
+   availability after backend deployment.
 4. Test a file with 129 chunks using the isolated preview vault and API;
    confirm persistence after a restart and byte-for-byte restored SHA-256.
    Test that the 2 GiB + 1 byte boundary is refused.
