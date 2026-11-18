@@ -309,8 +309,17 @@ def install_r2_mod_routes(app, connection, require_admin):
             return {"state": "published", "product_id": row["product_id"],
                     "received": [], "total_parts": math.ceil(row["size_bytes"] / row["part_bytes"])}
         client, bucket = require_ready()
+        key = object_key(sid, row["kind"])
         try:
-            parts = list_uploaded_parts(client,bucket,object_key(sid,row["kind"]),row["r2_upload_id"])
+            existing = client.head_object(Bucket=bucket, Key=key)
+            if existing.get("ContentLength") == row["size_bytes"]:
+                return {"state": "verifying", "received": [],
+                        "size_bytes":row["size_bytes"], "part_bytes":row["part_bytes"],
+                        "total_parts":math.ceil(row["size_bytes"]/row["part_bytes"])}
+        except Exception:
+            pass  # A not-yet-completed multipart object is not visible to HEAD.
+        try:
+            parts = list_uploaded_parts(client,bucket,key,row["r2_upload_id"])
         except Exception:
             raise HTTPException(503, "R2 cannot confirm uploaded chunks")
         received = [x["PartNumber"]-1 for x in parts]
@@ -351,23 +360,33 @@ def install_r2_mod_routes(app, connection, require_admin):
         key = object_key(sid,row["kind"])
         expected_count = math.ceil(row["size_bytes"]/row["part_bytes"])
         if row["state"] == "pending":
+            # If the API was interrupted after R2 finalized the object but
+            # before SQLite committed, retry verification instead of replaying
+            # an already-consumed multipart UploadId.
+            completed = False
             try:
-                parts=list_uploaded_parts(client,bucket,key,row["r2_upload_id"])
-                if len(parts) != expected_count:
-                    raise HTTPException(409, "Some R2 parts are not uploaded")
-                for n,part in enumerate(parts):
-                    expected=min(row["part_bytes"],row["size_bytes"]-n*row["part_bytes"])
-                    if part.get("PartNumber") != n+1 or part.get("Size") != expected:
-                        raise HTTPException(409, "R2 part order or size mismatch")
-                client.complete_multipart_upload(
-                    Bucket=bucket,Key=key,UploadId=row["r2_upload_id"],
-                    MultipartUpload={"Parts":[{"ETag":p["ETag"],"PartNumber":p["PartNumber"]}
-                                              for p in parts]},
-                )
-            except HTTPException:
-                raise
+                head = client.head_object(Bucket=bucket, Key=key)
+                completed = head.get("ContentLength") == row["size_bytes"]
             except Exception:
-                raise HTTPException(503, "R2 did not complete the multipart upload")
+                pass
+            if not completed:
+                try:
+                    parts=list_uploaded_parts(client,bucket,key,row["r2_upload_id"])
+                    if len(parts) != expected_count:
+                        raise HTTPException(409, "Some R2 parts are not uploaded")
+                    for n,part in enumerate(parts):
+                        expected=min(row["part_bytes"],row["size_bytes"]-n*row["part_bytes"])
+                        if part.get("PartNumber") != n+1 or part.get("Size") != expected:
+                            raise HTTPException(409, "R2 part order or size mismatch")
+                    client.complete_multipart_upload(
+                        Bucket=bucket,Key=key,UploadId=row["r2_upload_id"],
+                        MultipartUpload={"Parts":[{"ETag":p["ETag"],"PartNumber":p["PartNumber"]}
+                                                  for p in parts]},
+                    )
+                except HTTPException:
+                    raise
+                except Exception:
+                    raise HTTPException(503, "R2 did not complete the multipart upload")
         try:
             info = client.head_object(Bucket=bucket,Key=key)
             if info.get("ContentLength") != row["size_bytes"]:
