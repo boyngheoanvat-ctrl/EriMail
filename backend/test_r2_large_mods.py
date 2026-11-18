@@ -90,6 +90,17 @@ with tempfile.TemporaryDirectory(prefix="eri-r2-large-test-") as folder:
     config=client.get("/api/v1/admin/r2-mods/config",headers=key).json()
     assert config["enabled"] and config["max_object_bytes"]==r2.R2_MAX_OBJECT
 
+    # Exercise the requested 3.73 GB IPA/APK and a >4 GiB object.
+    # This creates metadata only, never allocates the actual large bytes.
+    for kind in ("ipa", "apk"):
+        for size in (3_730_000_000, 4 * 1024**3 + 1):
+            sample={**body,"kind":kind,"filename":"large."+kind,"size_bytes":size}
+            response=client.post("/api/v1/admin/r2-mods/start",json=sample,headers=key)
+            assert response.status_code==201,(kind,size,response.text)
+            plan=response.json()
+            assert plan["size_bytes"]==size
+            assert plan["total_parts"]==math.ceil(size / plan["part_bytes"])
+            assert 1 < plan["total_parts"] <= 10_000
     # Big files are planned without consuming their size on Render.
     begin=client.post("/api/v1/admin/r2-mods/start",json=body,headers=key)
     assert begin.status_code==201,begin.text
