@@ -34,7 +34,7 @@ jobs:
           python test_upload_reservations.py
           python test_fast_upload.py
           python test_eri_atomic_snapshot.py
-          python -m unittest -v test_eri_vault.py test_eri_persistence.py
+          python -m unittest -v test_eri_vault.py test_eri_persistence.py test_live_storage_migration.py
       - name: Syntax check
         run: python -m py_compile backend/app.py backend/eri_vault.py backend/test_large_ipa_limits.py
 
