@@ -534,16 +534,16 @@ private struct AdminHome: View {
                 }
                 Section("Quản lý sản phẩm đã đăng") {
                     NavigationLink { AdminCatalogView(kind: .ipa).environmentObject(session) } label: {
-                        Label("Xóa IPA Mod Game", systemImage: "trash")
+                        Label("Quản lý IPA Mod Game", systemImage: "shippingbox")
                     }
                     NavigationLink { AdminCatalogView(kind: .apk).environmentObject(session) } label: {
-                        Label("Xóa APK Mod Game", systemImage: "trash")
+                        Label("Quản lý APK Mod Game", systemImage: "shippingbox")
                     }
                     NavigationLink { AdminCatalogView(kind: .certificate).environmentObject(session) } label: {
-                        Label("Xóa chứng chỉ", systemImage: "trash")
+                        Label("Quản lý chứng chỉ", systemImage: "checkmark.seal")
                     }
                     NavigationLink { AdminCatalogView(kind: .ai).environmentObject(session) } label: {
-                        Label("Xóa AI Plus", systemImage: "trash")
+                        Label("Quản lý AI Plus", systemImage: "sparkles")
                     }
                 }
                 Section("Sao lưu dữ liệu ERI Store") {
@@ -2239,32 +2239,47 @@ private struct CatalogEditView: View {
     }
 }
 
+private enum CatalogFilter: String, CaseIterable {
+    case all = "TẤT CẢ"
+    case free = "FREE"
+    case paid = "BÁN"
+}
+
 private struct AdminCatalogView: View {
     @EnvironmentObject private var session: AdminSession
     let kind: UploadKind
     @State private var products: [CatalogProduct] = []
-    @State private var showFree = false
+    @State private var filter: CatalogFilter = .all
     @State private var toDelete: CatalogProduct?
     @State private var editing: CatalogProduct?
     @State private var busy = false
     @State private var message = ""
 
     private var visibleProducts: [CatalogProduct] {
-        (kind == .ipa || kind == .apk) ? products.filter { ($0.price_vnd == 0) == showFree } : products
+        guard kind == .ipa || kind == .apk else { return products }
+        switch filter {
+        case .all: return products
+        case .free: return products.filter { $0.price_vnd == 0 }
+        case .paid: return products.filter { $0.price_vnd > 0 }
+        }
     }
 
     var body: some View {
         List {
-            if (kind == .ipa || kind == .apk) {
-                Picker("Loại Mod Game", selection: $showFree) {
-                    Text("FREE").tag(true)
-                    Text("BÁN").tag(false)
+            if kind == .ipa || kind == .apk {
+                Picker("Loại Mod Game", selection: $filter) {
+                    ForEach(CatalogFilter.allCases, id: \.self) { choice in
+                        Text(choice.rawValue).tag(choice)
+                    }
                 }
                 .pickerStyle(.segmented)
             }
             if !message.isEmpty { Text(message).foregroundStyle(.secondary) }
+            Text("Đã nhận từ máy chủ: \(products.count) mục · Đang hiển thị: \(visibleProducts.count) mục")
+                .font(.footnote).foregroundStyle(.secondary)
             if visibleProducts.isEmpty && !products.isEmpty {
-                Text("Chưa có Mod Game thuộc tab này.").foregroundStyle(.secondary)
+                Text("Không có sản phẩm trong bộ lọc này. Chọn TẤT CẢ để xem các mục còn lại.")
+                    .foregroundStyle(.secondary)
             }
             ForEach(visibleProducts) { item in
                 VStack(alignment: .leading, spacing: 6) {
