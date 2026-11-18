@@ -112,6 +112,20 @@ with tempfile.TemporaryDirectory(prefix="eri-r2-large-test-") as folder:
     assert status.status_code==200 and status.json()["received"]==[]
     assert client.post("/api/v1/admin/r2-mods/"+init["upload_id"]+"/complete",
                        headers=key).status_code==409
+    # Pending uploads are visible only to the admin and can be explicitly
+    # cancelled without deleting a published product.
+    unfinished=client.get("/api/v1/admin/r2-mods/unfinished",headers=key)
+    assert unfinished.status_code==200,unfinished.text
+    assert init["upload_id"] in [x["id"] for x in unfinished.json()["items"]]
+    assert client.get("/api/v1/admin/r2-mods/unfinished").status_code in (401,403)
+    cancelled=client.post("/api/v1/admin/r2-mods/"+init["upload_id"]+"/abort",headers=key)
+    assert cancelled.status_code==200 and cancelled.json()["aborted"],cancelled.text
+    assert client.post("/api/v1/admin/r2-mods/"+init["upload_id"]+"/abort",headers=key).status_code==200
+    assert client.get("/api/v1/admin/r2-mods/"+init["upload_id"]+"/status",headers=key).status_code==410
+    assert client.post("/api/v1/admin/r2-mods/"+init["upload_id"]+"/complete",
+                       headers=key).status_code==410
+    assert init["upload_id"] not in [x["id"] for x in
+                                   client.get("/api/v1/admin/r2-mods/unfinished",headers=key).json()["items"]]
 
     too_big={**body,"size_bytes":r2.R2_MAX_OBJECT+1}
     denied=client.post("/api/v1/admin/r2-mods/start",json=too_big,headers=key)
@@ -149,6 +163,7 @@ with tempfile.TemporaryDirectory(prefix="eri-r2-large-test-") as folder:
     again=client.post(prefix+"/complete",headers=key)
     assert again.status_code==201 and again.json()["id"]==product_id
     assert client.get(prefix+"/status",headers=key).json()["state"]=="published"
+    assert client.post(prefix+"/abort",headers=key).status_code==409
     with connection() as db:
         row=db.execute("SELECT size_bytes,storage_name FROM private_product_uploads WHERE product_id=?",(product_id,)).fetchone()
         assert row["size_bytes"]==len(data)
