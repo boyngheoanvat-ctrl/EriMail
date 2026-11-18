@@ -13,6 +13,8 @@ import CryptoKit
 import UniformTypeIdentifiers
 
 private let server = "https://eri-api-dag8.onrender.com"
+// 2 GiB IPA/APK ceiling; the server and the private vault must match.
+private let eriModUploadMaxBytes = 2 * 1024 * 1024 * 1024
 
 @main
 struct ERIAdminApp: App {
@@ -145,7 +147,7 @@ private final class AdminSession: ObservableObject {
                      onProgress: @escaping @MainActor (Double) -> Void) async throws {
         let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
         guard let size = (attrs[.size] as? NSNumber)?.intValue,
-              size > 0 && size <= 512 * 1024 * 1024 else {
+              size > 0 && size <= eriModUploadMaxBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
         let base = "/api/v1/admin/orders/" + orderID + "/delivery-sessions"
@@ -1179,7 +1181,7 @@ private struct OrderFileDeliveryView: View {
                     }
                 }
                 Section {
-                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 512 MiB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
+                    Text("Chọn IPA, ZIP, P12, mobileprovision, PDF, TXT hoặc file hỗ trợ khác, tối đa 2 GiB. Khi gửi đủ file, đơn chuyển sang Đã giao và khách sẽ thấy nút Tải file trong tài khoản.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Lưu ý: File hiện nằm trên ổ tạm Render Free, có thể mất khi server khởi động lại. Không lưu thông tin bí mật quan trọng khi chưa chuyển sang kho lưu trữ bền vững.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1193,7 +1195,7 @@ private struct OrderFileDeliveryView: View {
             }
             .sheet(isPresented: $picker) {
                 ERIDocumentPicker(
-                    maxBytes: 512 * 1024 * 1024,
+                    maxBytes: eriModUploadMaxBytes,
                     onPick: { url in
                         if let previous = fileURL {
                             try? FileManager.default.removeItem(at: previous.deletingLastPathComponent())
@@ -1254,7 +1256,7 @@ private enum UploadKind: String {
     // Use a broad system document picker; validate file extension after selection.
     var maxBytes: Int {
         switch self {
-        case .ipa, .apk: return 512 * 1_048_576
+        case .ipa, .apk: return eriModUploadMaxBytes
         case .certificate: return 15 * 1_048_576
         case .ai: return 20 * 1_048_576
         }
@@ -1446,6 +1448,8 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
+                    Text("IPA tối đa 2 GiB. iPhone cần đủ dung lượng trống để sao chép tệp và chuẩn bị các phần tải nền.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
