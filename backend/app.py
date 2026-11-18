@@ -16,12 +16,19 @@ from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Header, Depends, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from eri_r2_mods import (install_r2_mod_routes, parse_storage_name,
+                         object_exists as eri_r2_object_exists,
+                         signed_download as eri_r2_signed_download,
+                         delete_object as eri_r2_delete_object)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 DB = Path(os.getenv("ERI_DB_PATH", "./eri.sqlite3"))
 from eri_vault import ERIVault, VaultError, CHUNK_BYTES as VAULT_CHUNK_BYTES
+
+# Keep IPA/APK, order delivery and private-vault limits in sync.
+MOD_UPLOAD_MAX_BYTES = 2 * 1024**3
 _eri_db_guard = threading.RLock()
 _VAULT_MODE = os.getenv("ERI_VAULT_MODE", "").lower()
 if _VAULT_MODE not in ("", "off", "required", "preview", "bootstrap"):
@@ -97,7 +104,7 @@ def _queue_cloud_deletion(db, storage_name: str, size: int):
         return
     if (not isinstance(storage_name, str)
             or not re.fullmatch(r"[a-f0-9]{32}\.[a-z0-9]{1,16}", storage_name)
-            or not isinstance(size, int) or not 0 < size <= 512 * 1024 * 1024):
+            or not isinstance(size, int) or not 0 < size <= MOD_UPLOAD_MAX_BYTES):
         raise VaultError("Cannot queue invalid private object deletion")
     db.execute(
         "INSERT OR IGNORE INTO vault_delete_queue(storage_name,size_bytes,created_at) "
@@ -425,7 +432,7 @@ def ipa_storage_status():
     ready, missing = [], []
     for row in rows:
         item = {"id": row["id"], "name": row["name"], "version": row["version"]}
-        if row["storage_name"] and _eri_mod_file(row):
+        if row["storage_name"] and (_eri_mod_file(row) or eri_r2_object_exists(row["storage_name"], row["size_bytes"])):
             ready.append(item)
         else:
             missing.append(item)
@@ -450,7 +457,7 @@ def public_mod_catalog():
         item = {key: row[key] for key in
                 ("id", "name", "version", "bundle_id", "description", "price_vnd", "platform")}
         if item["price_vnd"] == 0:
-            if row["storage_name"] and _eri_mod_file(row):
+            if row["storage_name"] and (_eri_mod_file(row) or eri_r2_object_exists(row["storage_name"], row["size_bytes"])):
                 item["download_path"] = f'/api/v1/mods/{item["id"]}/download'
             else:
                 item["file_available"] = False
@@ -471,6 +478,14 @@ def download_free_mod(product_id: int):
         ).fetchone()
     if row is None:
         raise HTTPException(404, "Free mod file not available")
+    if parse_storage_name(row["storage_name"]):
+        if not eri_r2_object_exists(row["storage_name"], row["size_bytes"]):
+            raise HTTPException(404, "R2 file is missing or storage is not configured")
+        return RedirectResponse(
+            eri_r2_signed_download(row["storage_name"], row["original_name"]),
+            status_code=307,
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+        )
     path = _eri_mod_file(row, restore=True)
     if path is None:
         raise HTTPException(404, "File missing on server; ask admin to re-upload")
@@ -861,7 +876,7 @@ async def sign_ipa(
 
 # Files are private and only uploadable by an authenticated admin.
 # Use persistent, access-controlled storage for ERI_UPLOAD_DIR and ERI_DB_PATH in production.
-UPLOAD_LIMITS = {"ipa": 512 * 1024**2, "apk": 512 * 1024**2, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
+UPLOAD_LIMITS = {"ipa": MOD_UPLOAD_MAX_BYTES, "apk": MOD_UPLOAD_MAX_BYTES, "certificate": 15 * 1024**2, "ai": 20 * 1024**2}
 UPLOAD_SUFFIXES = {
     "ipa": {".ipa"},
     "apk": {".apk"},
@@ -1488,23 +1503,33 @@ def admin_delete_catalog_product(kind: str, product_id: int):
             (kind, product_id)).fetchall()
         storage_names = [x["storage_name"] for x in matches]
         for item in matches:
-            _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
+            if not parse_storage_name(item["storage_name"]):
+                _queue_cloud_deletion(db, item["storage_name"], item["size_bytes"])
         db.execute("DELETE FROM private_product_uploads WHERE kind=? AND product_id=?",
                    (kind, product_id))
         db.execute("DELETE FROM " + lookup[kind] + " WHERE id=?", (product_id,))
         # Keep existing order records and payment history; they store a name/price snapshot.
-    # Remove only private files referenced by metadata. Never construct paths from user input.
+    # Remove only private files referenced by metadata. A remote R2 deletion
+    # failure must not be mistaken for successful cleanup.
+    r2_cleanup_pending = 0
     for name in storage_names:
+        if parse_storage_name(name):
+            try:
+                if not eri_r2_delete_object(name):
+                    r2_cleanup_pending += 1
+            except Exception:
+                r2_cleanup_pending += 1
+            continue
         if Path(name).name == name and not name.startswith("."):
             (UPLOAD_DIR / name).unlink(missing_ok=True)
     cleanup = _drain_cloud_deletions()
     return {"deleted": True, "id": product_id, "kind": kind,
-            "cloud_cleanup_pending":cleanup["pending"]}
+            "cloud_cleanup_pending":cleanup["pending"]+r2_cleanup_pending}
 
 
 # Authenticated delivery files, visible only to the buyer whose order is fulfilled.
 # WARNING: /tmp is temporary on Render Free; use durable storage in production.
-DELIVERY_MAX_BYTES = 512 * 1024 * 1024
+DELIVERY_MAX_BYTES = MOD_UPLOAD_MAX_BYTES
 DELIVERY_SUFFIXES = {".ipa",".apk",".zip",".pdf",".txt",".mobileprovision",".p12",".cer",
                      ".png",".jpg",".jpeg",".json",".plist",".md",".csv"}
 
@@ -1814,6 +1839,11 @@ register_decrypt_catalog(app, connection, UPLOAD_DIR, _eri_mod_file, require_cus
 # API credentials remain server-side; no public customer dispatch privileges.
 from eri_actions_bridge import install_actions_bridge
 install_actions_bridge(app, require_admin)
+
+# Optional direct multipart IPA/APK uploads to private R2. No object is
+# published until its size, SHA-256 and ZIP structure are verified.
+# Remains disabled until ERI_R2_MOD_UPLOADS=enabled and secrets are configured.
+install_r2_mod_routes(app, connection, require_admin)
 
 # Automatic publisher-authorized IPA -> GitHub Actions -> R2 workflow.
 # Disabled by default until scoped GitHub/R2 secrets and persistent DB are ready.

@@ -120,7 +120,7 @@ assert 'id="certificate-free-panel"' in html
 assert 'id="certificate-udid"' in html
 assert 'https://website.khoindvn.io.vn/apps.js' not in html
 assert 'eri-home-extras.css?v=20261115certificatetab1' in html
-assert 'app.js?v=20261116authfix2' in html
+assert 'app.js?v=20261116mobtabs1' in html
 app = (web / "app.js").read_text()
 assert 'openCategory("certificate",tab.dataset.certMode)' in app
 assert 'freeCertificates=category==="certificate"&&certMode==="free"' in app
