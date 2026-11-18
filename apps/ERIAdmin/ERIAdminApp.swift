@@ -545,6 +545,13 @@ private struct AdminHome: View {
                         Label("Xóa AI Plus", systemImage: "trash")
                     }
                 }
+                Section("Sao lưu dữ liệu ERI Store") {
+                    NavigationLink {
+                        AdminBackupView().environmentObject(session)
+                    } label: {
+                        Label("Xuất bản sao lưu SQLite", systemImage: "externaldrive.badge.timemachine")
+                    }
+                }
                 Section("Quản lý tài khoản khách hàng") {
                     NavigationLink {
                         CustomerManagementView().environmentObject(session)
@@ -586,6 +593,77 @@ private struct AdminHome: View {
             }
             .sheet(isPresented: $showLogin) { LoginView().environmentObject(session) }
             .onAppear { if !session.authenticated { showLogin = true } }
+        }
+    }
+}
+
+// Create a consistent, admin-authenticated snapshot using the existing API.
+// The SQLite bytes remain local until the administrator explicitly shares them.
+private struct AdminBackupView: View {
+    @EnvironmentObject private var session: AdminSession
+    @State private var exporting = false
+    @State private var backupURL: URL?
+    @State private var message = ""
+
+    var body: some View {
+        Form {
+            Section("Sao lưu trước khi cập nhật máy chủ") {
+                Text("Tải một bản sao SQLite nhất quán từ ERI API để giữ tài khoản, đơn hàng và thông tin sản phẩm.")
+                    .font(.footnote)
+                Button {
+                    Task { await exportBackup() }
+                } label: {
+                    Label(exporting ? "Đang xuất bản sao lưu..." : "Tạo bản sao lưu mới",
+                          systemImage: "square.and.arrow.down")
+                }
+                .disabled(!session.authenticated || exporting)
+                if exporting { ProgressView() }
+                if let backupURL {
+                    Text("Đã lưu: " + backupURL.lastPathComponent)
+                        .font(.footnote).foregroundStyle(.green)
+                    ShareLink(item: backupURL) {
+                        Label("Lưu vào Files / chia sẻ bản sao lưu", systemImage: "square.and.arrow.up")
+                    }
+                }
+                if !message.isEmpty {
+                    Text(message).font(.footnote)
+                }
+            }
+            Section("Bảo vệ dữ liệu") {
+                Text("Hãy dùng Lưu vào Tệp trên iPhone, sau đó sao chép tệp sao lưu ra nơi an toàn. Đây chỉ là cơ sở dữ liệu SQLite; các IPA/APK và tệp giao hàng còn phải kiểm tra trong kho lưu trữ riêng trước khi triển khai.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Không đăng bản sao lưu lên GitHub hoặc chia sẻ công khai: tệp có thể chứa thông tin khách hàng.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Sao lưu ERI Store")
+    }
+
+    private func exportBackup() async {
+        guard !exporting else { return }
+        exporting = true
+        defer { exporting = false }
+        message = ""
+        do {
+            let bytes = try await session.send("/api/v1/admin/backups/sqlite")
+            let signature = Data("SQLite format 3\u{0000}".utf8)
+            guard bytes.count > 100, bytes.starts(with: signature) else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ERIBackups", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let date = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let output = folder.appendingPathComponent("eri-store-backup-" + date + ".sqlite3")
+            try bytes.write(to: output, options: .atomic)
+            try FileManager.default.setAttributes([
+                .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication
+            ], ofItemAtPath: output.path)
+            backupURL = output
+            message = "Đã tạo bản sao lưu SQLite. Hãy bấm Lưu vào Files để giữ bản sao ngoài ứng dụng."
+        } catch {
+            message = "Sao lưu chưa thành công: " + error.localizedDescription +
+                ". Không cập nhật API trước khi có bản sao lưu hợp lệ."
         }
     }
 }
