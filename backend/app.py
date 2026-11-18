@@ -916,6 +916,56 @@ UPLOAD_DIR = Path(os.getenv("ERI_UPLOAD_DIR", str(DB.parent / "eri-private-uploa
 # Check physical free space instead of promising limitless local storage.
 ERI_UPLOAD_DISK_RESERVE_BYTES = 128 * 1024**2
 
+def _eri_reserved_upload_bytes() -> int:
+    """Count bytes not yet received by other upload sessions.
+
+    Fast sessions use sparse files; stat().st_size therefore is NOT enough
+    to account for how much space they still need. Use verified part markers.
+    The admission check runs under _eri_upload_lock to avoid two simultaneous
+    requests overcommitting the same free space.
+    """
+    remaining = 0
+    for meta_path in UPLOAD_DIR.glob(".*.session.json"):
+        try:
+            info = json.loads(meta_path.read_text("utf-8"))
+            size = info.get("size_bytes")
+            if type(size) is not int or not 0 < size <= 2**63 - 1:
+                continue
+            if info.get("fast"):
+                upload_id = info.get("upload_id", "")
+                if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
+                    continue
+                directory = UPLOAD_DIR / ("." + upload_id + ".parts")
+                confirmed = set()
+                if directory.is_dir():
+                    for marker in directory.glob("*.sha256"):
+                        if not marker.stem.isdecimal():
+                            continue
+                        index = int(marker.stem)
+                        if 0 <= index < (size + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES:
+                            confirmed.add(index)
+                acknowledged = sum(
+                    min(ERI_CHUNK_BYTES, size - i * ERI_CHUNK_BYTES)
+                    for i in confirmed
+                )
+            else:
+                acknowledged = max(0, min(size, int(info.get("offset", 0))))
+            remaining += size - acknowledged
+        except (OSError, TypeError, ValueError):
+            # Invalid/stale private metadata needs manual inspection; never
+            # misinterpret it as proof of available capacity.
+            continue
+    for meta_path in UPLOAD_DIR.glob(".*.delivery.json"):
+        try:
+            info = json.loads(meta_path.read_text("utf-8"))
+            size = info.get("size_bytes")
+            offset = info.get("offset")
+            if type(size) is int and type(offset) is int and 0 <= offset <= size:
+                remaining += size - offset
+        except (OSError, TypeError, ValueError):
+            continue
+    return remaining
+
 def _eri_check_upload_capacity(size: int) -> None:
     if type(size) is not int or size < 1:
         raise HTTPException(422, "Invalid upload size")
@@ -924,9 +974,10 @@ def _eri_check_upload_capacity(size: int) -> None:
         available = shutil.disk_usage(UPLOAD_DIR).free
     except OSError as exc:
         raise HTTPException(503, "Cannot inspect upload storage") from exc
-    if size + ERI_UPLOAD_DISK_RESERVE_BYTES > available:
-        raise HTTPException(507, "Insufficient server disk space. Configure "
-                                 "durable storage and temporary upload space.")
+    reserved = _eri_reserved_upload_bytes()
+    if size + reserved + ERI_UPLOAD_DISK_RESERVE_BYTES > available:
+        raise HTTPException(507, "Insufficient server disk space, including "
+                                 "bytes reserved for other active uploads.")
 
 @app.get("/api/v1/admin/upload-capacity", dependencies=[Depends(require_admin)])
 def eri_upload_capacity():
@@ -934,6 +985,7 @@ def eri_upload_capacity():
     available = shutil.disk_usage(UPLOAD_DIR).free
     return {"max_mod_file_bytes": MOD_UPLOAD_MAX_BYTES or None,
             "local_free_bytes": available,
+            "pending_upload_bytes": _eri_reserved_upload_bytes(),
             "reserve_bytes": ERI_UPLOAD_DISK_RESERVE_BYTES,
             "vault_configured": _eri_vault is not None}
 
@@ -1164,9 +1216,10 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
         raise HTTPException(422, "Only Mod Game supports free uploads")
     if item.kind == "certificate" and not item.issuer.strip():
         raise HTTPException(422, "Certificate issuer required")
-    # Reserve only when local storage can hold the whole validated product.
-    await asyncio.to_thread(_eri_check_upload_capacity, item.size_bytes)
     async with _eri_upload_lock:
+        # Reserve under the same lock as session creation, so concurrent
+        # large uploads cannot both claim the last free disk space.
+        _eri_check_upload_capacity(item.size_bytes)
         upload_id = secrets.token_hex(16)
         metadata_file, data_file = _eri_paths(upload_id)
         metadata = item.model_dump()
