@@ -47,6 +47,14 @@ jobs:
                           raise ValueError("Missing expected items list")
                       counts[label] = len(items)
                       print(f"{label}: {len(items)} published items (API limit 100)")
+                      if label == "ipa_and_apk":
+                          breakdown = {}
+                          for item in items:
+                              platform = item.get("platform", "unknown")
+                              tier = "FREE" if item.get("price_vnd") == 0 else "PAID"
+                              key = str(platform) + "_" + tier
+                              breakdown[key] = breakdown.get(key, 0) + 1
+                          print("IPA/APK breakdown:", json.dumps(breakdown, sort_keys=True))
                       break
                   except (urllib.error.URLError, ValueError, RuntimeError) as exc:
                       if attempt == 2:
