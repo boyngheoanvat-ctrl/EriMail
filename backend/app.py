@@ -1369,101 +1369,108 @@ async def eri_chunk_upload(upload_id: str, request: Request,
         _eri_save_session(upload_id, meta)
         return {"offset": meta["offset"]}
 
+def _eri_finish_chunk_upload_blocking(upload_id: str):
+    """CPU/disk/cloud heavy finalize; never execute on Uvicorn's event loop."""
+    meta = _eri_read_session(upload_id)
+    if meta.get("fast"):
+        # Do not finalize until every validated byte range is acknowledged.
+        if any(not _eri_fast_part_marker(upload_id, i).is_file()
+               for i in range(_eri_fast_part_count(meta))):
+            raise HTTPException(409, "Not all fast upload parts have arrived")
+        meta["offset"] = meta["size_bytes"]
+    if meta["offset"] != meta["size_bytes"]:
+        raise HTTPException(409, "File not fully transferred")
+    metadata_file, part = _eri_paths(upload_id)
+    digest = hashlib.sha256()
+    with part.open("rb") as src:
+        while data := src.read(1024 * 1024):
+            digest.update(data)
+    if meta["extension"] == ".ipa":
+        version, bundle_id = _eri_ipa_properties(part)
+        # Verify IPA on the dedicated ERI import path before publishing.
+        if meta.get("verify_free_ipa") and meta["price_vnd"] == 0:
+            from ipa_tools import _inspect_archive
+            inspection = _inspect_archive(part)
+            app_info = inspection.get("app") or {}
+            if (inspection.get("zip_password_protected") or
+                    inspection.get("fairplay_encrypted") is not False or
+                    app_info.get("bundle_id") != bundle_id or
+                    app_info.get("version") != version):
+                raise HTTPException(
+                    422, "IPA còn mã hóa, thiếu thông tin hoặc không xác minh được ứng dụng"
+                )
+    elif meta["extension"] == ".apk":
+        try:
+            with zipfile.ZipFile(part) as archive:
+                if "AndroidManifest.xml" not in archive.namelist():
+                    raise HTTPException(422, "Invalid APK: missing AndroidManifest.xml")
+        except zipfile.BadZipFile:
+            raise HTTPException(422, "Invalid APK archive")
+        version, bundle_id = "", ""
+    elif meta["extension"] == ".zip":
+        try:
+            with zipfile.ZipFile(part) as archive:
+                _ = archive.infolist()
+        except zipfile.BadZipFile:
+            raise HTTPException(422, "Invalid ZIP file")
+        version, bundle_id = "", ""
+    else:
+        version, bundle_id = "", ""
+    final = UPLOAD_DIR / (upload_id + meta["extension"])
+    os.replace(part, final)
+    try:
+        if _eri_vault is not None:
+            # Each 4-MiB cloud part was stored before its ACK.
+            count = (meta["size_bytes"] + VAULT_CHUNK_BYTES - 1) // VAULT_CHUNK_BYTES
+            for i in range(count):
+                if not _eri_vault.chunk_exists(upload_id, i):
+                    raise VaultError("Cloud IPA part missing; product not published")
+        with connection() as db:
+            if meta["kind"] in ("ipa", "apk"):
+                row = db.execute(
+                    "INSERT INTO ipa(name,version,bundle_id,download_url,sha256,"
+                    "authorized,price_vnd,description,platform) VALUES(?,?,?,?,?,1,?,?,?)",
+                    (meta["name"], version, bundle_id, "private:" + upload_id,
+                     digest.hexdigest(), meta["price_vnd"], meta["description"], meta["kind"]))
+            elif meta["kind"] == "certificate":
+                row = db.execute(
+                    "INSERT INTO certificates(name,issuer,description,price_vnd,active)"
+                    " VALUES(?,?,?,?,1)",
+                    (meta["name"], meta["issuer"], meta["description"], meta["price_vnd"]))
+            else:
+                row = db.execute(
+                    "INSERT INTO products(name,description,price_vnd,active) VALUES(?,?,?,1)",
+                    (meta["name"], meta["description"], meta["price_vnd"]))
+            db.execute(
+                "INSERT INTO private_product_uploads(id,kind,product_id,original_name,"
+                "storage_name,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (upload_id, meta["kind"], row.lastrowid, meta["filename"],
+                 final.name, meta["size_bytes"], digest.hexdigest(),
+                 datetime.now(timezone.utc).isoformat()))
+            product_id = row.lastrowid
+    except Exception:
+        os.replace(final, part)
+        raise
+    metadata_file.unlink(missing_ok=True)
+    if meta.get("fast"):
+        # Cleanup is best effort after the DB transaction succeeds.
+        directory = _eri_fast_parts_dir(upload_id)
+        try:
+            for marker in directory.iterdir():
+                marker.unlink()
+            directory.rmdir()
+        except OSError:
+            pass
+    return {"id": product_id, "name": meta["name"], "uploaded": True}
+
 @app.post("/api/v1/admin/upload-sessions/{upload_id}/complete",
           dependencies=[Depends(require_admin)], status_code=201)
 async def eri_finish_chunk_upload(upload_id: str):
+    # Preserve the existing upload lock but do all ZIP inspection, SHA-256,
+    # cloud checks and SQLite snapshot I/O in a worker thread. This allows
+    # Render health checks and other API requests to be serviced promptly.
     async with _eri_upload_lock:
-        meta = _eri_read_session(upload_id)
-        if meta.get("fast"):
-            # Do not finalize until every validated byte range is acknowledged.
-            if any(not _eri_fast_part_marker(upload_id, i).is_file()
-                   for i in range(_eri_fast_part_count(meta))):
-                raise HTTPException(409, "Not all fast upload parts have arrived")
-            meta["offset"] = meta["size_bytes"]
-        if meta["offset"] != meta["size_bytes"]:
-            raise HTTPException(409, "File not fully transferred")
-        metadata_file, part = _eri_paths(upload_id)
-        digest = hashlib.sha256()
-        with part.open("rb") as src:
-            while data := src.read(1024 * 1024):
-                digest.update(data)
-        if meta["extension"] == ".ipa":
-            version, bundle_id = _eri_ipa_properties(part)
-            # Verify IPA on the dedicated ERI import path before publishing.
-            if meta.get("verify_free_ipa") and meta["price_vnd"] == 0:
-                from ipa_tools import _inspect_archive
-                inspection = _inspect_archive(part)
-                app_info = inspection.get("app") or {}
-                if (inspection.get("zip_password_protected") or
-                        inspection.get("fairplay_encrypted") is not False or
-                        app_info.get("bundle_id") != bundle_id or
-                        app_info.get("version") != version):
-                    raise HTTPException(
-                        422, "IPA còn mã hóa, thiếu thông tin hoặc không xác minh được ứng dụng"
-                    )
-        elif meta["extension"] == ".apk":
-            try:
-                with zipfile.ZipFile(part) as archive:
-                    if "AndroidManifest.xml" not in archive.namelist():
-                        raise HTTPException(422, "Invalid APK: missing AndroidManifest.xml")
-            except zipfile.BadZipFile:
-                raise HTTPException(422, "Invalid APK archive")
-            version, bundle_id = "", ""
-        elif meta["extension"] == ".zip":
-            try:
-                with zipfile.ZipFile(part) as archive:
-                    _ = archive.infolist()
-            except zipfile.BadZipFile:
-                raise HTTPException(422, "Invalid ZIP file")
-            version, bundle_id = "", ""
-        else:
-            version, bundle_id = "", ""
-        final = UPLOAD_DIR / (upload_id + meta["extension"])
-        os.replace(part, final)
-        try:
-            if _eri_vault is not None:
-                # Each 4-MiB cloud part was stored before its ACK.
-                count = (meta["size_bytes"] + VAULT_CHUNK_BYTES - 1) // VAULT_CHUNK_BYTES
-                for i in range(count):
-                    if not _eri_vault.chunk_exists(upload_id, i):
-                        raise VaultError("Cloud IPA part missing; product not published")
-            with connection() as db:
-                if meta["kind"] in ("ipa", "apk"):
-                    row = db.execute(
-                        "INSERT INTO ipa(name,version,bundle_id,download_url,sha256,"
-                        "authorized,price_vnd,description,platform) VALUES(?,?,?,?,?,1,?,?,?)",
-                        (meta["name"], version, bundle_id, "private:" + upload_id,
-                         digest.hexdigest(), meta["price_vnd"], meta["description"], meta["kind"]))
-                elif meta["kind"] == "certificate":
-                    row = db.execute(
-                        "INSERT INTO certificates(name,issuer,description,price_vnd,active)"
-                        " VALUES(?,?,?,?,1)",
-                        (meta["name"], meta["issuer"], meta["description"], meta["price_vnd"]))
-                else:
-                    row = db.execute(
-                        "INSERT INTO products(name,description,price_vnd,active) VALUES(?,?,?,1)",
-                        (meta["name"], meta["description"], meta["price_vnd"]))
-                db.execute(
-                    "INSERT INTO private_product_uploads(id,kind,product_id,original_name,"
-                    "storage_name,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                    (upload_id, meta["kind"], row.lastrowid, meta["filename"],
-                     final.name, meta["size_bytes"], digest.hexdigest(),
-                     datetime.now(timezone.utc).isoformat()))
-                product_id = row.lastrowid
-        except Exception:
-            os.replace(final, part)
-            raise
-        metadata_file.unlink(missing_ok=True)
-        if meta.get("fast"):
-            # Cleanup is best effort after the DB transaction succeeds.
-            directory = _eri_fast_parts_dir(upload_id)
-            try:
-                for marker in directory.iterdir():
-                    marker.unlink()
-                directory.rmdir()
-            except OSError:
-                pass
-    return {"id": product_id, "name": meta["name"], "uploaded": True}
+        return await asyncio.to_thread(_eri_finish_chunk_upload_blocking, upload_id)
 
 
 # Merchant-configured static MoMo QR. Never put admin tokens or buyer secrets here.

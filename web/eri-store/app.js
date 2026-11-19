@@ -258,6 +258,27 @@ function renderCatalog(){
     grid.append(card);
   }
 }
+// Render Free sometimes restarts while the user is opening the shop.
+// Retry *only* the read-only product listing, never purchases or auth writes.
+async function loadPublicCatalogWithRetry(path){
+  const waits=[0,1800,4000,7000];
+  for(let attempt=0;attempt<waits.length;attempt++){
+    if(waits[attempt]){
+      $("catalog-message").textContent="Máy chủ đang khởi động lại; thử kết nối lần "+(attempt+1)+"/"+waits.length+"...";
+      await new Promise(resolve=>setTimeout(resolve,waits[attempt]));
+    }
+    try{
+      return await request(path);
+    }catch(error){
+      const message=String(error?.message||"");
+      const transient=error instanceof TypeError ||
+        /HTTP (502|503|504)\b/.test(message) ||
+        /Máy chủ phản hồi quá lâu|Không thể kết nối/i.test(message);
+      if(!transient||attempt===waits.length-1)throw error;
+    }
+  }
+  throw new Error("Không thể kết nối cửa hàng. Vui lòng thử lại sau.");
+}
 async function loadCatalog(){
   const category=state.category;
   const certMode=state.certTab;
@@ -293,7 +314,7 @@ async function loadCatalog(){
   const grid=$("products");
   grid.replaceChildren(element("div","placeholder"),element("div","placeholder"),element("div","placeholder"));
   try{
-    const data=await request("/api/v1/"+KINDS[category].endpoint);
+    const data=await loadPublicCatalogWithRetry("/api/v1/"+KINDS[category].endpoint);
     if(category!==state.category||(category==="certificate"&&certMode!==state.certTab))return;
     if(!Array.isArray(data.items))throw new Error("Danh mục chưa đúng định dạng.");
     state.items=data.items;
