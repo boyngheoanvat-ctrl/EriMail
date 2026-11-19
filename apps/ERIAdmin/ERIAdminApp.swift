@@ -1676,7 +1676,7 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
-                    Text("IPA/APK lớn tải trực tiếp lên R2 khi máy chủ đã cấu hình. Dung lượng thực tế phụ thuộc kho và iPhone; R2 hỗ trợ mỗi tệp đến gần 5 TiB. Nếu chưa bật R2, giới hạn bởi ổ máy chủ.")
+                    Text("Không cần R2 hoặc thẻ: IPA/APK được tải lên qua một thanh tiến độ duy nhất. Hệ thống truyền các khối bảo mật trong nền, có thể tiếp tục sau khi mất mạng. Giới hạn thực tế phụ thuộc dung lượng kho và iPhone.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1686,7 +1686,7 @@ private struct AdminUploadView: View {
                 if working || backgroundUploader.pending {
                     let displayed = backgroundUploader.pending ? backgroundUploader.progress : progress
                     ProgressView(value: displayed)
-                    Text("Tiến độ tải: " + String(format: "%.1f", displayed * 100) + "%")
+                    Text("Tiến độ toàn bộ tệp: " + String(format: "%.1f", displayed * 100) + "%")
                         .font(.footnote).foregroundStyle(.secondary)
                     if backgroundUploader.pending {
                         Text(backgroundUploader.status).font(.footnote)
