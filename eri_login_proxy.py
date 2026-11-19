@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from eri_login_firewall import ERIFirewall
 
 FN = os.environ.get("ERI_SUPABASE_FUNCTION_URL", "").rstrip("/")
 KEY_FN = os.environ.get("ERI_KEY_FUNCTION_URL", "").rstrip("/")
@@ -21,6 +22,7 @@ ADMIN = os.environ.get("ERI_ADMIN_KEY", "")
 # Rotating the primary secret revokes all delegated credentials immediately.
 ADMIN_TOKEN_PREFIX = "ERIADM1"
 ADMIN_TOKEN_TTL_MAX_DAYS = 90
+FIREWALL = ERIFirewall()
 
 def issue_admin_token(days=30):
     if len(ADMIN) < 32:
@@ -104,7 +106,15 @@ POSTS = {
 }
 
 class Handler(BaseHTTPRequestHandler):
-    def send(self, status, payload, kind="application/json; charset=utf-8"):
+    def firewall_guard(self):
+        outcome = FIREWALL.check(self.command, self.path, self.client_address[0], self.headers)
+        if outcome is None:
+            return False
+        status, code, retry = outcome
+        self.send(status, {"error": "Yêu cầu bị giới hạn hoặc từ chối bởi Firewall", "code": code}, retry=retry)
+        return True
+
+    def send(self, status, payload, kind="application/json; charset=utf-8", retry=None):
         blob = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", kind)
@@ -114,15 +124,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-ERI-ADMIN-KEY")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(blob)))
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if retry is not None:
+            self.send_header("Retry-After", str(retry))
         self.end_headers()
         self.wfile.write(blob)
 
     def do_HEAD(self):
+        if self.firewall_guard():
+            return
         self.send_response(200)
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_OPTIONS(self):
+        if self.firewall_guard():
+            return
         self.send(200, b"")
 
     def is_primary_admin(self):
@@ -155,6 +173,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(503, {"error":"Không thể kết nối cơ sở dữ liệu ERI"})
 
     def do_GET(self):
+        if self.firewall_guard():
+            return
         path = urllib.parse.urlsplit(self.path).path
         if path == "/":
             return self.send(200, {"service":"ERI Login","admin":"/admin","health":"/api/health"})
@@ -172,6 +192,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, {"error":"Không tìm thấy API"})
 
     def do_POST(self):
+        if self.firewall_guard():
+            return
         path = urllib.parse.urlsplit(self.path).path
         if path not in POSTS:
             return self.send(404, {"error":"Không tìm thấy API"})
