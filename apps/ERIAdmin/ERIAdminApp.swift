@@ -646,7 +646,38 @@ private struct AdminBackupView: View {
         defer { exporting = false }
         message = ""
         do {
-            let bytes = try await session.send("/api/v1/admin/backups/sqlite")
+            // Render Free can temporarily return 502/503 while an instance
+            // is restarting. Retry GET backups only; never retry writes.
+            var downloaded: Data?
+            for attempt in 0..<3 {
+                do {
+                    downloaded = try await session.send("/api/v1/admin/backups/sqlite")
+                    break
+                } catch {
+                    var transient = false
+                    if let serverError = error as? AdminError {
+                        switch serverError {
+                        case .http(502), .http(503), .http(504),
+                             .httpDetail(502, _), .httpDetail(503, _),
+                             .httpDetail(504, _):
+                            transient = true
+                        default:
+                            break
+                        }
+                    } else if let networkError = error as? URLError {
+                        transient = networkError.code == .timedOut ||
+                            networkError.code == .cannotConnectToHost ||
+                            networkError.code == .networkConnectionLost
+                    }
+                    guard transient && attempt < 2 else { throw error }
+                    message = "Render đang kết nối lại, thử lấy bản sao lưu lần " +
+                        String(attempt + 2) + "/3..."
+                    try await Task.sleep(nanoseconds: UInt64(2 + attempt * 3) * 1_000_000_000)
+                }
+            }
+            guard let bytes = downloaded else {
+                throw URLError(.badServerResponse)
+            }
             let signature = Data("SQLite format 3\u{0000}".utf8)
             guard bytes.count > 100, bytes.starts(with: signature) else {
                 throw URLError(.cannotDecodeContentData)
