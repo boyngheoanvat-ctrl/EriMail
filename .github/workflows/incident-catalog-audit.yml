@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
+      - uses: actions/checkout@v4
+      - name: Check store JavaScript syntax (no live writes)
+        run: node --check web/eri-store/app.js
       - name: Count existing production listings without reading private records
         env:
           ERI_API: https://eri-api-dag8.onrender.com
