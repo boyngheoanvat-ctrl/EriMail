@@ -62,6 +62,9 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
     private var renewing = false
     private var retryBlocked = false
     private var backgroundEventsCompletion: (() -> Void)?
+    // Only presentation state. A byte counts as durable only after the API
+    // confirms the matching SHA-256; in-flight bytes never enter checkpoints.
+    private var inFlightBytes: [Int: Int64] = [:]
 
     private lazy var transfers: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: eriBackgroundIdentifier)
@@ -69,7 +72,9 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         config.isDiscretionary = false
         config.waitsForConnectivity = true
         config.allowsCellularAccess = true
-        config.httpMaximumConnectionsPerHost = 1
+        // A modest 2-request window overlaps slow free-host/cloud round trips
+        // without risking 173 simultaneous requests on Render Free.
+        config.httpMaximumConnectionsPerHost = 2
         return URLSession(configuration: config, delegate: self, delegateQueue: .main)
     }()
 
@@ -81,7 +86,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
             pending = true
             active = true
             progress = Double(saved.acknowledgedBytes) / Double(max(saved.size, 1))
-            status = "Đã khôi phục phiên upload nền; đang kiểm tra với iOS..."
+            status = "Đã khôi phục tiến độ IPA; đang kiểm tra với iOS..."
         }
     }
 
@@ -262,6 +267,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                                      acknowledgedBytes: 0, failures: 0,
                                      metadata: metadata, renewals: 0, acknowledgedParts: [])
         progress = 0
+        inFlightBytes.removeAll()
         pending = true
         active = true
         retryBlocked = false
@@ -289,6 +295,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         pending = false
         active = false
         progress = 0
+        inFlightBytes.removeAll()
         retryBlocked = false
         status = "Đã bỏ phiên tải cũ. Thông tin sản phẩm vẫn được lưu; vui lòng chọn lại IPA."
         persist()
@@ -344,6 +351,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
             current.renewals = renewals + 1
             record = current
             progress = 0
+            inFlightBytes.removeAll()
             pending = true
             active = true
             retryBlocked = false
@@ -394,8 +402,9 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
     }
 
     // Queue ALL remaining file-backed requests before iOS suspends the app.
-    // The background URLSession runs in a system process. The session still
-    // uses only ONE HTTP connection, and the API accepts out-of-order indexes.
+    // iOS operates the background session even when the UI is suspended.
+    // Two HTTP connections can overlap slow cloud acknowledgements; the API
+    // accepts out-of-order checksummed chunks without double-counting them.
     // Finalization must not be submitted until each chunk is acknowledged.
     private func scheduleNext() {
         guard !scheduling, !renewing, !retryBlocked, let current = record else { return }
@@ -444,9 +453,9 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                         }
                         self.status = "Đã tải xong IPA; đang xác nhận sản phẩm trên máy chủ..."
                     } else {
-                        // Limit connection count to one, NOT the number of
-                        // scheduled tasks. iOS can transfer the queue without
-                        // waiting for ERI ADMIN to run after every 4-MB file.
+                        // Queue disk-backed tasks, not 173 concurrent
+                        // connections. iOS enforces the 2-connection window
+                        // and can continue after ERI ADMIN is suspended.
                         for i in 0..<current.partCount where
                             !confirmed.contains(i) && !queued.contains(i) {
                             let name = Self.partName(i)
@@ -472,9 +481,11 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                             job.resume()
                             added += 1
                         }
-                        self.status = "iOS đang tải IPA trong nền; " +
-                            String(confirmed.count) + "/" + String(current.partCount) +
-                            " phần đã được máy chủ xác nhận."
+                        let receivedMB = Double(current.acknowledgedBytes) / 1_048_576
+                        let totalMB = Double(current.size) / 1_048_576
+                        self.status = "Đang tải IPA: " +
+                            String(format: "%.1f / %.1f MB", receivedMB, totalMB) +
+                            " · có thể khóa màn hình."
                     }
                     self.sending = !tasks.isEmpty || added > 0
                     self.pending = true
@@ -494,11 +505,15 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                     totalBytesSent: Int64,
                     totalBytesExpectedToSend: Int64) {
         guard let current = record,
-              partIndex(task.taskDescription, for: current) != nil,
+              let index = partIndex(task.taskDescription, for: current),
+              !receivedIndices(current).contains(index),
               totalBytesExpectedToSend > 0 else { return }
-        // The progress bar can include bytes in flight; only the server's
-        // successful response advances the durable checkpoint.
-        let display = Double(current.acknowledgedBytes) + Double(totalBytesSent)
+        let expected = min(current.chunkBytes, current.size - index * current.chunkBytes)
+        inFlightBytes[index] = min(Int64(expected), max(0, totalBytesSent))
+        // Present a single whole-file bar, including both active uploads.
+        // Persist only server-confirmed parts, never these temporary bytes.
+        let inFlight = inFlightBytes.values.reduce(Int64(0), +)
+        let display = Double(current.acknowledgedBytes) + Double(inFlight)
         progress = min(0.999, display / Double(max(1, current.size)))
     }
 
@@ -507,6 +522,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         guard var current = record else { return }
         let isComplete = isCompleteTask(task.taskDescription, for: current)
         let index = partIndex(task.taskDescription, for: current)
+        if let index { inFlightBytes.removeValue(forKey: index) }
         // Ignore responses from an older upload ID after a renewed session.
         guard isComplete || index != nil else { return }
         if renewing { return }
@@ -521,6 +537,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                 active = false
                 sending = false
                 progress = 1.0
+                inFlightBytes.removeAll()
                 status = "IPA đã tải xong và sản phẩm đã được máy chủ xác nhận."
                 persist()
                 Task.detached(priority: .utility) {
