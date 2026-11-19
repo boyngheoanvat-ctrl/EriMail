@@ -37,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix="eri-r2-large-test-") as folder:
 
         def generate_presigned_url(self, method, Params, ExpiresIn):
             assert method in ("get_object","upload_part","put_object")
-            assert ExpiresIn in (600,900)
+            assert ExpiresIn in (600,900,3600)
             return "https://example.r2.cloudflarestorage.com/" + Params["Key"]
 
         def list_parts(self, Bucket, Key, UploadId, **kwargs):
