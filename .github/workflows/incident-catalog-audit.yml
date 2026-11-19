@@ -17,6 +17,21 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check store JavaScript syntax (no live writes)
         run: node --check web/eri-store/app.js
+      - name: Check production CORS for Safari store without customer data
+        run: |
+          python - <<'PY'
+          import urllib.request
+          url="https://eri-api-dag8.onrender.com/api/v1/mods"
+          origin="https://eri-store-web.onrender.com"
+          req=urllib.request.Request(url,headers={"Origin":origin,"Accept":"application/json"})
+          try:
+              with urllib.request.urlopen(req,timeout=50) as res:
+                  allowed=res.headers.get("Access-Control-Allow-Origin","")
+                  print("API GET status:",res.status)
+                  print("Storefront CORS:", "OK" if allowed==origin else "MISSING")
+          except Exception as exc:
+              print("CORS CHECK UNAVAILABLE:",type(exc).__name__)
+          PY
       - name: Count existing production listings without reading private records
         env:
           ERI_API: https://eri-api-dag8.onrender.com
