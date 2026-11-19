@@ -1,0 +1,46 @@
+name: ERI Firewall - test & build iOS dylib
+
+on:
+  push:
+    branches:
+      - feature/eri-network-firewall-nov19
+  workflow_dispatch:
+
+jobs:
+  test-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python -m py_compile eri_login_proxy.py eri_login_firewall.py
+      - name: Firewall unit tests
+        run: python -m unittest discover -s tests -p test_eri_firewall.py -v
+
+  build-ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile arm64 dylib for iOS 16+
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=16.0 \
+            -fobjc-arc \
+            -fvisibility=hidden \
+            -Werror \
+            -dynamiclib \
+            -install_name "@rpath/ERIClientFirewall.dylib" \
+            ios/ERIClientFirewall/ERIClientFirewall.m \
+            -framework Foundation \
+            -o artifacts/ERIClientFirewall.dylib
+          xcrun lipo -info artifacts/ERIClientFirewall.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ERIClientFirewall-ios-arm64-unsigned
+          path: artifacts/ERIClientFirewall.dylib
+          if-no-files-found: error
+          retention-days: 30
