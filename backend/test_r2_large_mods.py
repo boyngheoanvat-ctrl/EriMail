@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix="eri-r2-large-test-") as folder:
             return {"UploadId":token}
 
         def generate_presigned_url(self, method, Params, ExpiresIn):
-            assert method in ("get_object","upload_part")
+            assert method in ("get_object","upload_part","put_object")
             assert ExpiresIn in (600,900)
             return "https://example.r2.cloudflarestorage.com/" + Params["Key"]
 
@@ -174,4 +174,45 @@ with tempfile.TemporaryDirectory(prefix="eri-r2-large-test-") as folder:
     assert download.status_code==307,download.text
     assert ".r2.cloudflarestorage.com" in download.headers["location"]
 
-    print("Optional R2 direct large uploads, IPA verification, resume and store routing: OK")
+    # One-request whole-file upload. The presigned PUT carries the ENTIRE IPA;
+    # no multipart objects or part staging must be created on Render.
+    no_split=client.post("/api/v1/admin/r2-mods/start-direct",
+                         json={**small,"name":"Whole IPA demo"},headers=key)
+    assert no_split.status_code==201,no_split.text
+    direct=no_split.json()
+    assert direct["total_parts"]==1 and direct["mode"]=="single-put"
+    direct_id=direct["upload_id"]
+    direct_prefix="/api/v1/admin/r2-mods/"+direct_id
+    presign=client.get(direct_prefix+"/direct-ticket",headers=key)
+    assert presign.status_code==200,presign.text
+    assert presign.json()["bytes"]==len(data)
+    assert presign.json()["url"].startswith("https://")
+    assert client.get(direct_prefix+"/part/0",headers=key).status_code==409
+    assert client.post(direct_prefix+"/complete",headers=key).status_code==409
+    assert client.get(direct_prefix+"/status",headers=key).json()["state"]=="pending"
+    direct_key=r2.object_key(direct_id,"ipa")
+    assert direct_key not in fake.objects
+    fake.objects[direct_key]=data  # Simulated direct R2 PUT; no app server upload.
+    assert client.get(direct_prefix+"/status",headers=key).json()["state"]=="verifying"
+    assert client.get(direct_prefix+"/direct-ticket",headers=key).status_code==409
+    published=client.post(direct_prefix+"/complete",headers=key)
+    assert published.status_code==201,published.text
+    assert published.json()["sha256"]==__import__("hashlib").sha256(data).hexdigest()
+    assert client.post(direct_prefix+"/complete",headers=key).json()["id"]==published.json()["id"]
+    assert client.post(direct_prefix+"/abort",headers=key).status_code==409
+    with connection() as db:
+        listing=db.execute("SELECT storage_name,sha256 FROM private_product_uploads WHERE product_id=?",
+                           (published.json()["id"],)).fetchone()
+        assert listing["storage_name"]==r2.storage_name(direct_id,"ipa")
+
+    # Verify the direct PUT size ceiling without allocating gigabytes.
+    max_direct={**body,"size_bytes":r2.R2_SINGLE_PUT_MAX}
+    assert client.post("/api/v1/admin/r2-mods/start-direct",
+                       json=max_direct,headers=key).status_code==201
+    denied_direct=client.post("/api/v1/admin/r2-mods/start-direct",
+                              json={**body,"size_bytes":r2.R2_SINGLE_PUT_MAX+1},
+                              headers=key)
+    assert denied_direct.status_code==413
+    assert not list(Path(folder).rglob("*.part")), "Direct mode must not stage IPA bytes on Render"
+
+    print("Multipart AND one-shot R2 whole-IPA uploads, SHA and store routing: OK")
