@@ -31,6 +31,8 @@ R2_MAX_PARTS = 10_000
 R2_MIN_PART = 5 * MIB
 R2_DEFAULT_PART = 64 * MIB
 R2_MAX_PART = 5 * GIB
+R2_SINGLE_PUT_MAX = 5 * GIB  # Cloudflare R2 single PUT limit
+DIRECT_UPLOAD_MARKER = "direct-put"
 _R2_NAME = re.compile(r"r2\.([a-f0-9]{32})\.(ipa|apk)\Z")
 _ID = re.compile(r"[a-f0-9]{32}\Z")
 
@@ -261,7 +263,9 @@ def install_r2_mod_routes(app, connection, require_admin):
     @app.get("/api/v1/admin/r2-mods/config", dependencies=[Depends(require_admin)])
     def config():
         return {"enabled": enabled(), "max_object_bytes": R2_MAX_OBJECT if enabled() else 0,
-                "part_bytes": R2_DEFAULT_PART, "provider": "Cloudflare R2"}
+                "part_bytes": R2_DEFAULT_PART,
+                "single_put_max_bytes": R2_SINGLE_PUT_MAX if enabled() else 0,
+                "provider": "Cloudflare R2"}
 
     @app.post("/api/v1/admin/r2-mods/start", dependencies=[Depends(require_admin)],
               status_code=status.HTTP_201_CREATED)
@@ -302,6 +306,61 @@ def install_r2_mod_routes(app, connection, require_admin):
                 "part_bytes": part_size,
                 "total_parts": math.ceil(item.size_bytes / part_size)}
 
+    @app.post("/api/v1/admin/r2-mods/start-direct",
+              dependencies=[Depends(require_admin)],
+              status_code=status.HTTP_201_CREATED)
+    def begin_direct(item: ModStart):
+        """Single authenticated session; the IPA bytes go directly iPhone -> R2."""
+        _client_obj, _bucket = require_ready()
+        filename = Path(item.filename).name
+        if Path(filename).suffix.lower() != "." + item.kind or not item.authorized:
+            raise HTTPException(422, "Valid extension and distribution authorization required")
+        if item.size_bytes > R2_SINGLE_PUT_MAX:
+            raise HTTPException(413, "Single R2 PUT is limited to 5 GiB")
+        ident = secrets.token_hex(16)
+        with connection() as db:
+            ensure_table(db)
+            db.execute(
+                "INSERT INTO eri_r2_mod_sessions "
+                "(id,r2_upload_id,kind,original_name,size_bytes,part_bytes,"
+                "name,description,price_vnd,state,created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (ident,DIRECT_UPLOAD_MARKER,item.kind,filename,item.size_bytes,
+                 item.size_bytes,item.name.strip(),item.description,item.price_vnd,
+                 "pending",datetime.now(timezone.utc).isoformat()),
+            )
+        return {"upload_id":ident,"size_bytes":item.size_bytes,
+                "part_bytes":item.size_bytes,"total_parts":1,"mode":"single-put"}
+
+    @app.get("/api/v1/admin/r2-mods/{sid}/direct-ticket",
+             dependencies=[Depends(require_admin)])
+    def direct_ticket(sid: str):
+        row = lookup(sid)
+        if row["r2_upload_id"] != DIRECT_UPLOAD_MARKER:
+            raise HTTPException(409, "This upload uses multipart")
+        if row["state"] != "pending":
+            raise HTTPException(409, "This upload is no longer pending")
+        client, bucket = require_ready()
+        key = object_key(sid,row["kind"])
+        try:
+            info = client.head_object(Bucket=bucket,Key=key)
+            if info.get("ContentLength") == row["size_bytes"]:
+                raise HTTPException(409, "R2 already received this object; confirm instead")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+        url = client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket":bucket,"Key":key,
+                    "ContentType":"application/octet-stream"},
+            ExpiresIn=3600,
+        )
+        if not url.startswith("https://"):
+            raise HTTPException(503, "Invalid R2 direct upload URL")
+        return {"url":url,"bytes":row["size_bytes"],"method":"PUT",
+                "expires_in_seconds":3600}
+
     @app.get("/api/v1/admin/r2-mods/{sid}/status", dependencies=[Depends(require_admin)])
     def upload_status(sid: str):
         row = lookup(sid)
@@ -320,6 +379,10 @@ def install_r2_mod_routes(app, connection, require_admin):
                         "total_parts":math.ceil(row["size_bytes"]/row["part_bytes"])}
         except Exception:
             pass  # A not-yet-completed multipart object is not visible to HEAD.
+        if row["r2_upload_id"] == DIRECT_UPLOAD_MARKER:
+            return {"state":"pending","received":[],
+                    "size_bytes":row["size_bytes"],"part_bytes":row["size_bytes"],
+                    "total_parts":1,"mode":"single-put"}
         try:
             parts = list_uploaded_parts(client,bucket,key,row["r2_upload_id"])
         except Exception:
@@ -367,9 +430,10 @@ def install_r2_mod_routes(app, connection, require_admin):
             # A missing multipart object is not visible through HEAD.
             pass
         try:
-            client.abort_multipart_upload(
-                Bucket=bucket, Key=key, UploadId=row["r2_upload_id"],
-            )
+            if row["r2_upload_id"] != DIRECT_UPLOAD_MARKER:
+                client.abort_multipart_upload(
+                    Bucket=bucket, Key=key, UploadId=row["r2_upload_id"],
+                )
         except Exception as exc:
             # Do not pretend a cancelled upload is cleaned up on R2.
             code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
@@ -392,6 +456,8 @@ def install_r2_mod_routes(app, connection, require_admin):
              dependencies=[Depends(require_admin)])
     def presign_chunk(sid: str, index: int):
         row = lookup(sid)
+        if row["r2_upload_id"] == DIRECT_UPLOAD_MARKER:
+            raise HTTPException(409, "Direct PUT does not accept parts")
         if row["state"] != "pending":
             raise HTTPException(409, "R2 upload is not accepting parts")
         count = math.ceil(row["size_bytes"] / row["part_bytes"])
@@ -432,6 +498,8 @@ def install_r2_mod_routes(app, connection, require_admin):
                 completed = head.get("ContentLength") == row["size_bytes"]
             except Exception:
                 pass
+            if not completed and row["r2_upload_id"] == DIRECT_UPLOAD_MARKER:
+                raise HTTPException(409, "Direct R2 PUT has not completed")
             if not completed:
                 try:
                     parts=list_uploaded_parts(client,bucket,key,row["r2_upload_id"])
