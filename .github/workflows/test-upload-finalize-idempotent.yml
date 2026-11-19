@@ -1,0 +1,36 @@
+name: IPA complete retry must not duplicate products
+
+on:
+  push:
+    branches:
+      - fix/idempotent-ipa-finalize-20261119
+    paths:
+      - "backend/**"
+      - ".github/workflows/test-upload-finalize-idempotent.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install API test dependencies
+        run: pip install -r backend/requirements.txt httpx
+      - name: Verify repeat complete and stored data
+        working-directory: backend
+        run: |
+          python test_upload_finalize_idempotent.py
+          python test_fast_upload.py
+          python test_render_health_upload.py
+          python test_upload_reservations.py
+          python test_eri_atomic_snapshot.py
+          python -m unittest -v test_eri_vault.py test_eri_persistence.py
+      - name: Check Python syntax
+        run: python -m py_compile backend/app.py backend/test_upload_finalize_idempotent.py
