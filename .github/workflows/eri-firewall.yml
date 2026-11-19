@@ -30,7 +30,6 @@ jobs:
             -isysroot "$SDK" \
             -miphoneos-version-min=16.0 \
             -fobjc-arc \
-            -fvisibility=hidden \
             -Werror \
             -dynamiclib \
             -install_name "@rpath/ERIClientFirewall.dylib" \
