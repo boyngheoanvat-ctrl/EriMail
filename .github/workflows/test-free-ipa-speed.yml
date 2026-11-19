@@ -109,3 +109,33 @@ jobs:
         with:
           name: ERIAdmin-free-fast-upload-unsigned-IPA
           path: ERIAdmin-free-fast-upload-unsigned.ipa
+
+  publish-release:
+    name: Publish unsigned IPA for iPhone signing
+    needs: [api-tests, ios-compile]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ERIAdmin-free-fast-upload-unsigned-IPA
+          path: dist
+      - name: Publish or refresh Free upload release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=eri-admin-free-fast-20261119
+          file=dist/ERIAdmin-free-fast-upload-unsigned.ipa
+          test -s "$file"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$file" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" "$file" \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "ERI ADMIN – Free IPA upload speed" \
+              --notes "ERi ADMIN iOS: 2 concurrent bounded 4-MiB background transfers to existing Render/Supabase, whole-file progress, checksum-verified resumable upload. No R2 required. IPA is UNSIGNED: sign with a valid iOS certificate before installation. Does not update the Render backend or restore older missing data."
+          fi
