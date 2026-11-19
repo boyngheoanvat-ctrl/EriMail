@@ -169,6 +169,15 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         }
     }
 
+    private func showTotalProgress(for current: ERIBackgroundRecord) {
+        let confirmed = receivedIndices(current)
+        for index in confirmed { inFlightBytes.removeValue(forKey: index) }
+        let inFlight = inFlightBytes.values.reduce(Int64(0), +)
+        let display = Double(current.acknowledgedBytes) + Double(inFlight)
+        // Only the actual /complete 201 can show 100%.
+        progress = min(0.999, display / Double(max(1, current.size)))
+    }
+
     // Called by the app delegate on launch, including iOS relaunch for transfer events.
     func restore() {
         _ = transfers
@@ -230,7 +239,8 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
             } ?? current.partCount
             current.failures = 0
             record = current
-            progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
+            inFlightBytes.removeAll()
+            showTotalProgress(for: current)
             persist()
             active = true
             retryBlocked = false
@@ -512,9 +522,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         inFlightBytes[index] = min(Int64(expected), max(0, totalBytesSent))
         // Present a single whole-file bar, including both active uploads.
         // Persist only server-confirmed parts, never these temporary bytes.
-        let inFlight = inFlightBytes.values.reduce(Int64(0), +)
-        let display = Double(current.acknowledgedBytes) + Double(inFlight)
-        progress = min(0.999, display / Double(max(1, current.size)))
+        showTotalProgress(for: current)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,
@@ -558,7 +566,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
                 } ?? current.partCount
                 current.failures = 0
                 record = current
-                progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
+                showTotalProgress(for: current)
                 persist()
                 scheduleNext()
                 return
@@ -566,7 +574,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         }
 
         if code == 404 {
-            progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
+            showTotalProgress(for: current)
             if current.metadata == nil {
                 active = false
                 retryBlocked = true
@@ -595,7 +603,7 @@ final class ERIBackgroundUploader: NSObject, ObservableObject, URLSessionTaskDel
         // Retrying the same part is safe: the API checks its SHA-256 marker.
         current.failures += 1
         record = current
-        progress = Double(current.acknowledgedBytes) / Double(max(1, current.size))
+        showTotalProgress(for: current)
         persist()
         if current.failures <= 3 && !retryBlocked {
             status = "Kết nối gián đoạn; đang gửi lại phần chưa được xác nhận..."
