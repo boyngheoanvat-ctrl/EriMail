@@ -1559,7 +1559,28 @@ private enum ERIR2FileIdentity {
 private struct ERIR2Config: Decodable {
     let enabled: Bool
     let max_object_bytes: Int
+    let single_put_max_bytes: Int?
 }
+private struct ERIR2DirectTicket: Decodable {
+    let url: String
+    let bytes: Int
+    let method: String
+}
+
+private final class ERIR2WholeFileProgress: NSObject, URLSessionTaskDelegate {
+    var onProgress: ((Double) -> Void)?
+    init(_ callback: @escaping (Double) -> Void) { onProgress = callback }
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    didSendBodyData bytesSent: Int64,
+                    totalBytesSent: Int64,
+                    totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        let fraction = min(0.98, max(0.0, Double(totalBytesSent) /
+                                           Double(totalBytesExpectedToSend)))
+        DispatchQueue.main.async { [weak self] in self?.onProgress?(fraction) }
+    }
+}
+
 private struct ERIR2UploadStart: Decodable {
     let upload_id: String
     let size_bytes: Int
@@ -1676,7 +1697,7 @@ private struct AdminUploadView: View {
                     }
                 }
                 if kind == .ipa {
-                    Text("IPA/APK lớn tải trực tiếp lên R2 khi máy chủ đã cấu hình. Dung lượng thực tế phụ thuộc kho và iPhone; R2 hỗ trợ mỗi tệp đến gần 5 TiB. Nếu chưa bật R2, giới hạn bởi ổ máy chủ.")
+                    Text("Nếu R2 đã bật: IPA/APK đến 5 GiB được gửi nguyên file bằng 1 yêu cầu HTTPS, không chia 173 phần. Mất mạng phải tải lại từ đầu. Nếu chưa bật R2, vẫn dùng tải nhiều phần; tải nguyên file không được hỗ trợ trên Render Free.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Phiên bản và Bundle ID được tự động đọc từ tệp IPA sau khi tải xong.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -1710,7 +1731,7 @@ private struct AdminUploadView: View {
                 }
                 .disabled(!valid || working || backgroundUploader.pending)
                 if (kind == .ipa || kind == .apk), r2PendingUploadID != nil {
-                    Text("Có phiên tải R2 chưa hoàn tất. Chọn lại cùng IPA rồi bấm Cập nhật để tiếp tục, không cần tải lại các phần đã nhận.")
+                    Text("Có phiên tải R2 đang dở. Chọn lại cùng IPA rồi bấm Cập nhật. Với tải nguyên file, khi mạng ngắt sẽ phải truyền lại từ đầu; tải nhiều phần vẫn tiếp tục được.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Button("Hủy phiên tải R2 đang dở", role: .destructive) {
                         confirmR2Cancel = true
@@ -1731,8 +1752,9 @@ private struct AdminUploadView: View {
         .navigationTitle(kind.title)
         .onAppear {
             restoreDraft()
-            r2PendingUploadID = UserDefaults.standard.dictionary(
-                forKey: "eri.admin.r2.pending." + kind.rawValue
+            r2PendingUploadID = (
+                UserDefaults.standard.dictionary(forKey: "eri.admin.r2.single.pending." + kind.rawValue)
+                ?? UserDefaults.standard.dictionary(forKey: "eri.admin.r2.pending." + kind.rawValue)
             )?["id"] as? String
         }
         .confirmationDialog(
@@ -1833,12 +1855,107 @@ private struct AdminUploadView: View {
         do {
             _ = try await session.send(
                 "/api/v1/admin/r2-mods/" + sid + "/abort", method: "POST")
-            UserDefaults.standard.removeObject(forKey: "eri.admin.r2.pending." + kind.rawValue)
-            r2PendingUploadID = nil
+            for prefix in ["eri.admin.r2.single.pending.", "eri.admin.r2.pending."] {
+                let key = prefix + kind.rawValue
+                if UserDefaults.standard.dictionary(forKey: key)?["id"] as? String == sid {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+            r2PendingUploadID = (
+                UserDefaults.standard.dictionary(forKey: "eri.admin.r2.single.pending." + kind.rawValue)
+                ?? UserDefaults.standard.dictionary(forKey: "eri.admin.r2.pending." + kind.rawValue)
+            )?["id"] as? String
             status = "Đã hủy phiên tải R2 chưa hoàn tất. IPA đã chọn vẫn được giữ trên iPhone."
         } catch {
             status = "Không thể hủy phiên tải R2: " + error.localizedDescription
         }
+    }
+
+    private func publishWholeModViaR2(_ file: URL, size: Int, amount: Int) async throws {
+        // R2's S3 PutObject supports up to 5 GiB in a single HTTP request.
+        // Unlike multipart, a dropped connection requires retransmitting all bytes.
+        let key = "eri.admin.r2.single.pending." + kind.rawValue
+        let identity = try await Task.detached(priority: .userInitiated) {
+            try ERIR2FileIdentity.fingerprint(file, size: size)
+        }.value
+        let existing = UserDefaults.standard.dictionary(forKey: key)
+        let same = existing?["fingerprint"] as? String == identity &&
+                   existing?["filename"] as? String == file.lastPathComponent &&
+                   existing?["size"] as? Int == size &&
+                   existing?["name"] as? String == name &&
+                   existing?["description"] as? String == description &&
+                   existing?["price"] as? Int == amount
+        var sid = same ? (existing?["id"] as? String ?? "") : ""
+        if sid.isEmpty {
+            uploadPhase = "Đang tạo liên kết tải nguyên file lên R2..."
+            let payload: [String: Any] = [
+                "kind": kind.rawValue, "filename": file.lastPathComponent,
+                "size_bytes": size,
+                "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
+                "description": description, "price_vnd": amount,
+                "authorized": authorized
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let response = try await session.send("/api/v1/admin/r2-mods/start-direct",
+                                                  method: "POST", data: data)
+            let started = try JSONDecoder().decode(ERIR2UploadStart.self, from: response)
+            guard started.size_bytes == size, started.total_parts == 1 else {
+                throw URLError(.badServerResponse)
+            }
+            sid = started.upload_id
+            UserDefaults.standard.set([
+                "id": sid, "fingerprint": identity,
+                "filename": file.lastPathComponent, "size": size,
+                "name": name, "description": description, "price": amount
+            ], forKey: key)
+        }
+        r2PendingUploadID = sid
+        let base = "/api/v1/admin/r2-mods/" + sid
+        let response = try await session.send(base + "/status")
+        let remote = try JSONDecoder().decode(ERIR2UploadStatus.self, from: response)
+        if remote.state == "published" {
+            UserDefaults.standard.removeObject(forKey: key)
+            r2PendingUploadID = nil
+            progress = 1
+            return
+        }
+        guard remote.state == "pending" || remote.state == "verifying" else {
+            throw URLError(.badServerResponse)
+        }
+        if remote.state == "pending" {
+            let data = try await session.send(base + "/direct-ticket")
+            let ticket = try JSONDecoder().decode(ERIR2DirectTicket.self, from: data)
+            guard ticket.bytes == size, ticket.method == "PUT",
+                  let target = URL(string: ticket.url),
+                  target.scheme == "https",
+                  target.host?.hasSuffix(".r2.cloudflarestorage.com") == true else {
+                throw URLError(.badServerResponse)
+            }
+            var put = URLRequest(url: target)
+            put.httpMethod = "PUT"
+            put.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            put.timeoutInterval = 3600
+            uploadPhase = "Đang tải nguyên IPA lên R2 bằng 1 yêu cầu. Giữ ERI ADMIN mở."
+            let reporter = ERIR2WholeFileProgress { fraction in
+                progress = fraction
+            }
+            // fromFile streams directly from the staged IPA; no part files or
+            // Data(contentsOf:) copies of the whole archive.
+            let (_, uploadResponse) = try await URLSession.shared.upload(
+                for: put, fromFile: file, delegate: reporter)
+            let code = (uploadResponse as? HTTPURLResponse)?.statusCode ?? 0
+            guard code == 200 || code == 204 else {
+                throw AdminError.httpDetail(code, "R2 không nhận nguyên file IPA.")
+            }
+        }
+        progress = 0.98
+        uploadPhase = "R2 đã nhận nguyên file; đang kiểm tra SHA-256 và Info.plist..."
+        let confirmed = try await session.send(base + "/complete", method: "POST")
+        let done = try JSONDecoder().decode(ERIR2UploadDone.self, from: confirmed)
+        guard done.uploaded, done.id > 0 else { throw URLError(.badServerResponse) }
+        UserDefaults.standard.removeObject(forKey: key)
+        r2PendingUploadID = nil
+        progress = 1.0
     }
 
     private func publishModViaR2(_ file: URL, size: Int, amount: Int) async throws {
@@ -1990,8 +2107,14 @@ private struct AdminUploadView: View {
                     guard size <= configuration.max_object_bytes else {
                         throw ImportedFileFailure.exceededLimit(configuration.max_object_bytes)
                     }
-                    try await publishModViaR2(file, size: size, amount: amount)
-                    status = "R2 đã xác minh và đăng sản phẩm thành công."
+                    if size <= (configuration.single_put_max_bytes ?? 0) {
+                        // The server supports R2 single PUT. One network
+                        // request, no 173-part preparation on the iPhone.
+                        try await publishWholeModViaR2(file, size: size, amount: amount)
+                    } else {
+                        try await publishModViaR2(file, size: size, amount: amount)
+                    }
+                    status = "R2 đã kiểm tra và đăng sản phẩm thành công."
                     selectedFile = nil
                     saveDraft()
                     try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
