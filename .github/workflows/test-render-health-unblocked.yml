@@ -1,0 +1,39 @@
+name: Render API health responsiveness (no production deployment)
+
+on:
+  push:
+    branches:
+      - fix/render-health-upload-eventloop-20261119
+    paths:
+      - "backend/**"
+      - ".github/workflows/test-render-health-unblocked.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install API test dependencies
+        run: pip install -r backend/requirements.txt httpx
+      - name: Verify health during slow IPA verification and persistence
+        working-directory: backend
+        run: |
+          python test_render_health_upload.py
+          python test_fast_upload.py
+          python test_eri_atomic_snapshot.py
+          python test_upload_reservations.py
+          python -m unittest -v test_eri_vault.py test_eri_persistence.py
+      - name: Compile Python
+        run: python -m py_compile backend/app.py backend/test_render_health_upload.py
