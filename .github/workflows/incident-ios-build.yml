@@ -69,5 +69,5 @@ jobs:
           cd payload && zip -qr ../ERIAdmin-catalog-visibility-unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: ERIAdmin-capacity-aware-unsigned-IPA
-          path: ERIAdmin-capacity-aware-unsigned.ipa
+          name: ERIAdmin-catalog-visibility-unsigned-IPA
+          path: ERIAdmin-catalog-visibility-unsigned.ipa
