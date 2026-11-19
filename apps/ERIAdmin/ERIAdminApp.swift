@@ -1648,6 +1648,7 @@ private struct AdminUploadView: View {
     @State private var description = ""
     @State private var price = ""
     @State private var modIsFree = false
+    @State private var preferWholeFile = true
     @State private var authorized = false
     @State private var selectedFile: URL?
     @State private var showImporter = false
@@ -1669,6 +1670,11 @@ private struct AdminUploadView: View {
                     }
                     .pickerStyle(.segmented)
                     Toggle("Tôi có quyền phân phối IPA này", isOn: $authorized)
+                    Toggle("Gửi nguyên file – 1 lần (nhanh gọn)", isOn: $preferWholeFile)
+                    Text(preferWholeFile
+                         ? "Cần bật Cloudflare R2 trên máy chủ. Đến 5 GiB; mất mạng phải gửi lại nguyên file."
+                         : "Chế độ tương thích: gửi từng phần, hỗ trợ tiếp tục nếu mất mạng.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     if modIsFree {
                         Text("Khách được tải trực tiếp IPA miễn phí, không tạo đơn thanh toán.")
                             .font(.footnote).foregroundStyle(.secondary)
@@ -1771,6 +1777,7 @@ private struct AdminUploadView: View {
         .onChange(of: price) { _ in saveDraft() }
         .onChange(of: issuer) { _ in saveDraft() }
         .onChange(of: modIsFree) { _ in saveDraft() }
+        .onChange(of: preferWholeFile) { _ in saveDraft() }
         .onChange(of: authorized) { _ in saveDraft() }
         .onDisappear { saveDraft() }
         .sheet(isPresented: $showImporter) {
@@ -1815,7 +1822,8 @@ private struct AdminUploadView: View {
             ? file!.path : ""
         UserDefaults.standard.set([
             "name": name, "description": description, "price": price,
-            "issuer": issuer, "modIsFree": modIsFree, "authorized": authorized,
+            "issuer": issuer, "modIsFree": modIsFree,
+            "preferWholeFile": preferWholeFile, "authorized": authorized,
             "filePath": savedFile
         ], forKey: draftKey)
     }
@@ -1827,6 +1835,7 @@ private struct AdminUploadView: View {
         if price.isEmpty { price = draft["price"] as? String ?? "" }
         if issuer.isEmpty { issuer = draft["issuer"] as? String ?? "" }
         modIsFree = draft["modIsFree"] as? Bool ?? modIsFree
+        preferWholeFile = draft["preferWholeFile"] as? Bool ?? true
         authorized = draft["authorized"] as? Bool ?? authorized
         if selectedFile == nil,
            let path = draft["filePath"] as? String, !path.isEmpty,
@@ -2107,9 +2116,14 @@ private struct AdminUploadView: View {
                     guard size <= configuration.max_object_bytes else {
                         throw ImportedFileFailure.exceededLimit(configuration.max_object_bytes)
                     }
-                    if size <= (configuration.single_put_max_bytes ?? 0) {
-                        // The server supports R2 single PUT. One network
-                        // request, no 173-part preparation on the iPhone.
+                    if preferWholeFile {
+                        guard let directMax = configuration.single_put_max_bytes,
+                              directMax > 0, size <= directMax else {
+                            throw AdminError.httpDetail(413,
+                                "Gửi nguyên file chỉ hỗ trợ IPA/APK tối đa 5 GiB trên R2. " +
+                                "Tắt 'Gửi nguyên file' để tải nhiều phần.")
+                        }
+                        // One HTTPS request from the iPhone; no 173-part staging.
                         try await publishWholeModViaR2(file, size: size, amount: amount)
                     } else {
                         try await publishModViaR2(file, size: size, amount: amount)
@@ -2120,8 +2134,12 @@ private struct AdminUploadView: View {
                     try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
                     return
                 }
-                // Old production backend has no direct-R2 route and still
-                // rejects files above 512 MiB. Report this before wasting data.
+                if preferWholeFile {
+                    throw AdminError.httpDetail(503,
+                        "R2 chưa bật trong Render. Chế độ tải nguyên file không thể hoạt động. " +
+                        "Cần cấu hình kho R2 hoặc tắt tùy chọn Gửi nguyên file để dùng tải nhiều phần.")
+                }
+                // Legacy API may still reject larger files on older servers.
                 if r2ConfigResponse == nil && size > 512 * 1024 * 1024 {
                     throw AdminError.httpDetail(503,
                         "Render vẫn chạy API cũ (giới hạn 512 MiB). " +
