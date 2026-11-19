@@ -1254,9 +1254,42 @@ async def eri_begin_chunk_upload(item: EriChunkStart):
 @app.get("/api/v1/admin/upload-sessions/{upload_id}", dependencies=[Depends(require_admin)])
 async def eri_chunk_upload_status(upload_id: str):
     async with _eri_upload_lock:
-        meta = _eri_read_session(upload_id)
+        published = await asyncio.to_thread(_eri_existing_published_upload, upload_id)
+        if published:
+            return {"offset": published["size_bytes"], "size_bytes": published["size_bytes"],
+                    "fast": True, "published": True, "id": published["id"]}
+        meta = await asyncio.to_thread(_eri_read_session, upload_id)
         return {"offset": meta["offset"], "size_bytes": meta["size_bytes"],
                 "fast": bool(meta.get("fast"))}
+
+
+def _eri_existing_published_upload(upload_id: str):
+    """Read a previously committed publication without restoring a large IPA.
+
+    A client can miss the HTTP 201 after the database and cloud snapshot have
+    committed. Retrying /complete must acknowledge that SAME product, not
+    create a second catalog record or replay 173 saved cloud chunks.
+    """
+    _eri_paths(upload_id)  # Reject untrusted IDs before querying SQLite.
+    with connection() as db:
+        row = db.execute(
+            "SELECT kind,product_id,size_bytes FROM private_product_uploads WHERE id=?",
+            (upload_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        table = {"ipa": "ipa", "apk": "ipa",
+                 "certificate": "certificates", "ai": "products"}.get(row["kind"])
+        if table is None:
+            raise HTTPException(409, "Published upload has an unknown product kind")
+        product = db.execute("SELECT name FROM " + table + " WHERE id=?",
+                             (row["product_id"],)).fetchone()
+        if product is None:
+            # Do not report success for a corrupted or deleted catalog row.
+            raise HTTPException(409, "Published upload has no matching product")
+        return {"id": row["product_id"], "name": product["name"],
+                "uploaded": True, "size_bytes": row["size_bytes"],
+                "kind": row["kind"]}
 
 
 def _eri_fast_parts_dir(upload_id: str) -> Path:
@@ -1277,7 +1310,15 @@ def _eri_fast_part_marker(upload_id: str, index: int) -> Path:
          dependencies=[Depends(require_admin)])
 async def eri_fast_upload_status(upload_id: str):
     async with _eri_upload_lock:
-        meta = _eri_read_session(upload_id)
+        published = await asyncio.to_thread(_eri_existing_published_upload, upload_id)
+        if published:
+            # Never restore/hydrate a 724 MB IPA just to answer a harmless
+            # retry after an already committed publication.
+            total = (published["size_bytes"] + ERI_CHUNK_BYTES - 1) // ERI_CHUNK_BYTES
+            return {"received": list(range(total)), "chunk_bytes": ERI_CHUNK_BYTES,
+                    "size_bytes": published["size_bytes"], "total_parts": total,
+                    "published": True, "id": published["id"]}
+        meta = await asyncio.to_thread(_eri_read_session, upload_id)
         if not meta.get("fast"):
             raise HTTPException(409, "Session is not in fast upload mode")
         count = _eri_fast_part_count(meta)
@@ -1371,6 +1412,11 @@ async def eri_chunk_upload(upload_id: str, request: Request,
 
 def _eri_finish_chunk_upload_blocking(upload_id: str):
     """CPU/disk/cloud heavy finalize; never execute on Uvicorn's event loop."""
+    published = _eri_existing_published_upload(upload_id)
+    if published:
+        # Server committed this session before the previous HTTP reply was lost.
+        # Returning its original ID is both faster and prevents UNIQUE failures.
+        return {"id": published["id"], "name": published["name"], "uploaded": True}
     meta = _eri_read_session(upload_id)
     if meta.get("fast"):
         # Do not finalize until every validated byte range is acknowledged.
