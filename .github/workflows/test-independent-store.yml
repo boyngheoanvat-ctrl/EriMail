@@ -1,0 +1,69 @@
+name: Verify ERI Store works without Admin online
+on:
+  push:
+    branches:
+      - fix/shop-catalog-independent-of-admin
+    paths:
+      - 'backend/app.py'
+      - 'backend/test_mod_catalog_offline.py'
+      - 'web/eri-store/app.js'
+      - 'apps/ERIAdmin/**'
+      - '.github/workflows/test-independent-store.yml'
+permissions:
+  contents: read
+jobs:
+  shop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r backend/requirements.txt httpx
+      - run: cd backend && python test_mod_catalog_offline.py
+      - run: cd backend && python test_mod_downloads.py
+      - run: python -m py_compile backend/app.py
+      - run: node --check web/eri-store/app.js
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: Generate ERI ADMIN
+        run: |
+          mkdir -p build-project/Sources
+          cp apps/ERIAdmin/ERIAdminApp.swift build-project/Sources/App.swift
+          cp apps/ERIAdmin/ERIBackgroundUploader.swift build-project/Sources/ERIBackgroundUploader.swift
+          cat > build-project/project.yml <<'EOF'
+          name: ERIAdmin
+          options:
+            deploymentTarget:
+              iOS: '16.0'
+          targets:
+            ERIAdmin:
+              type: application
+              platform: iOS
+              sources: [Sources]
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.eringuyen.admin
+                  PRODUCT_NAME: ERIAdmin
+                  INFOPLIST_KEY_CFBundleDisplayName: 'ERI ADMIN'
+                  GENERATE_INFOPLIST_FILE: YES
+                  INFOPLIST_KEY_UILaunchScreen_Generation: YES
+                  INFOPLIST_KEY_UIRequiresFullScreen: YES
+                  SWIFT_VERSION: '5.0'
+                  TARGETED_DEVICE_FAMILY: '1,2'
+                  CODE_SIGNING_ALLOWED: NO
+                  CODE_SIGNING_REQUIRED: NO
+          EOF
+          cd build-project && xcodegen generate
+      - name: Compile Swift and app
+        run: |
+          xcrun swiftc -frontend -parse build-project/Sources/App.swift
+          xcrun swiftc -frontend -parse build-project/Sources/ERIBackgroundUploader.swift
+          cd build-project
+          xcodebuild -project ERIAdmin.xcodeproj -scheme ERIAdmin -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath derived CODE_SIGNING_ALLOWED=NO build

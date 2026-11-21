@@ -70,7 +70,7 @@ function showBanner(message){
   $("banner").textContent=message||"";
   $("banner").classList.toggle("hidden",!message);
 }
-async function request(path,{method="GET",data,authorized=false}={}){
+async function request(path,{method="GET",data,authorized=false,timeoutMs=25000}={}){
   const headers={};
   if(data!==undefined)headers["Content-Type"]="application/json";
   if(authorized){
@@ -78,7 +78,7 @@ async function request(path,{method="GET",data,authorized=false}={}){
     headers.Authorization="Bearer "+state.token;
   }
   const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),25000);
+  const timeout=setTimeout(()=>controller.abort(),timeoutMs);
   let response;
   try{
     response=await fetch(API+path,{method,headers,body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal,cache:"no-store"});
@@ -261,14 +261,16 @@ function renderCatalog(){
 // Render Free sometimes restarts while the user is opening the shop.
 // Retry *only* the read-only product listing, never purchases or auth writes.
 async function loadPublicCatalogWithRetry(path){
-  const waits=[0,1800,4000,7000];
+  // Never keep the storefront in skeleton state for minutes.
+  // 3 bounded GET attempts; customers can retry with Làm mới if Render wakes late.
+  const waits=[0,1800,4000];
   for(let attempt=0;attempt<waits.length;attempt++){
     if(waits[attempt]){
-      $("catalog-message").textContent="Máy chủ đang khởi động lại; thử kết nối lần "+(attempt+1)+"/"+waits.length+"...";
+      $("catalog-message").textContent="Đang kết nối lại cửa hàng; lần "+(attempt+1)+"/"+waits.length+"...";
       await new Promise(resolve=>setTimeout(resolve,waits[attempt]));
     }
     try{
-      return await request(path);
+      return await request(path,{timeoutMs:10000});
     }catch(error){
       const message=String(error?.message||"");
       const transient=error instanceof TypeError ||
@@ -322,7 +324,7 @@ async function loadCatalog(){
   }catch(e){
     if(category!==state.category||(category==="certificate"&&certMode!==state.certTab))return;
     grid.replaceChildren(element("div","empty",errorMessage(e)));
-    $("catalog-message").textContent="Không tải được sản phẩm";
+    $("catalog-message").textContent="Không tải được sản phẩm · Nhấn Làm mới để thử lại";
     showBanner(errorMessage(e));
   }
 }
