@@ -60,6 +60,30 @@ with tempfile.TemporaryDirectory(prefix="eri-shop-offline-admin-") as temp:
     assert response.status_code==200,response.text
     missing=[item for item in response.json()["items"] if item["id"]%3!=0]
     assert any("download_path" not in item for item in response.json()["items"])
+    # The durable writer can hold its lock while a remote snapshot uploads.
+    # Public catalog GET must not queue behind that lock.
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    entered=threading.Event()
+    released=threading.Event()
+    def hold_writer_guard():
+        with backend._eri_db_guard:
+            entered.set()
+            released.wait(timeout=10)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        task=executor.submit(hold_writer_guard)
+        assert entered.wait(timeout=3)
+        try:
+            start=time.monotonic()
+            response=client.get("/api/v1/mods")
+            elapsed=time.monotonic()-start
+            assert response.status_code==200, response.text
+            assert len(response.json()["items"])==20
+            assert elapsed<2, "Public catalog blocked by Admin backup/writer lock"
+        finally:
+            released.set()
+        task.result(timeout=10)
+
     # Paid listings must remain discoverable (and use payment flow) without
     # the local Admin app. Metadata read never depends on its runtime.
     with backend.connection() as db:
