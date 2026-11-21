@@ -128,6 +128,26 @@ def connection():
                     db.rollback()
                 db.close()
 
+@contextmanager
+def shop_read_connection():
+    """Read the last committed product catalog without holding the upload lock.
+
+    During a large Admin upload the writer can wait on the cloud snapshot;
+    storefront GET requests must still serve existing committed products.
+    SQLite readers have their own transaction snapshot and never write to the
+    local file or the remote Vault.
+    """
+    if not _eri_db_safe:
+        raise VaultError("Database recovery required before public reads")
+    db = sqlite3.connect(DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute("PRAGMA query_only=ON")
+        yield db
+    finally:
+        db.close()
+
+
 def _persist_private_file(path: Path, item_id: str, digest: str):
     if _eri_vault is not None:
         _eri_vault.upload_file(path, item_id, expected_sha256=digest)
@@ -409,7 +429,7 @@ def health():
 
 @app.get("/api/v1/ipa")
 def ipa_catalog(q: str = ""):
-    with connection() as db:
+    with shop_read_connection() as db:
         rows = db.execute(
             "SELECT id,name,version,bundle_id,description,price_vnd,platform FROM ipa WHERE authorized=1 AND (name LIKE ? OR bundle_id LIKE ?) ORDER BY id DESC LIMIT 100",
             (f"%{q[:100]}%", f"%{q[:100]}%"),
@@ -418,7 +438,7 @@ def ipa_catalog(q: str = ""):
 
 @app.get("/api/v1/products")
 def products():
-    with connection() as db:
+    with shop_read_connection() as db:
         rows = db.execute("SELECT id,name,description,price_vnd FROM products WHERE active=1 ORDER BY id DESC LIMIT 100").fetchall()
     return {"items": [{**dict(x), "price_vnd": sale_price(x["price_vnd"])} for x in rows]}
 
@@ -518,7 +538,7 @@ def _eri_public_file_reference(row):
 
 @app.get("/api/v1/mods")
 def public_mod_catalog():
-    with connection() as db:
+    with shop_read_connection() as db:
         rows = db.execute(
             "SELECT i.id,i.name,i.version,i.bundle_id,i.description,i.price_vnd,"
             "i.platform,p.storage_name,p.size_bytes,p.sha256 "
@@ -602,7 +622,7 @@ class CertificateProduct(BaseModel):
 
 @app.get("/api/v1/certificates")
 def certificates():
-    with connection() as db:
+    with shop_read_connection() as db:
         rows = db.execute("SELECT id,name,issuer,description,price_vnd FROM certificates WHERE active=1 ORDER BY id DESC LIMIT 100").fetchall()
     return {"items": [{**dict(x), "price_vnd": sale_price(x["price_vnd"])} for x in rows]}
 
