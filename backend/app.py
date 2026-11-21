@@ -505,7 +505,7 @@ def _eri_public_file_reference(row):
     r2 = parse_storage_name(name)
     if r2:
         return r2[1] == platform
-    if not re.fullmatch(r"[a-f0-9]{32}\\.(ipa|apk)", name):
+    if not re.fullmatch(r"[a-f0-9]{32}\.(ipa|apk)", name):
         return False
     if not name.endswith("." + platform):
         return False
