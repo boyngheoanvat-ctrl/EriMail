@@ -36,6 +36,14 @@ jobs:
               elapsed=time.monotonic()-started
               assert isinstance(result.get("items"),list), name
               print(f"{name}: HTTP 200, {len(result['items'])} products, {elapsed:.2f} seconds")
+              if name=="Mod Game":
+                  segments={}
+                  for item in result["items"]:
+                      platform=item.get("platform","unknown")
+                      mode="FREE" if int(item.get("price_vnd",0))==0 else "BÁN"
+                      segment=platform+"/"+mode
+                      segments[segment]=segments.get(segment,0)+1
+                  print("MOD BREAKDOWN: "+json.dumps(segments,ensure_ascii=False))
               assert elapsed<15, name+" public catalog too slow after health warmup"
           page=get(site+"/?eri_live_catalog=1",timeout=20).decode("utf-8")
           assert "app.js?v=20261121catalogfast1" in page
