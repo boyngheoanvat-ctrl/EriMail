@@ -71,7 +71,7 @@ assert 'id="eri-decrypt-direct-request"' not in html
 assert "createRequest" not in tools
 assert '/api/v1/tools/ipa/decrypt/vault?q=' in tools
 assert '/api/v1/mods' in tools, "Legacy endpoint must remain as fallback"
-assert "eri-store-v45" in service
+assert "eri-store-v46" in service
 assert "?v=20261115p3" in html
 assert "ipa-tools.js?v=20261115direct1" in html
 assert "decrypt-store.js?v=20261116brand1" in html
@@ -120,7 +120,7 @@ assert 'id="certificate-free-panel"' in html
 assert 'id="certificate-udid"' in html
 assert 'https://website.khoindvn.io.vn/apps.js' not in html
 assert 'eri-home-extras.css?v=20261115certificatetab1' in html
-assert 'app.js?v=20261116mobtabs1' in html
+assert 'app.js?v=20261121catalogfast1' in html
 app = (web / "app.js").read_text()
 assert 'openCategory("certificate",tab.dataset.certMode)' in app
 assert 'freeCertificates=category==="certificate"&&certMode==="free"' in app
