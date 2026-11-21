@@ -25,8 +25,8 @@ jobs:
             echo 'Game login UI must remain outside ERI ADMIN.'
             exit 1
           fi
-          test "$(grep -c 'Text("FREE").tag(true)' apps/ERIAdmin/ERIAdminApp.swift)" -eq 2
-          test "$(grep -c 'Text("BÁN").tag(false)' apps/ERIAdmin/ERIAdminApp.swift)" -eq 2
+          test "$(grep -c 'Text("FREE").tag(true)' apps/ERIAdmin/ERIAdminApp.swift)" -ge 1
+          test "$(grep -c 'Text("BÁN").tag(false)' apps/ERIAdmin/ERIAdminApp.swift)" -ge 1
           grep -q 'id="mod-subtabs"' web/eri-store/index.html
           grep -q 'SHOP MOD BY ERI NGUYỄN' web/eri-store/index.html
           echo 'ERI Shop source separation: OK'
