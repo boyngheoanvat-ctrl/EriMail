@@ -486,6 +486,36 @@ def ipa_storage_status():
             "notice": "Kho IPA chỉ có thể tải những file thực sự tồn tại trên máy chủ."}
 
 
+def _eri_public_file_reference(row):
+    """Check durable catalog metadata, NOT remote file availability.
+
+    A published product has already been committed along with its private
+    object reference. Public catalog requests must never do one R2 HEAD or
+    Supabase Vault HEAD per item: a slow object store otherwise freezes the
+    entire storefront, even while ERI ADMIN is offline. Actual downloads still
+    validate access and object existence.
+    """
+    name = row["storage_name"]
+    size = row["size_bytes"]
+    platform = row["platform"]
+    if not isinstance(name, str) or platform not in ("ipa", "apk"):
+        return False
+    if not isinstance(size, int) or size <= 0:
+        return False
+    r2 = parse_storage_name(name)
+    if r2:
+        return r2[1] == platform
+    if not re.fullmatch(r"[a-f0-9]{32}\\.(ipa|apk)", name):
+        return False
+    if not name.endswith("." + platform):
+        return False
+    # Legacy local-only installations have no durable vault and must not
+    # advertise a download after their temporary upload file vanished.
+    if _eri_vault is None:
+        return _eri_mod_file(row) is not None
+    return True
+
+
 @app.get("/api/v1/mods")
 def public_mod_catalog():
     with connection() as db:
@@ -501,7 +531,7 @@ def public_mod_catalog():
         item = {key: row[key] for key in
                 ("id", "name", "version", "bundle_id", "description", "price_vnd", "platform")}
         if item["price_vnd"] == 0:
-            if row["storage_name"] and (_eri_mod_file(row) or eri_r2_object_exists(row["storage_name"], row["size_bytes"])):
+            if _eri_public_file_reference(row):
                 item["download_path"] = f'/api/v1/mods/{item["id"]}/download'
             else:
                 item["file_available"] = False
