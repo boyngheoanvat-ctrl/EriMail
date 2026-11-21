@@ -603,13 +603,28 @@ private struct AdminHome: View {
 private struct AdminBackupView: View {
     @EnvironmentObject private var session: AdminSession
     @State private var exporting = false
+    @State private var checkingVault = false
+    @State private var vaultStatus = "Chưa kiểm tra"
     @State private var backupURL: URL?
     @State private var message = ""
 
     var body: some View {
         Form {
-            Section("Sao lưu trước khi cập nhật máy chủ") {
-                Text("Tải một bản sao SQLite nhất quán từ ERI API để giữ tài khoản, đơn hàng và thông tin sản phẩm.")
+            Section("Tự động bảo vệ dữ liệu") {
+                Text("ERI API tự lưu tài khoản, đơn hàng và thông tin sản phẩm vào kho bền vững sau mỗi thay đổi. ERI STORE vẫn hoạt động khi ERI ADMIN đóng hoặc offline; KHÔNG cần bấm tạo bản sao để hiển thị sản phẩm.")
+                    .font(.footnote)
+                LabeledContent("Kho lưu trữ", value: vaultStatus)
+                Button {
+                    Task { await checkVault() }
+                } label: {
+                    Label(checkingVault ? "Đang kiểm tra..." : "Kiểm tra lưu trữ tự động",
+                          systemImage: "checkmark.shield")
+                }
+                .disabled(!session.authenticated || checkingVault)
+            }
+            Section("Xuất bản sao dự phòng (tùy chọn)") {
+                Text("Chỉ xuất thêm một tệp SQLite về iPhone khi bạn muốn giữ bản sao riêng. Không cần xuất tệp để shop bán hàng hoặc hiện IPA/APK.")
+                    .font(.footnote)
                     .font(.footnote)
                 Button {
                     Task { await exportBackup() }
@@ -638,6 +653,31 @@ private struct AdminBackupView: View {
             }
         }
         .navigationTitle("Sao lưu ERI Store")
+        .task { await checkVault() }
+    }
+
+    private func checkVault() async {
+        guard session.authenticated && !checkingVault else { return }
+        checkingVault = true
+        defer { checkingVault = false }
+        do {
+            let data = try await session.send("/api/v1/admin/vault/status")
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let enabled = obj["enabled"] as? Bool,
+                  let ready = obj["ready"] as? Bool else {
+                throw URLError(.cannotParseResponse)
+            }
+            if enabled && ready {
+                let customers = obj["customers"] as? Int ?? 0
+                let files = obj["uploads"] as? Int ?? 0
+                vaultStatus = "Đã kết nối · " + String(customers) +
+                    " khách · " + String(files) + " tệp"
+            } else {
+                vaultStatus = "Cần kiểm tra cấu hình Supabase"
+            }
+        } catch {
+            vaultStatus = "Chưa xác minh · " + error.localizedDescription
+        }
     }
 
     private func exportBackup() async {
@@ -694,8 +734,8 @@ private struct AdminBackupView: View {
             backupURL = output
             message = "Đã tạo bản sao lưu SQLite. Hãy bấm Lưu vào Files để giữ bản sao ngoài ứng dụng."
         } catch {
-            message = "Sao lưu chưa thành công: " + error.localizedDescription +
-                ". Không cập nhật API trước khi có bản sao lưu hợp lệ."
+            message = "Không xuất được bản sao SQLite về iPhone: " + error.localizedDescription +
+                ". Việc xuất file tùy chọn không điều khiển sao lưu tự động của ERI API."
         }
     }
 }
